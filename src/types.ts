@@ -15,6 +15,7 @@ export interface CommentData {
   CREATION_DATE?: string;
   MARKET?: string;
   GUESTNAME?: string;
+  TAGS?: string[];
 }
 
 export interface ApiSettings {

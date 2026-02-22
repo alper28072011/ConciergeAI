@@ -88,7 +88,19 @@ export default function App() {
       const data = await response.json();
       
       if (data && data.ResultSets && data.ResultSets.length > 0) {
-        setComments(data.ResultSets[0]);
+        const rawData: CommentData[] = data.ResultSets[0];
+        const groupedData = Object.values(rawData.reduce((acc: Record<string, CommentData>, curr: CommentData) => {
+          const id = curr.COMMENTID;
+          if (!id) return acc;
+          if (!acc[id]) {
+            acc[id] = { ...curr, TAGS: [] };
+          }
+          if (curr.GROUPNAME && !acc[id].TAGS!.includes(curr.GROUPNAME)) {
+            acc[id].TAGS!.push(curr.GROUPNAME);
+          }
+          return acc;
+        }, {}));
+        setComments(groupedData as CommentData[]);
       } else {
         setComments([]);
         alert('Belirtilen tarih aralığında yorum bulunamadı veya veri formatı hatalı.');

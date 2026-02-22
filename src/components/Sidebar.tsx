@@ -96,11 +96,13 @@ export function Sidebar({
           >
             <div className="flex justify-between items-start mb-2 gap-2">
               <h3 className="font-medium text-slate-900 truncate pr-2">{comment.GUESTNAME || 'Misafir'}</h3>
-              {comment.GROUPNAME && (
-                <span className={`text-[10px] font-semibold px-2 py-1 rounded-full border whitespace-nowrap ${getBadgeColor(comment.GROUPNAME)}`}>
-                  {comment.GROUPNAME}
-                </span>
-              )}
+              <div className="flex flex-wrap gap-1 justify-end">
+                {comment.TAGS && comment.TAGS.map((tag, idx) => (
+                  <span key={idx} className={`text-[10px] font-semibold px-2 py-1 rounded-full border whitespace-nowrap ${getBadgeColor(tag)}`}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
             </div>
             <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
               <span className="flex items-center gap-1"><Globe size={12} /> {comment.NATIONALITY || 'Bilinmiyor'}</span>
