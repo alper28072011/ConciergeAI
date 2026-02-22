@@ -64,6 +64,7 @@ export default function App() {
     setIsFetching(true);
     try {
       const payload = {
+        Parameters: { HOTELID: Number(settings.hotelId) },
         Action: settings.action,
         Object: settings.objectName,
         Select: [
