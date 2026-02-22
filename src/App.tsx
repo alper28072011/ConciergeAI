@@ -63,7 +63,7 @@ export default function App() {
           "ID", "HOTELID", "DETAILTYPE", "DEPNAME", "GROUPNAME", 
           "COMMENTID", "COMMENTDATE", "COMMENT", "ANSWER", 
           "SOURCENAME", "AGENCY", "NATIONALITY", "LOCATION", 
-          "CREATION_DATE", "MARKET"
+          "CREATION_DATE", "MARKET", "FULLNAME"
         ],
         Where: [
           { Column: "COMMENTDATE", Operator: ">=", Value: startDate },

@@ -14,7 +14,7 @@ export interface CommentData {
   LOCATION?: string;
   CREATION_DATE?: string;
   MARKET?: string;
-  GUESTNAME?: string;
+  FULLNAME?: string;
   TAGS?: string[];
 }
 

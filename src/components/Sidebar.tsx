@@ -1,6 +1,7 @@
 import React from 'react';
 import { CommentData } from '../types';
 import { MessageSquare, Calendar, Globe, RefreshCw } from 'lucide-react';
+import { formatTRDate } from '../utils';
 
 interface SidebarProps {
   comments: CommentData[];
@@ -25,15 +26,6 @@ export function Sidebar({
   onFetch,
   isFetching
 }: SidebarProps) {
-  const getBadgeColor = (groupName: string | undefined) => {
-    if (!groupName) return 'bg-slate-100 text-slate-700 border-slate-200';
-    const lower = groupName.toLowerCase();
-    if (lower.includes('temizlik') || lower.includes('housekeeping')) return 'bg-red-100 text-red-700 border-red-200';
-    if (lower.includes('restoran') || lower.includes('yemek')) return 'bg-green-100 text-green-700 border-green-200';
-    if (lower.includes('öneri')) return 'bg-blue-100 text-blue-700 border-blue-200';
-    return 'bg-slate-100 text-slate-700 border-slate-200';
-  };
-
   return (
     <div className="w-1/3 min-w-[320px] max-w-[400px] bg-white border-r border-slate-200 flex flex-col h-full">
       <div className="p-4 border-b border-slate-200 bg-slate-50/50 space-y-4">
@@ -95,18 +87,11 @@ export function Sidebar({
             }`}
           >
             <div className="flex justify-between items-start mb-2 gap-2">
-              <h3 className="font-medium text-slate-900 truncate pr-2">{comment.GUESTNAME || 'Misafir'}</h3>
-              <div className="flex flex-wrap gap-1 justify-end">
-                {comment.TAGS && comment.TAGS.map((tag, idx) => (
-                  <span key={idx} className={`text-[10px] font-semibold px-2 py-1 rounded-full border whitespace-nowrap ${getBadgeColor(tag)}`}>
-                    {tag}
-                  </span>
-                ))}
-              </div>
+              <h3 className="font-medium text-slate-900 truncate pr-2">{comment.FULLNAME || 'Misafir'}</h3>
             </div>
             <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
               <span className="flex items-center gap-1"><Globe size={12} /> {comment.NATIONALITY || 'Bilinmiyor'}</span>
-              <span className="flex items-center gap-1"><Calendar size={12} /> {comment.COMMENTDATE}</span>
+              <span className="flex items-center gap-1"><Calendar size={12} /> {formatTRDate(comment.COMMENTDATE)}</span>
             </div>
             <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">
               {comment.COMMENT}
