@@ -20,7 +20,7 @@ export interface CommentData {
 
 export interface ApiSettings {
   baseUrl: string;
-  token: string;
+  loginToken: string;
   hotelId: string;
   action: string;
   objectName: string;

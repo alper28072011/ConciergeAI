@@ -47,8 +47,16 @@ export default function App() {
       return;
     }
 
-    if (!settings.baseUrl || !settings.token || !settings.hotelId || !settings.action || !settings.objectName) {
+    if (!settings.baseUrl || !settings.hotelId || !settings.action || !settings.objectName) {
       alert('Lütfen API ayarlarındaki tüm alanları doldurun.');
+      setIsSettingsOpen(true);
+      return;
+    }
+
+    const activeToken = localStorage.getItem('loginToken') || settings.loginToken;
+
+    if (!activeToken) {
+      alert("Lütfen geçerli bir Elektraweb oturum token'ı (loginToken) girin");
       setIsSettingsOpen(true);
       return;
     }
@@ -76,7 +84,7 @@ export default function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${settings.token}`
+          'Authorization': `Bearer ${activeToken}`
         },
         body: JSON.stringify(payload)
       });

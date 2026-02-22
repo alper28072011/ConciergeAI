@@ -11,7 +11,7 @@ interface SettingsModalProps {
 export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
   const [settings, setSettings] = useState<ApiSettings>({
     baseUrl: '',
-    token: '',
+    loginToken: '',
     hotelId: '',
     action: 'Select',
     objectName: 'QA_HOTEL_GUEST_COMMENT_DETAIL'
@@ -24,7 +24,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
         const parsed = JSON.parse(saved);
         setSettings({
           baseUrl: parsed.baseUrl || '',
-          token: parsed.token || '',
+          loginToken: parsed.loginToken || parsed.token || '', // Fallback for migration
           hotelId: parsed.hotelId || '',
           action: parsed.action || 'Select',
           objectName: parsed.objectName || 'QA_HOTEL_GUEST_COMMENT_DETAIL'
@@ -60,8 +60,11 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
             <input type="text" name="baseUrl" value={settings.baseUrl} onChange={handleChange} placeholder="https://4001.hoteladvisor.net" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Bearer Token / API Key</label>
-            <input type="password" name="token" value={settings.token} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
+            <label className="block text-sm font-medium text-slate-700 mb-1">Elektraweb Login Token</label>
+            <input type="password" name="loginToken" value={settings.loginToken} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
+            <p className="mt-1 text-xs text-slate-400 leading-relaxed">
+              Uygulama Elektraweb ile aynı ağ/domain üzerinde çalışıyorsa bu alan otomatik dolar. Harici kullanım için tarayıcınızın Geliştirici Araçları -&gt; Application -&gt; Local Storage altından 'loginToken' değerini kopyalayıp buraya yapıştırın.
+            </p>
           </div>
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Hotel ID</label>
