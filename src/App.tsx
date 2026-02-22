@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { SettingsModal } from './components/SettingsModal';
 import { Sidebar } from './components/Sidebar';
 import { DetailPanel } from './components/DetailPanel';
@@ -30,6 +30,37 @@ export default function App() {
   
   const [startDate, setStartDate] = useState(formatDate(oneMonthAgo));
   const [endDate, setEndDate] = useState(formatDate(today));
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+
+    if (token) {
+      const savedSettings = localStorage.getItem('hotelApiSettings');
+      let settings: ApiSettings = {
+        baseUrl: '',
+        loginToken: '',
+        hotelId: '',
+        action: 'Select',
+        objectName: 'QA_HOTEL_GUEST_COMMENT'
+      };
+
+      if (savedSettings) {
+        try {
+          settings = JSON.parse(savedSettings);
+        } catch (e) {
+          console.error('Error parsing settings', e);
+        }
+      }
+
+      settings.loginToken = token;
+      localStorage.setItem('hotelApiSettings', JSON.stringify(settings));
+
+      // Clean URL
+      const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+      window.history.replaceState({ path: newUrl }, '', newUrl);
+    }
+  }, []);
 
   const fetchComments = async () => {
     const savedSettings = localStorage.getItem('hotelApiSettings');
@@ -99,6 +130,11 @@ export default function App() {
       });
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          setIsSettingsOpen(true);
+          alert("Oturum süreniz dolmuş (Token Expired). Lütfen yeni bir Login Token girin veya uygulamayı Elektraweb üzerinden yeniden başlatın.");
+          throw new Error(`Oturum Hatası: ${response.status}`);
+        }
         throw new Error(`API Hatası: ${response.status}`);
       }
 
