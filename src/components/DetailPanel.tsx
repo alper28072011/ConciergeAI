@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { CommentData } from '../types';
-import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone } from 'lucide-react';
+import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone, Save, Database } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { formatTRDate } from '../utils';
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db } from '../firebase';
 
 interface DetailPanelProps {
   comment: CommentData | null;
@@ -16,6 +18,44 @@ export function DetailPanel({ comment }: DetailPanelProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [showTranslation, setShowTranslation] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isFetchingDB, setIsFetchingDB] = useState(false);
+  const [savedInAgenda, setSavedInAgenda] = useState(false);
+
+  useEffect(() => {
+    if (comment?.ID) {
+      // Reset states
+      setExtraNotes('');
+      setGeneratedLetter('');
+      setTranslatedLetter('');
+      setShowTranslation(false);
+      setTargetLanguage('İngilizce');
+      setSavedInAgenda(false);
+
+      // Fetch from Firebase
+      const fetchData = async () => {
+        setIsFetchingDB(true);
+        try {
+          const docRef = doc(db, "agenda_notes", String(comment.ID));
+          const docSnap = await getDoc(docRef);
+
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            setExtraNotes(data.extraNotes || '');
+            setGeneratedLetter(data.generatedLetter || '');
+            setTargetLanguage(data.targetLanguage || 'İngilizce');
+            setSavedInAgenda(true);
+          }
+        } catch (error) {
+          console.error("Error fetching document:", error);
+        } finally {
+          setIsFetchingDB(false);
+        }
+      };
+
+      fetchData();
+    }
+  }, [comment?.ID]);
 
   if (!comment) {
     return (
@@ -27,6 +67,26 @@ export function DetailPanel({ comment }: DetailPanelProps) {
       </div>
     );
   }
+
+  const handleSaveToAgenda = async () => {
+    if (!comment?.ID) return;
+    setIsSaving(true);
+    try {
+      await setDoc(doc(db, "agenda_notes", String(comment.ID)), {
+        extraNotes,
+        generatedLetter,
+        targetLanguage,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      setSavedInAgenda(true);
+      alert('Ajandaya başarıyla kaydedildi.');
+    } catch (error) {
+      console.error("Error saving document:", error);
+      alert('Kaydedilirken bir hata oluştu.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const handleGenerate = async () => {
     setIsGenerating(true);
@@ -97,7 +157,13 @@ The letter should be empathetic, professional, and address the guest's feedback 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         
         {/* Top: Comment Details */}
-        <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+        <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 relative">
+          {savedInAgenda && (
+            <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-green-100 text-green-700 px-3 py-1.5 rounded-full text-xs font-semibold border border-green-200">
+              <Database size={12} />
+              Ajandada Kayıtlı
+            </div>
+          )}
           <div className="flex flex-wrap gap-4 mb-4 text-sm text-slate-600">
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><User size={16} className="text-slate-400"/> <span className="font-medium text-slate-900">{comment.RESNAMEID_LOOKUP || 'Misafir'}</span></div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Globe size={16} className="text-slate-400"/> {comment.NATIONALITY}</div>
@@ -224,6 +290,18 @@ The letter should be empathetic, professional, and address the guest's feedback 
                 </button>
                 
                 <div className="flex items-center gap-3">
+                  <button 
+                    onClick={handleSaveToAgenda}
+                    disabled={isSaving}
+                    className="flex items-center gap-2 text-sm font-medium bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded-lg transition-colors"
+                  >
+                    {isSaving ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                    ) : (
+                      <Save size={16} />
+                    )}
+                    Ajandaya Kaydet
+                  </button>
                   <button className="flex items-center gap-2 text-sm font-medium bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg transition-colors">
                     <Download size={16} />
                     PDF Kaydet
