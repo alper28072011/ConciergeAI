@@ -67,20 +67,25 @@ export default function App() {
         Action: settings.action,
         Object: settings.objectName,
         Select: [
-          "ID", "HOTELID", "COMMENT", "COMMENTDATE", "RESNAMEID_LOOKUP", 
-          "ANSWER", "PHONE", "EMAIL", "NATIONALITY", "GDPRCONFIRMED", 
-          "EMAILCONFIRMED", "PHONECONFIRMED", "SMSCONFIRMED", 
-          "WHATSAPPCONFIRMED", "GUESTID", "ROOMNO", "COMMENTSOURCEID_NAME", 
-          "CHECKIN", "CHECKOUT", "SCORE"
+          "COMMENTTYPEID", "STATEID", "ID", "HOTELID", "COMMENT", "COMMENTSOURCEID", 
+          "RESNAMEID", "COMMENTDATE", "COMMENTSOURCEID_NAME", "RESNAMEID_LOOKUP", 
+          "ANSWER", "LAST_STATEID", "CREATORID", "CREATORID_USERCODE", "INFO", 
+          "SCORE", "GRADE", "PHONE", "EMAIL", "NATIONALITY", "GDPRCONFIRMED", 
+          "EMAILCONFIRMED", "PHONECONFIRMED", "SMSCONFIRMED", "WHATSAPPCONFIRMED", 
+          "POSITIVE", "NEGATIVE", "SUGGESTION", "INFORMATION", "TYPESTOTAL", 
+          "GUESTID", "AGENCYCODE", "ROOMNO", "SOURCEREFID", "SURVEYNAME", 
+          "CHECKIN", "CHECKOUT", "EFFECTIVECHECKOUT"
         ],
         Where: [
           { Column: "STATEID", Operator: "=", Value: 3 },
           { Column: "COMMENTDATE", Operator: ">=", Value: startDate },
           { Column: "COMMENTDATE", Operator: "<=", Value: endDate },
-          { Column: "HOTELID", Operator: "=", Value: settings.hotelId }
+          { Column: "HOTELID", Operator: "=", Value: Number(settings.hotelId) }
         ],
         OrderBy: [{ Column: "COMMENTDATE", Direction: "DESC" }],
         Paging: { ItemsPerPage: 100, Current: 1 },
+        TotalCount: false,
+        Joins: [],
         LoginToken: activeToken
       };
 
