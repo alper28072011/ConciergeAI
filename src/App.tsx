@@ -7,49 +7,99 @@ import React, { useState } from 'react';
 import { SettingsModal } from './components/SettingsModal';
 import { Sidebar } from './components/Sidebar';
 import { DetailPanel } from './components/DetailPanel';
-import { CommentData } from './types';
+import { CommentData, ApiSettings } from './types';
 import { Settings, Hotel } from 'lucide-react';
-
-const MOCK_DATA: CommentData[] = [
-  { 
-    COMMENTID: "101", 
-    HOTELID: "21390", 
-    COMMENTDATE: "2025-06-15", 
-    COMMENT: "Merhaba, her şey güzeldi fakat odamın temizliğini beğenmedim. Yatak altları tozluydu ve banyoda eksik havlular vardı.", 
-    ANSWER: "Misafirin odasına detaylı temizlik yaptırıldı. Kat şefimiz bizzat kontrol etti ve özür dilendi.", 
-    SOURCENAME: "Guest Survey", 
-    NATIONALITY: "Almanya", 
-    GUESTNAME: "Christian Müller", 
-    GROUPNAME: "Housekeeping - Olumsuz" 
-  },
-  { 
-    COMMENTID: "102", 
-    HOTELID: "21390", 
-    COMMENTDATE: "2025-06-16", 
-    COMMENT: "Yemekler harikaydı, özellikle sabah kahvaltısındaki omlet şefi çok ilgiliydi. Akşam yemeğindeki tatlı büfesi de çok zengindi.", 
-    ANSWER: "Şefe ve mutfak ekibine teşekkür iletildi.", 
-    SOURCENAME: "Tripadvisor", 
-    NATIONALITY: "Türkiye", 
-    GUESTNAME: "Ayşe Yılmaz", 
-    GROUPNAME: "Restoran - Olumlu" 
-  },
-  { 
-    COMMENTID: "103", 
-    HOTELID: "21390", 
-    COMMENTDATE: "2025-06-17", 
-    COMMENT: "Havuz kenarında daha fazla şezlong olmalı, sabah 9'da inmemize rağmen yer bulmakta zorlandık. Animasyon ekibi çok eğlenceliydi.", 
-    ANSWER: "Ek şezlong siparişi verildi, geçici olarak plajdan takviye yapıldı. Animasyon ekibine teşekkür edildi.", 
-    SOURCENAME: "Booking.com", 
-    NATIONALITY: "İngiltere", 
-    GUESTNAME: "John Smith", 
-    GROUPNAME: "Öneri" 
-  }
-];
 
 export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [selectedCommentId, setSelectedCommentId] = useState<string | null>(null);
-  const [comments] = useState<CommentData[]>(MOCK_DATA);
+  const [comments, setComments] = useState<CommentData[]>([]);
+  const [isFetching, setIsFetching] = useState(false);
+
+  // Default dates: today and 1 month ago
+  const today = new Date();
+  const oneMonthAgo = new Date();
+  oneMonthAgo.setMonth(today.getMonth() - 1);
+  
+  const formatDate = (d: Date) => {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  
+  const [startDate, setStartDate] = useState(formatDate(oneMonthAgo));
+  const [endDate, setEndDate] = useState(formatDate(today));
+
+  const fetchComments = async () => {
+    const savedSettings = localStorage.getItem('hotelApiSettings');
+    if (!savedSettings) {
+      alert('Lütfen önce API ayarlarını yapın.');
+      setIsSettingsOpen(true);
+      return;
+    }
+
+    let settings: ApiSettings;
+    try {
+      settings = JSON.parse(savedSettings);
+    } catch (e) {
+      alert('API ayarları okunamadı. Lütfen tekrar kaydedin.');
+      return;
+    }
+
+    if (!settings.baseUrl || !settings.token || !settings.hotelId || !settings.action || !settings.objectName) {
+      alert('Lütfen API ayarlarındaki tüm alanları doldurun.');
+      setIsSettingsOpen(true);
+      return;
+    }
+
+    setIsFetching(true);
+    try {
+      const payload = {
+        Parameters: { HOTELID: settings.hotelId },
+        Action: settings.action,
+        Object: settings.objectName,
+        Select: [
+          "ID", "HOTELID", "DETAILTYPE", "DEPNAME", "GROUPNAME", 
+          "COMMENTID", "COMMENTDATE", "COMMENT", "ANSWER", 
+          "SOURCENAME", "AGENCY", "NATIONALITY", "LOCATION", 
+          "CREATION_DATE", "MARKET"
+        ],
+        Where: [
+          { Column: "COMMENTDATE", Operator: ">=", Value: startDate },
+          { Column: "COMMENTDATE", Operator: "<=", Value: endDate }
+        ],
+        Paging: { ItemsPerPage: 10000, Current: 1 }
+      };
+
+      const response = await fetch(settings.baseUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${settings.token}`
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error(`API Hatası: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data && data.ResultSets && data.ResultSets.length > 0) {
+        setComments(data.ResultSets[0]);
+      } else {
+        setComments([]);
+        alert('Belirtilen tarih aralığında yorum bulunamadı veya veri formatı hatalı.');
+      }
+    } catch (error: any) {
+      console.error('Fetch error:', error);
+      alert(`Veri çekilirken bir hata oluştu: ${error.message}`);
+    } finally {
+      setIsFetching(false);
+    }
+  };
 
   const selectedComment = comments.find(c => c.COMMENTID === selectedCommentId) || null;
 
@@ -77,7 +127,13 @@ export default function App() {
         <Sidebar 
           comments={comments} 
           selectedId={selectedCommentId} 
-          onSelect={setSelectedCommentId} 
+          onSelect={setSelectedCommentId}
+          startDate={startDate}
+          endDate={endDate}
+          onStartDateChange={setStartDate}
+          onEndDateChange={setEndDate}
+          onFetch={fetchComments}
+          isFetching={isFetching}
         />
         <DetailPanel comment={selectedComment} />
       </main>
@@ -85,7 +141,9 @@ export default function App() {
       <SettingsModal 
         isOpen={isSettingsOpen} 
         onClose={() => setIsSettingsOpen(false)} 
-        onSave={(settings) => console.log('Settings saved:', settings)} 
+        onSave={(settings) => {
+          console.log('Settings saved:', settings);
+        }} 
       />
     </div>
   );

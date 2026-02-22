@@ -13,15 +13,22 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     baseUrl: '',
     token: '',
     hotelId: '',
-    startDate: '',
-    endDate: ''
+    action: 'Select',
+    objectName: 'QA_HOTEL_GUEST_COMMENT_DETAIL'
   });
 
   useEffect(() => {
     const saved = localStorage.getItem('hotelApiSettings');
     if (saved) {
       try {
-        setSettings(JSON.parse(saved));
+        const parsed = JSON.parse(saved);
+        setSettings({
+          baseUrl: parsed.baseUrl || '',
+          token: parsed.token || '',
+          hotelId: parsed.hotelId || '',
+          action: parsed.action || 'Select',
+          objectName: parsed.objectName || 'QA_HOTEL_GUEST_COMMENT_DETAIL'
+        });
       } catch (e) {}
     }
   }, [isOpen]);
@@ -62,12 +69,12 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Başlangıç Tarihi</label>
-              <input type="date" name="startDate" value={settings.startDate} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
+              <label className="block text-sm font-medium text-slate-700 mb-1">Action</label>
+              <input type="text" name="action" value={settings.action} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Bitiş Tarihi</label>
-              <input type="date" name="endDate" value={settings.endDate} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
+              <label className="block text-sm font-medium text-slate-700 mb-1">Object Name</label>
+              <input type="text" name="objectName" value={settings.objectName} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
             </div>
           </div>
         </div>

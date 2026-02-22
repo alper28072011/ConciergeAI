@@ -95,7 +95,7 @@ The letter should be empathetic, professional, and address the guest's feedback 
         {/* Top: Comment Details */}
         <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
           <div className="flex flex-wrap gap-4 mb-4 text-sm text-slate-600">
-            <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><User size={16} className="text-slate-400"/> <span className="font-medium text-slate-900">{comment.GUESTNAME}</span></div>
+            <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><User size={16} className="text-slate-400"/> <span className="font-medium text-slate-900">{comment.GUESTNAME || 'Misafir'}</span></div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Globe size={16} className="text-slate-400"/> {comment.NATIONALITY}</div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Calendar size={16} className="text-slate-400"/> {comment.COMMENTDATE}</div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Building size={16} className="text-slate-400"/> {comment.SOURCENAME}</div>
