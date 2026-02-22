@@ -1,21 +1,24 @@
 export interface CommentData {
-  ID?: string;
-  HOTELID?: string;
-  DETAILTYPE?: string;
-  DEPNAME?: string;
-  GROUPNAME: string;
-  COMMENTID: string;
+  ID: string;
+  HOTELID: string;
   COMMENTDATE: string;
   COMMENT: string;
-  ANSWER: string;
-  SOURCENAME: string;
-  AGENCY?: string;
-  NATIONALITY: string;
-  LOCATION?: string;
-  CREATION_DATE?: string;
-  MARKET?: string;
-  FULLNAME?: string;
-  TAGS?: string[];
+  ANSWER?: string;
+  RESNAMEID_LOOKUP?: string;
+  PHONE?: string;
+  EMAIL?: string;
+  NATIONALITY?: string;
+  ROOMNO?: string;
+  GUESTID?: string;
+  COMMENTSOURCEID_NAME?: string;
+  CHECKIN?: string;
+  CHECKOUT?: string;
+  GDPRCONFIRMED?: boolean;
+  EMAILCONFIRMED?: boolean;
+  PHONECONFIRMED?: boolean;
+  SMSCONFIRMED?: boolean;
+  WHATSAPPCONFIRMED?: boolean;
+  SCORE?: number;
 }
 
 export interface ApiSettings {

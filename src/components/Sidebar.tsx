@@ -1,6 +1,6 @@
 import React from 'react';
 import { CommentData } from '../types';
-import { MessageSquare, Calendar, Globe, RefreshCw } from 'lucide-react';
+import { MessageSquare, Calendar, Globe, RefreshCw, DoorOpen } from 'lucide-react';
 import { formatTRDate } from '../utils';
 
 interface SidebarProps {
@@ -78,16 +78,22 @@ export function Sidebar({
         )}
         {comments.map((comment) => (
           <div
-            key={comment.COMMENTID || Math.random().toString()}
-            onClick={() => onSelect(comment.COMMENTID)}
+            key={comment.ID || Math.random().toString()}
+            onClick={() => onSelect(comment.ID)}
             className={`p-4 rounded-xl border cursor-pointer transition-all duration-200 ${
-              selectedId === comment.COMMENTID
+              selectedId === comment.ID
                 ? 'bg-slate-50 border-slate-900 shadow-sm'
                 : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'
             }`}
           >
             <div className="flex justify-between items-start mb-2 gap-2">
-              <h3 className="font-medium text-slate-900 truncate pr-2">{comment.FULLNAME || 'Misafir'}</h3>
+              <h3 className="font-medium text-slate-900 truncate pr-2">{comment.RESNAMEID_LOOKUP || 'Misafir'}</h3>
+              {comment.ROOMNO && (
+                <div className="flex items-center gap-1 text-slate-700 bg-slate-100 px-2 py-1 rounded-md">
+                  <DoorOpen size={14} />
+                  <span className="text-xs font-bold whitespace-nowrap">Oda: {comment.ROOMNO}</span>
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
               <span className="flex items-center gap-1"><Globe size={12} /> {comment.NATIONALITY || 'Bilinmiyor'}</span>
@@ -97,7 +103,7 @@ export function Sidebar({
               {comment.COMMENT}
             </p>
             <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
-              <span className="text-xs font-medium text-slate-400">{comment.SOURCENAME}</span>
+              <span className="text-xs font-medium text-slate-400">{comment.COMMENTSOURCEID_NAME}</span>
             </div>
           </div>
         ))}

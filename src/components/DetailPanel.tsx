@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CommentData } from '../types';
-import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare } from 'lucide-react';
+import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { formatTRDate } from '../utils';
 
@@ -37,8 +37,11 @@ export function DetailPanel({ comment }: DetailPanelProps) {
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
       const prompt = `You are a professional 5-star hotel Guest Relations Manager / Concierge. Write a polite and professional letter to a guest.
-Guest Name: ${comment.FULLNAME || 'Misafir'}
+Guest Name: ${comment.RESNAMEID_LOOKUP || 'Misafir'}
 Nationality: ${comment.NATIONALITY}
+Room Number: ${comment.ROOMNO}
+Check-In: ${formatTRDate(comment.CHECKIN || '')}
+Check-Out: ${formatTRDate(comment.CHECKOUT || '')}
 Guest Comment: ${comment.COMMENT}
 Action Taken by Hotel: ${comment.ANSWER}
 Extra Notes from Staff: ${extraNotes}
@@ -96,33 +99,59 @@ The letter should be empathetic, professional, and address the guest's feedback 
         {/* Top: Comment Details */}
         <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
           <div className="flex flex-wrap gap-4 mb-4 text-sm text-slate-600">
-            <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><User size={16} className="text-slate-400"/> <span className="font-medium text-slate-900">{comment.FULLNAME || 'Misafir'}</span></div>
+            <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><User size={16} className="text-slate-400"/> <span className="font-medium text-slate-900">{comment.RESNAMEID_LOOKUP || 'Misafir'}</span></div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Globe size={16} className="text-slate-400"/> {comment.NATIONALITY}</div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Calendar size={16} className="text-slate-400"/> {formatTRDate(comment.COMMENTDATE)}</div>
-            <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Building size={16} className="text-slate-400"/> {comment.SOURCENAME}</div>
+            <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Building size={16} className="text-slate-400"/> {comment.COMMENTSOURCEID_NAME}</div>
+            {comment.ROOMNO && <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><DoorOpen size={16} className="text-slate-400"/> {comment.ROOMNO}</div>}
+            {comment.PHONE && <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Phone size={16} className="text-slate-400"/> {comment.PHONE}</div>}
+            {comment.EMAIL && <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Mail size={16} className="text-slate-400"/> {comment.EMAIL}</div>}
           </div>
-
-          {comment.TAGS && comment.TAGS.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-4">
-              {comment.TAGS.map((tag, idx) => {
-                const lower = tag.toLowerCase();
-                let colorClass = 'bg-slate-100 text-slate-700 border-slate-200';
-                if (lower.includes('temizlik') || lower.includes('housekeeping')) colorClass = 'bg-red-100 text-red-700 border-red-200';
-                else if (lower.includes('restoran') || lower.includes('yemek')) colorClass = 'bg-green-100 text-green-700 border-green-200';
-                else if (lower.includes('öneri')) colorClass = 'bg-blue-100 text-blue-700 border-blue-200';
-                
-                return (
-                  <span key={idx} className={`text-xs font-semibold px-2.5 py-1 rounded-full border ${colorClass}`}>
-                    {tag}
-                  </span>
-                );
-              })}
-            </div>
-          )}
 
           <div className="prose prose-slate max-w-none">
             <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Misafir Yorumu</h4>
             <p className="text-slate-800 text-lg leading-relaxed">{comment.COMMENT}</p>
+          </div>
+        </div>
+
+        {/* Guest Details & Consents */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+              <ShieldCheck size={18} className="text-slate-500" />
+              Misafir Detayları & İzinler
+            </h4>
+            {comment.GUESTID && <span className="text-xs font-mono text-slate-400">ID: {comment.GUESTID}</span>}
+          </div>
+          <div className="flex flex-wrap gap-6">
+            <div className="flex items-center gap-2">
+              <div className={`p-1.5 rounded-full ${comment.WHATSAPPCONFIRMED ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>
+                <MessageCircle size={16} />
+              </div>
+              <span className={`text-sm ${comment.WHATSAPPCONFIRMED ? 'text-slate-700' : 'text-slate-400 line-through'}`}>WhatsApp</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className={`p-1.5 rounded-full ${comment.SMSCONFIRMED ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>
+                <Smartphone size={16} />
+              </div>
+              <span className={`text-sm ${comment.SMSCONFIRMED ? 'text-slate-700' : 'text-slate-400 line-through'}`}>SMS</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className={`p-1.5 rounded-full ${comment.EMAILCONFIRMED ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>
+                <Mail size={16} />
+              </div>
+              <span className={`text-sm ${comment.EMAILCONFIRMED ? 'text-slate-700' : 'text-slate-400 line-through'}`}>Email</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className={`p-1.5 rounded-full ${comment.PHONECONFIRMED ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-400'}`}>
+                <Phone size={16} />
+              </div>
+              <span className={`text-sm ${comment.PHONECONFIRMED ? 'text-slate-700' : 'text-slate-400 line-through'}`}>Telefon</span>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <div className={`w-2 h-2 rounded-full ${comment.GDPRCONFIRMED ? 'bg-green-500' : 'bg-red-500'}`} />
+              <span className="text-xs font-medium text-slate-500">KVKK / GDPR</span>
+            </div>
           </div>
         </div>
 
@@ -133,7 +162,7 @@ The letter should be empathetic, professional, and address the guest's feedback 
               <CheckCircle2 size={14} />
               Alınan Aksiyon
             </h4>
-            <p className="text-emerald-900">{comment.ANSWER}</p>
+            <p className="text-emerald-900">{comment.ANSWER || 'Henüz aksiyon alınmamış.'}</p>
           </div>
 
           <div>

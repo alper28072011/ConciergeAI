@@ -14,7 +14,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     loginToken: '',
     hotelId: '',
     action: 'Select',
-    objectName: 'QA_HOTEL_GUEST_COMMENT_DETAIL'
+    objectName: 'QA_HOTEL_GUEST_COMMENT'
   });
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           loginToken: parsed.loginToken || parsed.token || '', // Fallback for migration
           hotelId: parsed.hotelId || '',
           action: parsed.action || 'Select',
-          objectName: parsed.objectName || 'QA_HOTEL_GUEST_COMMENT_DETAIL'
+          objectName: parsed.objectName || 'QA_HOTEL_GUEST_COMMENT'
         });
       } catch (e) {}
     }

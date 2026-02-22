@@ -64,27 +64,30 @@ export default function App() {
     setIsFetching(true);
     try {
       const payload = {
-        Parameters: { HOTELID: settings.hotelId },
         Action: settings.action,
         Object: settings.objectName,
         Select: [
-          "ID", "HOTELID", "DETAILTYPE", "DEPNAME", "GROUPNAME", 
-          "COMMENTID", "COMMENTDATE", "COMMENT", "ANSWER", 
-          "SOURCENAME", "AGENCY", "NATIONALITY", "LOCATION", 
-          "CREATION_DATE", "MARKET", "FULLNAME"
+          "ID", "HOTELID", "COMMENT", "COMMENTDATE", "RESNAMEID_LOOKUP", 
+          "ANSWER", "PHONE", "EMAIL", "NATIONALITY", "GDPRCONFIRMED", 
+          "EMAILCONFIRMED", "PHONECONFIRMED", "SMSCONFIRMED", 
+          "WHATSAPPCONFIRMED", "GUESTID", "ROOMNO", "COMMENTSOURCEID_NAME", 
+          "CHECKIN", "CHECKOUT", "SCORE"
         ],
         Where: [
+          { Column: "STATEID", Operator: "=", Value: 3 },
           { Column: "COMMENTDATE", Operator: ">=", Value: startDate },
-          { Column: "COMMENTDATE", Operator: "<=", Value: endDate }
+          { Column: "COMMENTDATE", Operator: "<=", Value: endDate },
+          { Column: "HOTELID", Operator: "=", Value: settings.hotelId }
         ],
-        Paging: { ItemsPerPage: 10000, Current: 1 }
+        OrderBy: [{ Column: "COMMENTDATE", Direction: "DESC" }],
+        Paging: { ItemsPerPage: 100, Current: 1 },
+        LoginToken: activeToken
       };
 
       const response = await fetch(settings.baseUrl, {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${activeToken}`
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       });
@@ -96,19 +99,7 @@ export default function App() {
       const data = await response.json();
       
       if (data && data.ResultSets && data.ResultSets.length > 0) {
-        const rawData: CommentData[] = data.ResultSets[0];
-        const groupedData = Object.values(rawData.reduce((acc: Record<string, CommentData>, curr: CommentData) => {
-          const id = curr.COMMENTID;
-          if (!id) return acc;
-          if (!acc[id]) {
-            acc[id] = { ...curr, TAGS: [] };
-          }
-          if (curr.GROUPNAME && !acc[id].TAGS!.includes(curr.GROUPNAME)) {
-            acc[id].TAGS!.push(curr.GROUPNAME);
-          }
-          return acc;
-        }, {}));
-        setComments(groupedData as CommentData[]);
+        setComments(data.ResultSets[0]);
       } else {
         setComments([]);
         alert('Belirtilen tarih aralığında yorum bulunamadı veya veri formatı hatalı.');
@@ -121,7 +112,7 @@ export default function App() {
     }
   };
 
-  const selectedComment = comments.find(c => c.COMMENTID === selectedCommentId) || null;
+  const selectedComment = comments.find(c => c.ID === selectedCommentId) || null;
 
   return (
     <div className="h-screen w-full bg-slate-100 flex flex-col font-sans overflow-hidden">
