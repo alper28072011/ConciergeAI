@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CommentData } from '../types';
 import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone, Save, Database } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { formatTRDate } from '../utils';
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from '../firebase';
+// @ts-ignore
+import html2pdf from 'html2pdf.js';
 
 interface DetailPanelProps {
   comment: CommentData | null;
@@ -21,6 +23,7 @@ export function DetailPanel({ comment }: DetailPanelProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [isFetchingDB, setIsFetchingDB] = useState(false);
   const [savedInAgenda, setSavedInAgenda] = useState(false);
+  const letterRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (comment?.ID) {
@@ -152,12 +155,36 @@ The letter should be empathetic, professional, and address the guest's feedback 
     window.print();
   };
 
+  const handleDownloadPDF = () => {
+    if (!letterRef.current) return;
+    
+    // Create a temporary element for PDF generation to avoid textarea issues
+    const element = document.createElement('div');
+    element.innerHTML = letterRef.current.value.replace(/\n/g, '<br>');
+    element.style.padding = '40px';
+    element.style.fontFamily = 'serif';
+    element.style.fontSize = '16px';
+    element.style.lineHeight = '1.6';
+    element.style.color = '#000';
+    element.style.background = '#fff';
+    
+    const opt: any = {
+      margin: 10,
+      filename: `Misafir_Mektubu_${comment.RESNAMEID_LOOKUP || 'Misafir'}.pdf`,
+      image: { type: 'jpeg', quality: 0.98 },
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+    };
+
+    html2pdf().set(opt).from(element).save();
+  };
+
   return (
     <div className="flex-1 bg-white flex flex-col h-full overflow-hidden">
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className="flex-1 overflow-y-auto p-6 space-y-6 print:p-0 print:overflow-visible">
         
         {/* Top: Comment Details */}
-        <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 relative">
+        <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 relative print:hidden">
           {savedInAgenda && (
             <div className="absolute top-4 right-4 flex items-center gap-1.5 bg-green-100 text-green-700 px-3 py-1.5 rounded-full text-xs font-semibold border border-green-200">
               <Database size={12} />
@@ -181,7 +208,7 @@ The letter should be empathetic, professional, and address the guest's feedback 
         </div>
 
         {/* Guest Details & Consents */}
-        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm print:hidden">
           <div className="flex items-center justify-between mb-4">
             <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
               <ShieldCheck size={18} className="text-slate-500" />
@@ -222,7 +249,7 @@ The letter should be empathetic, professional, and address the guest's feedback 
         </div>
 
         {/* Middle: Action & Notes */}
-        <div className="space-y-4">
+        <div className="space-y-4 print:hidden">
           <div className="bg-emerald-50/50 rounded-2xl p-5 border border-emerald-100">
             <h4 className="text-xs font-semibold text-emerald-600 uppercase tracking-wider mb-2 flex items-center gap-1.5">
               <CheckCircle2 size={14} />
@@ -243,8 +270,8 @@ The letter should be empathetic, professional, and address the guest's feedback 
         </div>
 
         {/* Bottom: AI Generator */}
-        <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-lg">
-          <div className="flex flex-wrap items-end gap-4 mb-6">
+        <div className="bg-slate-900 rounded-2xl p-6 text-white shadow-lg print:bg-white print:shadow-none print:p-0 print:text-black">
+          <div className="flex flex-wrap items-end gap-4 mb-6 print:hidden">
             <div className="flex-1 min-w-[200px]">
               <label className="block text-xs font-medium text-slate-400 mb-2 uppercase tracking-wider">Hedef Dil</label>
               <select
@@ -274,12 +301,25 @@ The letter should be empathetic, professional, and address the guest's feedback 
           </div>
 
           {generatedLetter && (
-            <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <div className="bg-white text-slate-900 rounded-xl p-6 shadow-inner whitespace-pre-wrap font-serif text-base leading-relaxed border border-slate-200">
-                {showTranslation ? translatedLetter : generatedLetter}
+            <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500 print:mt-0 print:animate-none">
+              <div className="relative">
+                <textarea
+                  ref={letterRef as any}
+                  value={showTranslation ? translatedLetter : generatedLetter}
+                  onChange={(e) => {
+                    const newVal = e.target.value;
+                    if (showTranslation) {
+                      setTranslatedLetter(newVal);
+                    } else {
+                      setGeneratedLetter(newVal);
+                    }
+                  }}
+                  className="w-full bg-white text-slate-900 rounded-none shadow-lg p-12 font-serif text-base leading-relaxed border border-slate-200 min-h-[297mm] resize-none focus:outline-none focus:ring-1 focus:ring-slate-300 print:shadow-none print:border-none print:absolute print:inset-0 print:w-full print:h-full print:p-12 print:m-0"
+                  placeholder="Mektup içeriği burada görünecek..."
+                />
               </div>
               
-              <div className="flex flex-wrap items-center justify-between gap-4 pt-2">
+              <div className="flex flex-wrap items-center justify-between gap-4 pt-2 print:hidden">
                 <button
                   onClick={handleTranslate}
                   disabled={isTranslating}
@@ -302,7 +342,10 @@ The letter should be empathetic, professional, and address the guest's feedback 
                     )}
                     Ajandaya Kaydet
                   </button>
-                  <button className="flex items-center gap-2 text-sm font-medium bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg transition-colors">
+                  <button 
+                    onClick={handleDownloadPDF}
+                    className="flex items-center gap-2 text-sm font-medium bg-slate-800 hover:bg-slate-700 px-4 py-2 rounded-lg transition-colors"
+                  >
                     <Download size={16} />
                     PDF Kaydet
                   </button>

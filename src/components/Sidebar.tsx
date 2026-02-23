@@ -27,7 +27,7 @@ export function Sidebar({
   isFetching
 }: SidebarProps) {
   return (
-    <div className="w-1/3 min-w-[320px] max-w-[400px] bg-white border-r border-slate-200 flex flex-col h-full">
+    <div className="w-1/3 min-w-[320px] max-w-[400px] bg-white border-r border-slate-200 flex flex-col h-full print:hidden">
       <div className="p-4 border-b border-slate-200 bg-slate-50/50 space-y-4">
         <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
           <MessageSquare size={20} className="text-slate-500" />

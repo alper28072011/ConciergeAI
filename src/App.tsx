@@ -159,7 +159,7 @@ export default function App() {
   return (
     <div className="h-screen w-full bg-slate-100 flex flex-col font-sans overflow-hidden">
       {/* Header */}
-      <header className="bg-slate-900 text-white h-14 flex items-center justify-between px-6 shrink-0 z-10 shadow-md">
+      <header className="bg-slate-900 text-white h-14 flex items-center justify-between px-6 shrink-0 z-10 shadow-md print:hidden">
         <div className="flex items-center gap-3">
           <div className="bg-white/10 p-1.5 rounded-lg">
             <Hotel size={20} className="text-slate-100" />
