@@ -9,6 +9,8 @@ import { Sidebar } from './components/Sidebar';
 import { DetailPanel } from './components/DetailPanel';
 import { CommentData, ApiSettings } from './types';
 import { Settings, Hotel } from 'lucide-react';
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
+import { db } from './firebase';
 
 export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -56,10 +58,59 @@ export default function App() {
       settings.loginToken = token;
       localStorage.setItem('hotelApiSettings', JSON.stringify(settings));
 
+      // Sync to Firestore for other instances
+      const syncToken = async () => {
+        try {
+          await setDoc(doc(db, "config", "api_settings"), {
+            loginToken: token,
+            updatedAt: new Date().toISOString()
+          }, { merge: true });
+          console.log("Token synced to Firestore from URL");
+        } catch (error) {
+          console.error("Error syncing token to Firestore:", error);
+        }
+      };
+      syncToken();
+
       // Clean URL
       const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
       window.history.replaceState({ path: newUrl }, '', newUrl);
     }
+
+    // Listen for token updates from Firestore
+    const unsubscribe = onSnapshot(doc(db, "config", "api_settings"), (doc) => {
+      if (doc.exists()) {
+        const data = doc.data();
+        if (data.loginToken) {
+          const savedSettings = localStorage.getItem('hotelApiSettings');
+          let settings: ApiSettings = {
+            baseUrl: '',
+            loginToken: '',
+            hotelId: '',
+            action: 'Select',
+            objectName: 'QA_HOTEL_GUEST_COMMENT'
+          };
+
+          if (savedSettings) {
+            try {
+              settings = JSON.parse(savedSettings);
+            } catch (e) {
+              console.error('Error parsing settings', e);
+            }
+          }
+
+          // Only update if different
+          if (settings.loginToken !== data.loginToken) {
+            console.log("Syncing new token from Firestore...");
+            settings.loginToken = data.loginToken;
+            localStorage.setItem('hotelApiSettings', JSON.stringify(settings));
+            // Optional: Trigger a re-fetch or notify user
+          }
+        }
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const fetchComments = async () => {
