@@ -132,16 +132,6 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
             <label className="block text-sm font-medium text-slate-700 mb-1">Hotel ID</label>
             <input type="text" name="hotelId" value={settings.hotelId} onChange={handleChange} placeholder="21390" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Action</label>
-              <input type="text" name="action" value={settings.action} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Object Name</label>
-              <input type="text" name="objectName" value={settings.objectName} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
-            </div>
-          </div>
         </div>
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end">
           <button onClick={handleSave} className="bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors">

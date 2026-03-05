@@ -25,6 +25,4 @@ export interface ApiSettings {
   baseUrl: string;
   loginToken: string;
   hotelId: string;
-  action: string;
-  objectName: string;
 }
