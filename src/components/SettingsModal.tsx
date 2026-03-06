@@ -14,11 +14,9 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
   const [settings, setSettings] = useState<ApiSettings>({
     baseUrl: '',
     loginToken: '',
-    hotelId: '',
-    action: 'Select',
-    objectName: 'QA_HOTEL_GUEST_COMMENT'
+    hotelId: ''
   });
-  
+
   const bookmarkletRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
@@ -28,10 +26,8 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
         const parsed = JSON.parse(saved);
         setSettings({
           baseUrl: parsed.baseUrl || '',
-          loginToken: parsed.loginToken || parsed.token || '', // Fallback for migration
-          hotelId: parsed.hotelId || '',
-          action: parsed.action || 'Select',
-          objectName: parsed.objectName || 'QA_HOTEL_GUEST_COMMENT'
+          loginToken: parsed.loginToken || parsed.token || '',
+          hotelId: parsed.hotelId || ''
         });
       } catch (e) {}
     }
