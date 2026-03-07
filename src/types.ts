@@ -21,8 +21,23 @@ export interface CommentData {
   SCORE?: number;
 }
 
+export interface GuestData {
+  RESID: string;
+  ROOMNO: string;
+  GUESTNAMES: string;
+  CHECKIN: string;
+  CHECKOUT: string;
+  AGENCY: string;
+  ROOMTYPE: string;
+  TOTALPRICE: number;
+  hasComment?: boolean;
+  commentData?: CommentData;
+}
+
 export interface ApiSettings {
   baseUrl: string;
   loginToken: string;
   hotelId: string;
+  commentPayloadTemplate?: string;
+  guestPayloadTemplate?: string;
 }

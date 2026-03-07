@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { DetailPanel } from '../components/DetailPanel';
-import { CommentData } from '../types';
+import { CommentData, ApiSettings } from '../types';
 import { executeElektraQuery } from '../services/api';
+import { buildDynamicPayload } from '../utils';
 
 export function LetterModule() {
   const [selectedCommentId, setSelectedCommentId] = useState<string | null>(null);
@@ -25,31 +26,33 @@ export function LetterModule() {
   const [endDate, setEndDate] = useState(formatDate(today));
 
   const fetchComments = async () => {
+    const savedSettings = localStorage.getItem('hotelApiSettings');
+    if (!savedSettings) {
+      alert('Lütfen önce API ayarlarını yapın.');
+      return;
+    }
+
+    let settings: ApiSettings;
+    try {
+      settings = JSON.parse(savedSettings);
+    } catch (e) {
+      alert('API ayarları okunamadı.');
+      return;
+    }
+
+    if (!settings.commentPayloadTemplate) {
+      alert('Yorum listesi şablonu bulunamadı. Lütfen ayarlardan kontrol edin.');
+      return;
+    }
+
     setIsFetching(true);
     try {
-      const payload = {
-        Action: 'Select',
-        Object: 'QA_HOTEL_GUEST_COMMENT',
-        Select: [
-          "COMMENTTYPEID", "STATEID", "ID", "HOTELID", "COMMENT", "COMMENTSOURCEID", 
-          "RESNAMEID", "COMMENTDATE", "COMMENTSOURCEID_NAME", "RESNAMEID_LOOKUP", 
-          "ANSWER", "LAST_STATEID", "CREATORID", "CREATORID_USERCODE", "INFO", 
-          "SCORE", "GRADE", "PHONE", "EMAIL", "NATIONALITY", "GDPRCONFIRMED", 
-          "EMAILCONFIRMED", "PHONECONFIRMED", "SMSCONFIRMED", "WHATSAPPCONFIRMED", 
-          "POSITIVE", "NEGATIVE", "SUGGESTION", "INFORMATION", "TYPESTOTAL", 
-          "GUESTID", "AGENCYCODE", "ROOMNO", "SOURCEREFID", "SURVEYNAME", 
-          "CHECKIN", "CHECKOUT", "EFFECTIVECHECKOUT"
-        ],
-        Where: [
-          { Column: "STATEID", Operator: "=", Value: 3 },
-          { Column: "COMMENTDATE", Operator: ">=", Value: startDate },
-          { Column: "COMMENTDATE", Operator: "<=", Value: endDate }
-        ],
-        OrderBy: [{ Column: "COMMENTDATE", Direction: "DESC" }],
-        Paging: { ItemsPerPage: 100, Current: 1 },
-        TotalCount: false,
-        Joins: []
-      };
+      const payload = buildDynamicPayload(
+        settings.commentPayloadTemplate,
+        settings,
+        startDate,
+        endDate
+      );
 
       const data = await executeElektraQuery(payload);
       
