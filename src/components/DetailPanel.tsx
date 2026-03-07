@@ -118,9 +118,16 @@ The letter should be empathetic, professional, and address the guest's feedback 
       });
 
       setGeneratedLetter(response.text || 'Mektup oluşturulamadı.');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error generating letter:', error);
-      setGeneratedLetter('Mektup oluşturulurken bir hata oluştu. Lütfen API anahtarınızı kontrol edin.');
+      let errorMessage = 'Mektup oluşturulurken bir hata oluştu.';
+      if (error.message) {
+        errorMessage += ` Hata detayı: ${error.message}`;
+      }
+      if (!process.env.GEMINI_API_KEY) {
+        errorMessage += ' (API Anahtarı bulunamadı)';
+      }
+      setGeneratedLetter(errorMessage);
     } finally {
       setIsGenerating(false);
     }
