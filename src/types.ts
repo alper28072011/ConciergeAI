@@ -26,16 +26,3 @@ export interface ApiSettings {
   loginToken: string;
   hotelId: string;
 }
-
-export interface ElektraQueryPayload {
-  Parameters?: Record<string, any>;
-  Action: string;
-  Object: string;
-  Select?: string[];
-  Where?: Array<{ Column: string; Operator: string; Value: any }>;
-  OrderBy?: Array<{ Column: string; Direction: 'ASC' | 'DESC' }>;
-  Paging?: { ItemsPerPage: number; Current: number };
-  TotalCount?: boolean;
-  Joins?: any[];
-  LoginToken?: string;
-}
