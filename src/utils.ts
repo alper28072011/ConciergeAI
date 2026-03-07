@@ -1,4 +1,4 @@
-import { ApiSettings } from './types';
+import { ApiSettings, GuestData, CommentData } from './types';
 
 export const buildDynamicPayload = (
   templateString: string,
@@ -45,4 +45,50 @@ export const formatTRDate = (dateString: string) => {
     year: 'numeric',
     weekday: 'long'
   }).format(date);
+};
+
+export const findGuestComments = (guest: GuestData, allComments: CommentData[]): CommentData[] => {
+  return allComments.filter(comment => {
+    // Kriter 1: Email (Kesin Eşleşme)
+    if (guest.CONTACTEMAIL && comment.EMAIL && 
+        guest.CONTACTEMAIL.trim() !== '' && comment.EMAIL.trim() !== '' &&
+        guest.CONTACTEMAIL.trim().toLowerCase() === comment.EMAIL.trim().toLowerCase()) {
+      return true;
+    }
+
+    // Kriter 2: Phone (Kesin Eşleşme - Sadece rakamlar)
+    if (guest.CONTACTPHONE && comment.PHONE) {
+      const guestPhone = guest.CONTACTPHONE.replace(/\D/g, '');
+      const commentPhone = comment.PHONE.replace(/\D/g, '');
+      if (guestPhone !== '' && commentPhone !== '' && guestPhone === commentPhone) {
+        return true;
+      }
+    }
+
+    // Kriter 3: Tarih ve Oda
+    if (guest.ROOMNO && comment.ROOMNO && guest.ROOMNO === comment.ROOMNO) {
+      const guestCheckIn = guest.CHECKIN ? guest.CHECKIN.split('T')[0] : null;
+      const commentCheckIn = comment.CHECKIN ? comment.CHECKIN.split('T')[0] : null;
+      const commentDate = comment.COMMENTDATE ? comment.COMMENTDATE.split('T')[0] : null;
+
+      if (guestCheckIn && (guestCheckIn === commentCheckIn || guestCheckIn === commentDate)) {
+        return true;
+      }
+    }
+
+    // Kriter 4: Lookup Parse
+    if (comment.RESNAMEID_LOOKUP) {
+      const parts = comment.RESNAMEID_LOOKUP.split('-');
+      if (parts.length >= 2) {
+        const roomPart = parts[0].trim();
+        const namePart = parts[1].trim().toLowerCase();
+
+        if (roomPart === guest.ROOMNO && guest.GUESTNAMES.toLowerCase().includes(namePart)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  });
 };

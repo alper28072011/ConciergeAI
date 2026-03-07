@@ -30,8 +30,10 @@ export interface GuestData {
   AGENCY: string;
   ROOMTYPE: string;
   TOTALPRICE: number;
+  CONTACTPHONE?: string;
+  CONTACTEMAIL?: string;
   hasComment?: boolean;
-  commentData?: CommentData;
+  comments?: CommentData[];
 }
 
 export interface ApiSettings {
