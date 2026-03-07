@@ -49,44 +49,39 @@ export const formatTRDate = (dateString: string) => {
 
 export const findGuestComments = (guest: GuestData, allComments: CommentData[]): CommentData[] => {
   return allComments.filter(comment => {
-    // Kriter 1: Email (Kesin Eşleşme)
-    if (guest.CONTACTEMAIL && comment.EMAIL && 
-        guest.CONTACTEMAIL.trim() !== '' && comment.EMAIL.trim() !== '' &&
-        guest.CONTACTEMAIL.trim().toLowerCase() === comment.EMAIL.trim().toLowerCase()) {
-      return true;
-    }
+    // 1. ALTIN ANAHTAR (Kesin Eşleşme): GUESTID
+    if (comment.GUESTID && (guest.RESGUESTID === comment.GUESTID || guest.CONTACTGUESTID === comment.GUESTID)) return true;
 
-    // Kriter 2: Phone (Kesin Eşleşme - Sadece rakamlar)
-    if (guest.CONTACTPHONE && comment.PHONE) {
-      const guestPhone = guest.CONTACTPHONE.replace(/\D/g, '');
-      const commentPhone = comment.PHONE.replace(/\D/g, '');
-      if (guestPhone !== '' && commentPhone !== '' && guestPhone === commentPhone) {
-        return true;
-      }
-    }
+    // 2. Email Eşleşmesi (Boşlukları silip küçük harfe çevirerek)
+    const gEmail = guest.CONTACTEMAIL?.toLowerCase().trim();
+    const cEmail = comment.EMAIL?.toLowerCase().trim();
+    if (gEmail && cEmail && gEmail === cEmail) return true;
 
-    // Kriter 3: Tarih ve Oda
-    if (guest.ROOMNO && comment.ROOMNO && guest.ROOMNO === comment.ROOMNO) {
-      const guestCheckIn = guest.CHECKIN ? guest.CHECKIN.split('T')[0] : null;
-      const commentCheckIn = comment.CHECKIN ? comment.CHECKIN.split('T')[0] : null;
-      const commentDate = comment.COMMENTDATE ? comment.COMMENTDATE.split('T')[0] : null;
+    // 3. Telefon Eşleşmesi (Tüm boşluk, +, -, (, ) karakterlerini temizleyerek)
+    const cleanPhone = (p?: string) => p ? p.replace(/[\s\-\+\(\)]/g, '') : '';
+    const gPhone = cleanPhone(guest.CONTACTPHONE);
+    const cPhone = cleanPhone(comment.PHONE);
+    if (gPhone && cPhone && gPhone === cPhone) return true;
 
-      if (guestCheckIn && (guestCheckIn === commentCheckIn || guestCheckIn === commentDate)) {
-        return true;
-      }
-    }
-
-    // Kriter 4: Lookup Parse
-    if (comment.RESNAMEID_LOOKUP) {
+    // 4. Lookup String Parçalama ve İsim/Oda Analizi
+    if (comment.RESNAMEID_LOOKUP && guest.ROOMNO) {
       const parts = comment.RESNAMEID_LOOKUP.split('-');
-      if (parts.length >= 2) {
-        const roomPart = parts[0].trim();
-        const namePart = parts[1].trim().toLowerCase();
+      const lookupRoom = parts[0];
+      const lookupName = parts[1] ? parts[1].toLowerCase().trim() : '';
+      const guestNames = (guest.GUESTNAMES || guest.CONTACTPERSON || '').toLowerCase();
 
-        if (roomPart === guest.ROOMNO && guest.GUESTNAMES.toLowerCase().includes(namePart)) {
-          return true;
-        }
+      if (lookupRoom === String(guest.ROOMNO)) {
+        // Oda aynıysa ve isim de içeriyorsa kesin bu kişidir
+        if (lookupName && guestNames.includes(lookupName)) return true;
       }
+    }
+
+    // 5. Fallback: Sadece Oda No ve CheckIn Tarihi (Sadece YYYY-MM-DD kısmını alarak saatleri yoksay)
+    if (guest.ROOMNO && comment.ROOMNO && String(guest.ROOMNO) === String(comment.ROOMNO)) {
+      const guestCheckIn = guest.CHECKIN?.split(' ')[0]?.split('T')[0];
+      const commentCheckIn = comment.CHECKIN?.split(' ')[0]?.split('T')[0];
+      
+      if (guestCheckIn && commentCheckIn && guestCheckIn === commentCheckIn) return true;
     }
 
     return false;

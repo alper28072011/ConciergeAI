@@ -420,10 +420,12 @@ export function GuestListModule() {
                       <td className="p-4 text-sm font-medium text-slate-900 relative">
                         {guest.ROOMNO}
                         {guest.hasComment && (
-                          <div className="absolute -top-1 -right-1 group/tooltip">
-                             <MessageSquare size={14} className="text-emerald-500 fill-emerald-100" />
-                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover/tooltip:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-20">
-                               Yorum Var ({guest.comments?.length})
+                          <div className="absolute -top-1 -right-1 group/tooltip z-20">
+                             <div className="bg-emerald-100 p-1 rounded-full shadow-sm animate-pulse">
+                               <MessageSquare size={14} className="text-emerald-600 fill-emerald-200" />
+                             </div>
+                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover/tooltip:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
+                               Misafir yorum yaptı ({guest.comments?.length})
                              </div>
                           </div>
                         )}
@@ -469,46 +471,84 @@ export function GuestListModule() {
                               </div>
 
                               {guest.hasComment && guest.comments && guest.comments.length > 0 ? (
-                                <div className="space-y-4">
-                                  <h5 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b border-slate-200 pb-2">
-                                    <MessageSquare size={16} className="text-emerald-600" />
-                                    Misafir Yorumları ({guest.comments.length})
-                                  </h5>
-                                  {guest.comments.map((comment, idx) => (
-                                    <div key={comment.ID || idx} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-                                      <div className="bg-slate-50 px-4 py-3 border-b border-slate-100 flex justify-between items-center">
-                                        <div className="flex items-center gap-2">
-                                          <span className="text-xs font-bold text-slate-600 bg-slate-200 px-2 py-0.5 rounded">
-                                            {comment.COMMENTSOURCEID_NAME || 'Yorum'}
-                                          </span>
-                                          {comment.SCORE && (
-                                            <div className="flex items-center gap-0.5 text-amber-500">
-                                              <Star size={12} fill="currentColor" />
-                                              <span className="text-xs font-bold">{comment.SCORE}</span>
-                                            </div>
-                                          )}
-                                        </div>
-                                        <span className="text-xs text-slate-500 font-medium">
-                                          {formatTRDate(comment.COMMENTDATE)}
-                                        </span>
-                                      </div>
-                                      <div className="p-4">
-                                        <p className="text-slate-700 text-sm leading-relaxed italic mb-4">
-                                          "{comment.COMMENT}"
-                                        </p>
-                                        {comment.ANSWER && (
-                                          <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100 ml-4 relative">
-                                            <div className="absolute left-0 top-4 w-4 h-[1px] bg-emerald-200 -ml-4"></div>
-                                            <span className="block text-xs font-bold text-emerald-700 mb-1">Otel Yanıtı:</span>
-                                            <p className="text-sm text-emerald-800">{comment.ANSWER}</p>
-                                          </div>
-                                        )}
-                                      </div>
+                                <div className="mt-8 pt-6 border-t border-slate-200">
+                                  <h5 className="text-base font-bold text-slate-800 flex items-center gap-2 mb-4">
+                                    <div className="bg-emerald-100 p-2 rounded-lg">
+                                      <MessageSquare size={20} className="text-emerald-600" />
                                     </div>
-                                  ))}
+                                    Misafir Yorumları / Geri Bildirimleri
+                                    <span className="bg-emerald-100 text-emerald-700 text-xs px-2 py-0.5 rounded-full ml-auto">
+                                      {guest.comments.length} Yorum
+                                    </span>
+                                  </h5>
+                                  
+                                  <div className="space-y-6 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+                                    {guest.comments.map((comment, idx) => (
+                                      <div key={comment.ID || idx} className="relative pl-10">
+                                        {/* Timeline Dot */}
+                                        <div className="absolute left-2 top-4 w-4 h-4 rounded-full bg-white border-2 border-emerald-500 z-10"></div>
+                                        
+                                        <div className="bg-white rounded-2xl rounded-tl-none border border-slate-200 shadow-sm hover:shadow-md transition-all overflow-hidden group">
+                                          {/* Header */}
+                                          <div className="bg-slate-50/80 px-4 py-3 border-b border-slate-100 flex justify-between items-center">
+                                            <div className="flex items-center gap-3">
+                                              <span className="text-xs font-bold text-slate-600 bg-white border border-slate-200 px-2 py-1 rounded-md shadow-sm">
+                                                {comment.COMMENTSOURCEID_NAME || 'Yorum'}
+                                              </span>
+                                              {comment.SCORE && (
+                                                <div className="flex items-center gap-1 bg-amber-50 text-amber-600 px-2 py-1 rounded-md border border-amber-100">
+                                                  <Star size={12} fill="currentColor" />
+                                                  <span className="text-xs font-bold">{comment.SCORE} / 10</span>
+                                                </div>
+                                              )}
+                                            </div>
+                                            <span className="text-xs text-slate-400 font-medium font-mono">
+                                              {formatTRDate(comment.COMMENTDATE)}
+                                            </span>
+                                          </div>
+                                          
+                                          {/* Body */}
+                                          <div className="p-5">
+                                            <div className="flex gap-3">
+                                              <div className="shrink-0 mt-1">
+                                                <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+                                                  <Users size={14} />
+                                                </div>
+                                              </div>
+                                              <div className="flex-1">
+                                                <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">
+                                                  {comment.COMMENT}
+                                                </p>
+                                              </div>
+                                            </div>
+
+                                            {comment.ANSWER && (
+                                              <div className="mt-4 pl-11">
+                                                <div className="bg-emerald-50/50 rounded-xl rounded-tr-none p-4 border border-emerald-100/50 relative">
+                                                  <div className="flex gap-3">
+                                                    <div className="shrink-0 mt-1">
+                                                       <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
+                                                         <MessageSquare size={12} />
+                                                       </div>
+                                                    </div>
+                                                    <div>
+                                                      <span className="block text-xs font-bold text-emerald-700 mb-1">Otel Yanıtı</span>
+                                                      <p className="text-sm text-slate-600 leading-relaxed">
+                                                        {comment.ANSWER}
+                                                      </p>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
                                 </div>
                               ) : (
-                                <div className="text-center py-4 text-slate-400 text-sm italic border-t border-slate-200 pt-6">
+                                <div className="text-center py-8 text-slate-400 text-sm italic border-t border-slate-200 mt-6 bg-slate-50/50 rounded-lg">
                                   Bu misafir için herhangi bir yorum kaydı bulunmamaktadır.
                                 </div>
                               )}

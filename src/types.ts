@@ -9,7 +9,7 @@ export interface CommentData {
   EMAIL?: string;
   NATIONALITY?: string;
   ROOMNO?: string;
-  GUESTID?: string;
+  GUESTID?: number;
   COMMENTSOURCEID_NAME?: string;
   CHECKIN?: string;
   CHECKOUT?: string;
@@ -30,6 +30,9 @@ export interface GuestData {
   AGENCY: string;
   ROOMTYPE: string;
   TOTALPRICE: number;
+  RESGUESTID?: number;
+  CONTACTGUESTID?: number;
+  CONTACTPERSON?: string;
   CONTACTPHONE?: string;
   CONTACTEMAIL?: string;
   hasComment?: boolean;
