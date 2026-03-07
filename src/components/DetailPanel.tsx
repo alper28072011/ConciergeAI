@@ -91,14 +91,69 @@ export function DetailPanel({ comment }: DetailPanelProps) {
     }
   };
 
+  const getApiKey = (): string | null => {
+    let key: string | null = null;
+    let source = '';
+
+    // 1. Try to get from LocalStorage (User Settings) - Priority #1
+    try {
+      const savedSettings = localStorage.getItem('hotelApiSettings');
+      if (savedSettings) {
+        const parsed = JSON.parse(savedSettings);
+        if (parsed.geminiApiKey && typeof parsed.geminiApiKey === 'string') {
+          key = parsed.geminiApiKey;
+          source = 'Settings';
+        }
+      }
+    } catch (e) {
+      console.error('Error parsing settings for API key:', e);
+    }
+
+    // 2. Try to get from Environment Variables - Priority #2
+    if (!key) {
+      const envKey = process.env.GEMINI_API_KEY;
+      if (envKey && typeof envKey === 'string') {
+        key = envKey;
+        source = 'Environment';
+      }
+    }
+
+    if (key) {
+      // Clean the key: remove whitespace and surrounding quotes if present
+      key = key.trim();
+      if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
+        key = key.slice(1, -1);
+      }
+      
+      if (key.length > 0) {
+        console.log(`Using Gemini API Key from ${source} (Length: ${key.length}, Starts with: ${key.substring(0, 4)}...)`);
+        return key;
+      }
+    }
+
+    return null;
+  };
+
   const handleGenerate = async () => {
     setIsGenerating(true);
     setGeneratedLetter('');
     setTranslatedLetter('');
     setShowTranslation(false);
     
+    const apiKey = getApiKey();
+
+    if (!apiKey) {
+      const msg = 'Gemini API Anahtarı bulunamadı. Lütfen sağ üstteki "Ayarlar" butonuna tıklayıp geçerli bir Gemini API Anahtarı giriniz.';
+      alert(msg);
+      setGeneratedLetter(msg);
+      setIsGenerating(false);
+      return;
+    }
+
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      console.log('Initializing Gemini AI...');
+      const ai = new GoogleGenAI({ apiKey });
+      
       const prompt = `You are a professional 5-star hotel Guest Relations Manager / Concierge. Write a polite and professional letter to a guest.
 Guest Name: ${comment.RESNAMEID_LOOKUP || 'Misafir'}
 Nationality: ${comment.NATIONALITY}
@@ -112,21 +167,25 @@ Target Language: ${targetLanguage}
 
 The letter should be empathetic, professional, and address the guest's feedback and the actions taken. Do not include placeholders, write the final letter. Format with appropriate paragraphs.`;
 
+      console.log('Sending request to Gemini...');
       const response = await ai.models.generateContent({
         model: 'gemini-3-flash-preview',
         contents: prompt,
       });
 
-      setGeneratedLetter(response.text || 'Mektup oluşturulamadı.');
+      setGeneratedLetter(response.text || 'Mektup oluşturulamadı (Boş yanıt).');
     } catch (error: any) {
       console.error('Error generating letter:', error);
       let errorMessage = 'Mektup oluşturulurken bir hata oluştu.';
+      
       if (error.message) {
-        errorMessage += ` Hata detayı: ${error.message}`;
+        errorMessage += `\n\nHata Detayı: ${error.message}`;
       }
-      if (!process.env.GEMINI_API_KEY) {
-        errorMessage += ' (API Anahtarı bulunamadı)';
+      
+      if (error.message?.includes('403') || error.status === 403) {
+        errorMessage += '\n\n(403 Yetki Hatası: API Anahtarınız geçersiz veya yetkisiz. Lütfen Ayarlar panelinden anahtarınızı kontrol edin.)';
       }
+
       setGeneratedLetter(errorMessage);
     } finally {
       setIsGenerating(false);
@@ -140,8 +199,18 @@ The letter should be empathetic, professional, and address the guest's feedback 
     }
 
     setIsTranslating(true);
+
+    const apiKey = getApiKey();
+
+    if (!apiKey) {
+      alert('Gemini API Anahtarı bulunamadı. Lütfen Ayarlar panelinden giriniz.');
+      setIsTranslating(false);
+      return;
+    }
+
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      const ai = new GoogleGenAI({ apiKey });
+      
       const prompt = `Translate the following hotel guest letter to Turkish. Maintain the professional, 5-star hotel concierge tone.\n\n${generatedLetter}`;
 
       const response = await ai.models.generateContent({
@@ -151,8 +220,9 @@ The letter should be empathetic, professional, and address the guest's feedback 
 
       setTranslatedLetter(response.text || 'Çeviri yapılamadı.');
       setShowTranslation(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error translating letter:', error);
+      alert('Çeviri sırasında bir hata oluştu: ' + (error.message || 'Bilinmeyen hata'));
     } finally {
       setIsTranslating(false);
     }

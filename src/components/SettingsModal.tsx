@@ -54,7 +54,8 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     loginToken: '',
     hotelId: '',
     commentPayloadTemplate: DEFAULT_COMMENT_TEMPLATE,
-    guestPayloadTemplate: DEFAULT_GUEST_TEMPLATE
+    guestPayloadTemplate: DEFAULT_GUEST_TEMPLATE,
+    geminiApiKey: ''
   });
   
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -70,7 +71,8 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           loginToken: parsed.loginToken || parsed.token || '',
           hotelId: parsed.hotelId || '',
           commentPayloadTemplate: parsed.commentPayloadTemplate || DEFAULT_COMMENT_TEMPLATE,
-          guestPayloadTemplate: parsed.guestPayloadTemplate || DEFAULT_GUEST_TEMPLATE
+          guestPayloadTemplate: parsed.guestPayloadTemplate || DEFAULT_GUEST_TEMPLATE,
+          geminiApiKey: parsed.geminiApiKey || ''
         });
       } catch (e) {}
     }
@@ -163,6 +165,10 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Elektraweb Login Token</label>
                 <input type="password" name="loginToken" value={settings.loginToken} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Gemini API Anahtarı (Opsiyonel)</label>
+                <input type="password" name="geminiApiKey" value={settings.geminiApiKey || ''} onChange={handleChange} placeholder="AI özellikleri için gerekli" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
               </div>
             </div>
 

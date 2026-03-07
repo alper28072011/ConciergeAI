@@ -40,4 +40,5 @@ export interface ApiSettings {
   hotelId: string;
   commentPayloadTemplate?: string;
   guestPayloadTemplate?: string;
+  geminiApiKey?: string;
 }
