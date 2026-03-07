@@ -10,53 +10,30 @@ export const buildDynamicPayload = (
     throw new Error("Payload şablonu boş olamaz.");
   }
 
-  let payload;
+  let processedString = templateString;
+
+  // 0. Auto-fix Legacy Hardcoded Dates (User Request Fix)
+  // If the user has old templates with hardcoded 2024 dates, we replace them dynamically
+  // This ensures the filter works even if they haven't updated their settings
+  processedString = processedString.replace(/"Value":\s*"2024-01-01"/g, `"Value": "{{START_DATE}}"`);
+  processedString = processedString.replace(/"Value":\s*"2024-12-31"/g, `"Value": "{{END_DATE}}"`);
+
+  // 1. Replace Placeholders
+  // Use a global regex replacement to ensure all instances are replaced
+  processedString = processedString.replace(/{{LOGIN_TOKEN}}/g, activeSettings.loginToken || '');
+  processedString = processedString.replace(/{{HOTELID}}/g, activeSettings.hotelId || '');
+  processedString = processedString.replace(/{{START_DATE}}/g, startDate || '');
+  processedString = processedString.replace(/{{END_DATE}}/g, endDate || '');
+
+  // 2. Parse JSON
   try {
-    payload = JSON.parse(templateString);
+    const payload = JSON.parse(processedString);
+    return payload;
   } catch (e) {
-    throw new Error("Payload şablonu geçerli bir JSON değil.");
+    console.error("JSON Parse Error in buildDynamicPayload:", e);
+    console.error("Processed String was:", processedString);
+    return null;
   }
-
-  // Inject LoginToken
-  if (activeSettings.loginToken) {
-    payload.LoginToken = activeSettings.loginToken;
-  }
-
-  // Update Where conditions
-  if (payload.Where && Array.isArray(payload.Where)) {
-    payload.Where = payload.Where.map((condition: any) => {
-      // Update HOTELID
-      if (condition.Column === "HOTELID") {
-        return { ...condition, Value: Number(activeSettings.hotelId) };
-      }
-
-      // Update Date Filters
-      // We look for common date columns like CHECKIN, CHECKOUT, COMMENTDATE
-      const dateColumns = ["CHECKIN", "CHECKOUT", "COMMENTDATE", "DATE"];
-      if (dateColumns.includes(condition.Column)) {
-        if (condition.Operator === ">=") {
-          return { ...condition, Value: startDate };
-        }
-        if (condition.Operator === "<=") {
-          return { ...condition, Value: endDate };
-        }
-      }
-
-      return condition;
-    });
-  }
-  
-  // Also update Parameters.HOTELID if it exists
-  if (payload.Parameters && payload.Parameters.HOTELID) {
-      payload.Parameters.HOTELID = Number(activeSettings.hotelId);
-  } else if (payload.Parameters) {
-      // If Parameters exists but HOTELID is missing, maybe add it? 
-      // Better stick to what's in the template, but the prompt said "Where dizisi içinde dönerek..."
-      // However, usually HOTELID is also in Parameters for some calls. Let's be safe.
-      payload.Parameters.HOTELID = Number(activeSettings.hotelId);
-  }
-
-  return payload;
 };
 
 export const formatTRDate = (dateString: string) => {

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
+import { X, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
 import { ApiSettings } from '../types';
 import { doc, setDoc } from "firebase/firestore";
 import { db } from '../firebase';
@@ -13,6 +13,7 @@ interface SettingsModalProps {
 const DEFAULT_COMMENT_TEMPLATE = JSON.stringify({
   "Action": "Select",
   "Object": "QA_HOTEL_GUEST_COMMENT",
+  "LoginToken": "{{LOGIN_TOKEN}}",
   "Select": [
     "COMMENTTYPEID", "STATEID", "ID", "HOTELID", "COMMENT", "COMMENTSOURCEID", 
     "RESNAMEID", "COMMENTDATE", "COMMENTSOURCEID_NAME", "RESNAMEID_LOOKUP", 
@@ -25,24 +26,57 @@ const DEFAULT_COMMENT_TEMPLATE = JSON.stringify({
   ],
   "Where": [
     { "Column": "STATEID", "Operator": "=", "Value": 3 },
-    { "Column": "COMMENTDATE", "Operator": ">=", "Value": "2024-01-01" },
-    { "Column": "COMMENTDATE", "Operator": "<=", "Value": "2024-12-31" },
-    { "Column": "HOTELID", "Operator": "=", "Value": 0 }
+    { "Column": "COMMENTDATE", "Operator": ">=", "Value": "{{START_DATE}}" },
+    { "Column": "COMMENTDATE", "Operator": "<=", "Value": "{{END_DATE}}" },
+    { "Column": "HOTELID", "Operator": "=", "Value": "{{HOTELID}}" }
   ],
   "OrderBy": [{ "Column": "COMMENTDATE", "Direction": "DESC" }],
   "Paging": { "ItemsPerPage": 100, "Current": 1 }
 }, null, 2);
 
-const DEFAULT_GUEST_TEMPLATE = JSON.stringify({
+const DEFAULT_INHOUSE_TEMPLATE = JSON.stringify({
   "Action": "Select",
   "Object": "QA_HOTEL_RESERVATION_CHECKOUT",
+  "LoginToken": "{{LOGIN_TOKEN}}",
   "Select": [
     "RESID", "ROOMNO", "GUESTNAMES", "CHECKIN", "CHECKOUT", "AGENCY", "ROOMTYPE", "TOTALPRICE"
   ],
   "Where": [
-    { "Column": "CHECKOUT", "Operator": ">=", "Value": "2024-01-01" },
-    { "Column": "CHECKOUT", "Operator": "<=", "Value": "2024-12-31" },
-    { "Column": "HOTELID", "Operator": "=", "Value": 0 }
+    { "Column": "CHECKOUT", "Operator": ">=", "Value": "{{START_DATE}}" },
+    { "Column": "CHECKIN", "Operator": "<=", "Value": "{{END_DATE}}" },
+    { "Column": "HOTELID", "Operator": "=", "Value": "{{HOTELID}}" }
+  ],
+  "OrderBy": [{ "Column": "ROOMNO", "Direction": "ASC" }],
+  "Paging": { "ItemsPerPage": 100, "Current": 1 }
+}, null, 2);
+
+const DEFAULT_RESERVATION_TEMPLATE = JSON.stringify({
+  "Action": "Select",
+  "Object": "QA_HOTEL_RESERVATION_CHECKOUT",
+  "LoginToken": "{{LOGIN_TOKEN}}",
+  "Select": [
+    "RESID", "ROOMNO", "GUESTNAMES", "CHECKIN", "CHECKOUT", "AGENCY", "ROOMTYPE", "TOTALPRICE"
+  ],
+  "Where": [
+    { "Column": "CHECKIN", "Operator": ">=", "Value": "{{START_DATE}}" },
+    { "Column": "CHECKIN", "Operator": "<=", "Value": "{{END_DATE}}" },
+    { "Column": "HOTELID", "Operator": "=", "Value": "{{HOTELID}}" }
+  ],
+  "OrderBy": [{ "Column": "CHECKIN", "Direction": "ASC" }],
+  "Paging": { "ItemsPerPage": 100, "Current": 1 }
+}, null, 2);
+
+const DEFAULT_CHECKOUT_TEMPLATE = JSON.stringify({
+  "Action": "Select",
+  "Object": "QA_HOTEL_RESERVATION_CHECKOUT",
+  "LoginToken": "{{LOGIN_TOKEN}}",
+  "Select": [
+    "RESID", "ROOMNO", "GUESTNAMES", "CHECKIN", "CHECKOUT", "AGENCY", "ROOMTYPE", "TOTALPRICE"
+  ],
+  "Where": [
+    { "Column": "CHECKOUT", "Operator": ">=", "Value": "{{START_DATE}}" },
+    { "Column": "CHECKOUT", "Operator": "<=", "Value": "{{END_DATE}}" },
+    { "Column": "HOTELID", "Operator": "=", "Value": "{{HOTELID}}" }
   ],
   "OrderBy": [{ "Column": "CHECKOUT", "Direction": "DESC" }],
   "Paging": { "ItemsPerPage": 100, "Current": 1 }
@@ -54,11 +88,15 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     loginToken: '',
     hotelId: '',
     commentPayloadTemplate: DEFAULT_COMMENT_TEMPLATE,
-    guestPayloadTemplate: DEFAULT_GUEST_TEMPLATE,
+    inhousePayloadTemplate: DEFAULT_INHOUSE_TEMPLATE,
+    reservationPayloadTemplate: DEFAULT_RESERVATION_TEMPLATE,
+    checkoutPayloadTemplate: DEFAULT_CHECKOUT_TEMPLATE,
     geminiApiKey: ''
   });
   
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [expandedSection, setExpandedSection] = useState<string | null>(null);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
   const bookmarkletRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
@@ -66,12 +104,24 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
+        
+        // Auto-fix for hardcoded dates in comment template
+        let commentTemplate = parsed.commentPayloadTemplate || DEFAULT_COMMENT_TEMPLATE;
+        if (commentTemplate.includes('"Value": "2024-01-01"')) {
+          commentTemplate = commentTemplate.replace(/"Value": "2024-01-01"/g, '"Value": "{{START_DATE}}"');
+        }
+        if (commentTemplate.includes('"Value": "2024-12-31"')) {
+          commentTemplate = commentTemplate.replace(/"Value": "2024-12-31"/g, '"Value": "{{END_DATE}}"');
+        }
+
         setSettings({
           baseUrl: parsed.baseUrl || '',
           loginToken: parsed.loginToken || parsed.token || '',
           hotelId: parsed.hotelId || '',
-          commentPayloadTemplate: parsed.commentPayloadTemplate || DEFAULT_COMMENT_TEMPLATE,
-          guestPayloadTemplate: parsed.guestPayloadTemplate || DEFAULT_GUEST_TEMPLATE,
+          commentPayloadTemplate: commentTemplate,
+          inhousePayloadTemplate: parsed.inhousePayloadTemplate || DEFAULT_INHOUSE_TEMPLATE,
+          reservationPayloadTemplate: parsed.reservationPayloadTemplate || DEFAULT_RESERVATION_TEMPLATE,
+          checkoutPayloadTemplate: parsed.checkoutPayloadTemplate || DEFAULT_CHECKOUT_TEMPLATE,
           geminiApiKey: parsed.geminiApiKey || ''
         });
       } catch (e) {}
@@ -109,30 +159,52 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     }
   };
 
+  const resetToDefault = (name: keyof ApiSettings) => {
+    if (confirm('Bu şablonu varsayılan ayarlara döndürmek istediğinize emin misiniz?')) {
+      let defaultValue = '';
+      switch (name) {
+        case 'commentPayloadTemplate': defaultValue = DEFAULT_COMMENT_TEMPLATE; break;
+        case 'inhousePayloadTemplate': defaultValue = DEFAULT_INHOUSE_TEMPLATE; break;
+        case 'reservationPayloadTemplate': defaultValue = DEFAULT_RESERVATION_TEMPLATE; break;
+        case 'checkoutPayloadTemplate': defaultValue = DEFAULT_CHECKOUT_TEMPLATE; break;
+      }
+      setSettings(prev => ({ ...prev, [name]: defaultValue }));
+    }
+  };
+
   const validateJson = (jsonString: string, fieldName: string) => {
     try {
-      JSON.parse(jsonString);
+      let testString = jsonString
+        .replace(/{{LOGIN_TOKEN}}/g, "DUMMY_TOKEN")
+        .replace(/{{HOTELID}}/g, "12345")
+        .replace(/{{START_DATE}}/g, "2024-01-01")
+        .replace(/{{END_DATE}}/g, "2024-01-01");
+        
+      JSON.parse(testString);
       return true;
     } catch (e) {
-      setJsonError(`${fieldName} geçerli bir JSON formatında değil.`);
+      setJsonError(`${fieldName} geçerli bir JSON formatında değil (Placeholderlar dahil kontrol edildi).`);
       return false;
     }
   };
 
   const handleSave = async () => {
     if (!validateJson(settings.commentPayloadTemplate || '{}', 'Yorum Listesi Şablonu')) return;
-    if (!validateJson(settings.guestPayloadTemplate || '{}', 'Misafir Listesi Şablonu')) return;
+    if (!validateJson(settings.inhousePayloadTemplate || '{}', 'Konaklayanlar Şablonu')) return;
+    if (!validateJson(settings.reservationPayloadTemplate || '{}', 'Rezervasyon Şablonu')) return;
+    if (!validateJson(settings.checkoutPayloadTemplate || '{}', 'Ayrılanlar Şablonu')) return;
 
     localStorage.setItem('hotelApiSettings', JSON.stringify(settings));
     
     if (settings.loginToken) {
       try {
+        // Sync all settings to Firestore for centralized management
         await setDoc(doc(db, "config", "api_settings"), {
-          loginToken: settings.loginToken,
+          ...settings,
           updatedAt: new Date().toISOString()
         }, { merge: true });
       } catch (error) {
-        console.error("Error syncing token to Firestore:", error);
+        console.error("Error syncing settings to Firestore:", error);
       }
     }
 
@@ -140,9 +212,45 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     onClose();
   };
 
+  const toggleSection = (section: string) => {
+    setExpandedSection(expandedSection === section ? null : section);
+  };
+
+  const renderAccordionItem = (title: string, name: keyof ApiSettings) => (
+    <div className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
+      <button
+        onClick={() => toggleSection(name)}
+        className="w-full flex items-center justify-between p-4 bg-slate-50 hover:bg-slate-100 transition-colors text-left group"
+      >
+        <span className="text-xs font-bold text-slate-700 uppercase tracking-wider group-hover:text-slate-900">{title}</span>
+        {expandedSection === name ? 
+          <ChevronUp size={18} className="text-slate-400 group-hover:text-slate-600" /> : 
+          <ChevronDown size={18} className="text-slate-400 group-hover:text-slate-600" />
+        }
+      </button>
+      {expandedSection === name && (
+        <div className="p-4 bg-white border-t border-slate-200 animate-in slide-in-from-top-2 duration-200 relative">
+          <textarea
+            name={name}
+            value={settings[name] as string}
+            onChange={handleChange}
+            className="w-full h-64 px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-xs font-mono bg-slate-50"
+            spellCheck={false}
+          />
+          <button 
+            onClick={() => resetToDefault(name)}
+            className="absolute top-6 right-6 text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded transition-colors"
+          >
+            Varsayılanı Yükle
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="flex justify-between items-center p-4 border-b border-slate-100 shrink-0">
           <h2 className="text-lg font-semibold text-slate-800">API Bağlantı ve Sorgu Ayarları</h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
@@ -168,7 +276,23 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Gemini API Anahtarı (Opsiyonel)</label>
-                <input type="password" name="geminiApiKey" value={settings.geminiApiKey || ''} onChange={handleChange} placeholder="AI özellikleri için gerekli" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
+                <div className="relative">
+                  <input 
+                    type={showGeminiKey ? "text" : "password"} 
+                    name="geminiApiKey" 
+                    value={settings.geminiApiKey || ''} 
+                    onChange={handleChange} 
+                    placeholder="AI özellikleri için gerekli" 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm pr-10" 
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowGeminiKey(!showGeminiKey)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                  >
+                    {showGeminiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -194,12 +318,14 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
 
           <hr className="border-slate-100" />
 
-          {/* JSON Templates */}
+          {/* JSON Templates Accordion */}
           <div className="space-y-4">
             <h3 className="text-sm font-semibold text-slate-800">Dinamik Sorgu Şablonları (JSON)</h3>
-            <p className="text-xs text-slate-500">
-              Aşağıdaki alanlara geçerli JSON sorgu şablonlarını yapıştırın. Sistem, tarihleri ve otel ID'sini otomatik olarak güncelleyecektir.
-            </p>
+            <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-xs border border-blue-100">
+              <strong>Bilgi:</strong> Tarih alanlarına <code>{"{{START_DATE}}"}</code> ve <code>{"{{END_DATE}}"}</code>, 
+              Login Token alanına <code>{"{{LOGIN_TOKEN}}"}</code>, Hotel ID için <code>{"{{HOTELID}}"}</code> yazabilirsiniz. 
+              Sistem bu değerleri otomatik dolduracaktır.
+            </div>
             
             {jsonError && (
               <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm border border-red-100">
@@ -207,27 +333,11 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1 uppercase tracking-wider">Yorum Listesi Şablonu</label>
-                <textarea 
-                  name="commentPayloadTemplate" 
-                  value={settings.commentPayloadTemplate} 
-                  onChange={handleChange} 
-                  className="w-full h-64 px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-xs font-mono bg-slate-50"
-                  spellCheck={false}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1 uppercase tracking-wider">Misafir Listesi Şablonu</label>
-                <textarea 
-                  name="guestPayloadTemplate" 
-                  value={settings.guestPayloadTemplate} 
-                  onChange={handleChange} 
-                  className="w-full h-64 px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-xs font-mono bg-slate-50"
-                  spellCheck={false}
-                />
-              </div>
+            <div className="space-y-3">
+              {renderAccordionItem('Yorum Listesi Şablonu', 'commentPayloadTemplate')}
+              {renderAccordionItem('Konaklayanlar (Inhouse) Şablonu', 'inhousePayloadTemplate')}
+              {renderAccordionItem('Rezervasyon Şablonu', 'reservationPayloadTemplate')}
+              {renderAccordionItem('Ayrılanlar (Checkout) Şablonu', 'checkoutPayloadTemplate')}
             </div>
           </div>
         </div>

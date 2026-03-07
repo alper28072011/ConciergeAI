@@ -39,6 +39,10 @@ export interface ApiSettings {
   loginToken: string;
   hotelId: string;
   commentPayloadTemplate?: string;
-  guestPayloadTemplate?: string;
+  inhousePayloadTemplate?: string;
+  reservationPayloadTemplate?: string;
+  checkoutPayloadTemplate?: string;
   geminiApiKey?: string;
 }
+
+export type GuestListTab = 'inhouse' | 'reservation' | 'checkout';
