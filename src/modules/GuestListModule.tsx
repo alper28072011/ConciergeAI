@@ -87,6 +87,17 @@ export function GuestListModule() {
       if (!guestPayload) throw new Error("Guest payload failed.");
       if (!commentPayload) throw new Error("Comment payload failed.");
 
+      // *** CRITICAL FIX: Inject Missing Fields for Cross-Matching ***
+      // The user's saved template might be missing these fields, so we force them in.
+      if (guestPayload.Select && Array.isArray(guestPayload.Select)) {
+        const requiredFields = ['RESGUESTID', 'CONTACTGUESTID', 'CONTACTPHONE', 'CONTACTEMAIL'];
+        requiredFields.forEach(field => {
+          if (!guestPayload.Select.includes(field)) {
+            guestPayload.Select.push(field);
+          }
+        });
+      }
+
       // Inject Paging for Guest List
       if (!guestPayload.Paging) {
         guestPayload.Paging = { ItemsPerPage: 100, Current: pageNumber };
@@ -94,6 +105,15 @@ export function GuestListModule() {
         guestPayload.Paging.Current = pageNumber;
         // Ensure ItemsPerPage is set if missing, though template usually has it
         if (!guestPayload.Paging.ItemsPerPage) guestPayload.Paging.ItemsPerPage = 100;
+      }
+
+      // *** CRITICAL FIX: Increase Comment Limit ***
+      // To ensure we don't miss comments due to pagination, we request a larger batch.
+      if (!commentPayload.Paging) {
+        commentPayload.Paging = { ItemsPerPage: 2000, Current: 1 };
+      } else {
+        commentPayload.Paging.ItemsPerPage = 2000;
+        commentPayload.Paging.Current = 1;
       }
 
       // 2. Execute Requests in Parallel

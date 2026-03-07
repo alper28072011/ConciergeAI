@@ -50,7 +50,13 @@ export const formatTRDate = (dateString: string) => {
 export const findGuestComments = (guest: GuestData, allComments: CommentData[]): CommentData[] => {
   return allComments.filter(comment => {
     // 1. ALTIN ANAHTAR (Kesin Eşleşme): GUESTID
-    if (comment.GUESTID && (guest.RESGUESTID === comment.GUESTID || guest.CONTACTGUESTID === comment.GUESTID)) return true;
+    if (comment.GUESTID) {
+      const cGuestId = String(comment.GUESTID);
+      if ((guest.RESGUESTID && String(guest.RESGUESTID) === cGuestId) || 
+          (guest.CONTACTGUESTID && String(guest.CONTACTGUESTID) === cGuestId)) {
+        return true;
+      }
+    }
 
     // 2. Email Eşleşmesi (Boşlukları silip küçük harfe çevirerek)
     const gEmail = guest.CONTACTEMAIL?.toLowerCase().trim();
