@@ -249,7 +249,13 @@ The letter should be empathetic, professional, and address the guest's feedback 
       margin: 10,
       filename: `Misafir_Mektubu_${comment.RESNAMEID_LOOKUP || 'Misafir'}.pdf`,
       image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2 },
+      html2canvas: { 
+        scale: 2,
+        onclone: (clonedDoc: Document) => {
+          const styles = clonedDoc.querySelectorAll('style, link[rel="stylesheet"]');
+          styles.forEach(s => s.remove());
+        }
+      },
       jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
 

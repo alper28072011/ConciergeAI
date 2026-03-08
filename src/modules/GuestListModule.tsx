@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star } from 'lucide-react';
+import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText } from 'lucide-react';
 import { GuestData, CommentData, ApiSettings, GuestListTab } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { buildDynamicPayload, formatTRDate, findGuestComments } from '../utils';
@@ -25,6 +25,12 @@ export function GuestListModule() {
   // Dynamic Column Filters State
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [searchHasComment, setSearchHasComment] = useState<'all' | 'yes' | 'no'>('all');
+
+  // Mail Merge Modal State
+  const [isMailMergeModalOpen, setIsMailMergeModalOpen] = useState(false);
+  const [selectedGuestForMail, setSelectedGuestForMail] = useState<GuestData | null>(null);
+  const [generatedLetterContent, setGeneratedLetterContent] = useState('');
+  const [isGeneratingLetter, setIsGeneratingLetter] = useState(false);
 
   // Clear results when tab changes, but DO NOT auto-fetch
   useEffect(() => {
@@ -84,7 +90,7 @@ export function GuestListModule() {
 
       // Inject Required Fields for Guest
       if (guestPayload.Select && Array.isArray(guestPayload.Select)) {
-        const requiredFields = ['RESGUESTID', 'CONTACTGUESTID', 'CONTACTPHONE', 'CONTACTEMAIL', 'ROOMNO', 'CHECKIN', 'CHECKOUT', 'GUESTNAMES', 'RESID'];
+        const requiredFields = ['RESGUESTID', 'CONTACTGUESTID', 'CONTACTPHONE', 'CONTACTEMAIL', 'ROOMNO', 'CHECKIN', 'CHECKOUT', 'GUESTNAMES', 'RESID', 'NATIONALITY'];
         requiredFields.forEach(field => {
           if (!guestPayload.Select.includes(field)) guestPayload.Select.push(field);
         });
@@ -161,24 +167,39 @@ export function GuestListModule() {
         setHasMoreData(false);
       }
 
-      // 4. Cross-Match Logic
+      // 4. Fetch Survey Logs
+      let surveyLogs: any[] = [];
+      try {
+        const { collection, getDocs } = await import('firebase/firestore');
+        const { db } = await import('../firebase');
+        const querySnapshot = await getDocs(collection(db, 'survey_logs'));
+        querySnapshot.forEach(doc => {
+          surveyLogs.push(doc.data());
+        });
+      } catch (e) {
+        console.error("Error fetching survey logs:", e);
+      }
+
+      // 5. Cross-Match Logic
       let processedGuests = guestsList.map(guest => {
         const matchedComments = findGuestComments(guest, commentsList);
+        const hasSurveySent = surveyLogs.some(log => log.guestId === guest.RESID);
         return {
           ...guest,
           hasComment: matchedComments.length > 0,
-          comments: matchedComments
+          comments: matchedComments,
+          surveySent: hasSurveySent
         };
       });
 
-      // 5. Local Filter for "Has Comment"
+      // 6. Local Filter for "Has Comment"
       if (searchHasComment === 'yes') {
         processedGuests = processedGuests.filter(g => g.hasComment);
       } else if (searchHasComment === 'no') {
         processedGuests = processedGuests.filter(g => !g.hasComment);
       }
 
-      // 6. Deduplicate
+      // 7. Deduplicate
       const uniqueGuests = processedGuests.filter((guest, index, self) =>
         index === self.findIndex((t) => t.RESID === guest.RESID)
       );
@@ -231,6 +252,121 @@ export function GuestListModule() {
 
   const toggleRow = (id: string) => {
     setExpandedRowId(expandedRowId === id ? null : id);
+  };
+
+  const openMailMergeModal = async (guest: GuestData) => {
+    setSelectedGuestForMail(guest);
+    setIsGeneratingLetter(true);
+    setIsMailMergeModalOpen(true);
+    setGeneratedLetterContent('');
+
+    try {
+      // 1. Fetch templates from Firebase
+      const { collection, getDocs } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      
+      const querySnapshot = await getDocs(collection(db, 'letter_templates'));
+      const templates: any[] = [];
+      querySnapshot.forEach((doc) => {
+        templates.push({ id: doc.id, ...doc.data() });
+      });
+
+      if (templates.length === 0) {
+        setGeneratedLetterContent('Sistemde hiç şablon bulunamadı. Lütfen Şablon Yöneticisi ekranından şablon ekleyin.');
+        setIsGeneratingLetter(false);
+        return;
+      }
+
+      // 2. Find matching template based on NATIONALITY
+      const guestNationality = guest.NATIONALITY || 'ENG';
+      let matchedTemplate = templates.find(t => t.languageCode === guestNationality);
+      
+      // Fallback to ENG if no match
+      if (!matchedTemplate) {
+        matchedTemplate = templates.find(t => t.languageCode === 'ENG');
+      }
+      
+      // Fallback to the first available template if no ENG
+      if (!matchedTemplate) {
+        matchedTemplate = templates[0];
+      }
+
+      // 3. Replace Placeholders (Mail Merge)
+      let content = matchedTemplate.content;
+      content = content.replace(/{{GUEST_NAME}}/g, guest.GUESTNAMES || '');
+      content = content.replace(/{{ROOM_NO}}/g, guest.ROOMNO || '');
+      content = content.replace(/{{CHECKIN}}/g, formatTRDate(guest.CHECKIN) || '');
+      content = content.replace(/{{CHECKOUT}}/g, formatTRDate(guest.CHECKOUT) || '');
+      content = content.replace(/{{AGENCY}}/g, guest.AGENCY || '');
+
+      setGeneratedLetterContent(content);
+    } catch (error) {
+      console.error("Error generating letter:", error);
+      setGeneratedLetterContent('Şablon oluşturulurken bir hata oluştu.');
+    } finally {
+      setIsGeneratingLetter(false);
+    }
+  };
+
+  const handleSavePdf = async () => {
+    const html2pdf = (await import('html2pdf.js')).default;
+    const element = document.getElementById('mail-merge-content');
+    if (!element) return;
+
+    const opt: any = {
+      margin:       1,
+      filename:     `${selectedGuestForMail?.GUESTNAMES || 'Misafir'}_Mektup.pdf`,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { 
+        scale: 2,
+        onclone: (clonedDoc: Document) => {
+          // Remove all stylesheets to prevent html2canvas from parsing oklch colors (Tailwind v4)
+          const styles = clonedDoc.querySelectorAll('style, link[rel="stylesheet"]');
+          styles.forEach(s => s.remove());
+          
+          // Apply inline styles to the target element since we removed the stylesheets
+          const el = clonedDoc.getElementById('mail-merge-content');
+          if (el) {
+            el.style.backgroundColor = '#ffffff';
+            el.style.color = '#1e293b';
+            el.style.padding = '48px';
+            el.style.fontFamily = 'serif';
+            el.style.whiteSpace = 'pre-wrap';
+            el.style.lineHeight = '1.625';
+            el.style.fontSize = '14px';
+          }
+        }
+      },
+      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+    };
+
+    html2pdf().set(opt).from(element).save();
+  };
+
+  const handleMarkAsSent = async () => {
+    if (!selectedGuestForMail) return;
+
+    try {
+      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+
+      await addDoc(collection(db, 'survey_logs'), {
+        guestId: selectedGuestForMail.RESID,
+        guestName: selectedGuestForMail.GUESTNAMES,
+        roomNo: selectedGuestForMail.ROOMNO,
+        action: 'Anket Üretildi',
+        createdAt: serverTimestamp()
+      });
+
+      // Update local state to reflect the change
+      setGuests(prev => prev.map(g => g.RESID === selectedGuestForMail.RESID ? { ...g, surveySent: true } : g));
+      
+      alert('Başarıyla gönderildi olarak işaretlendi.');
+      setIsMailMergeModalOpen(false);
+    } catch (error) {
+      console.error("Error saving log:", error);
+      alert('İşlem kaydedilirken bir hata oluştu.');
+    }
   };
 
   return (
@@ -290,16 +426,19 @@ export function GuestListModule() {
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-slate-500">Yorum Durumu:</label>
-            <select 
-              value={searchHasComment}
-              onChange={(e) => setSearchHasComment(e.target.value as any)}
-              className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
+            <label className="text-xs font-medium text-slate-500">Sadece Sessiz Misafirler:</label>
+            <button
+              onClick={() => setSearchHasComment(searchHasComment === 'no' ? 'all' : 'no')}
+              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
+                searchHasComment === 'no' ? 'bg-emerald-600' : 'bg-slate-200'
+              }`}
             >
-              <option value="all">Tümü</option>
-              <option value="yes">Yorum Yapanlar</option>
-              <option value="no">Yorum Yapmayanlar</option>
-            </select>
+              <span
+                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                  searchHasComment === 'no' ? 'translate-x-6' : 'translate-x-1'
+                }`}
+              />
+            </button>
           </div>
           <button 
             onClick={() => handleSearch(false)}
@@ -421,14 +560,14 @@ export function GuestListModule() {
 
                 <th className="p-3 bg-slate-50 align-top min-w-[120px]">
                   <div className="flex flex-col gap-2">
-                    <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('TOTALPRICE')}>
-                      Tutar <ArrowUpDown size={12} />
+                    <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('NATIONALITY')}>
+                      Uyruk <ArrowUpDown size={12} />
                     </div>
                     <input 
                       type="text" 
                       className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs font-normal text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all bg-white"
-                      value={columnFilters['TOTALPRICE'] || ''} 
-                      onChange={(e) => handleFilterChange('TOTALPRICE', e.target.value)} 
+                      value={columnFilters['NATIONALITY'] || ''} 
+                      onChange={(e) => handleFilterChange('NATIONALITY', e.target.value)} 
                     />
                   </div>
                 </th>
@@ -477,8 +616,8 @@ export function GuestListModule() {
                       <td className="p-4 text-sm text-slate-500">{formatTRDate(guest.CHECKOUT)}</td>
                       <td className="p-4 text-sm text-slate-600">{guest.AGENCY || '-'}</td>
                       <td className="p-4 text-sm text-slate-600">{guest.ROOMTYPE}</td>
-                      <td className="p-4 text-sm text-slate-600 font-mono">
-                        {guest.TOTALPRICE?.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}
+                      <td className="p-4 text-sm text-slate-600 font-medium">
+                        {guest.NATIONALITY || '-'}
                       </td>
                     </tr>
                     {expandedRowId === guest.RESID && (
@@ -486,10 +625,28 @@ export function GuestListModule() {
                         <td colSpan={8} className="p-0">
                           <div className="p-6 border-t border-b border-slate-200 shadow-inner bg-slate-50">
                             <div className="max-w-4xl mx-auto">
-                              <h4 className="text-sm font-semibold text-slate-800 mb-4 flex items-center gap-2">
-                                <Search size={16} className="text-emerald-600" />
-                                Rezervasyon Detayları
-                              </h4>
+                              <div className="flex items-center justify-between mb-4">
+                                <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                                  <Search size={16} className="text-emerald-600" />
+                                  Rezervasyon Detayları
+                                </h4>
+                                <button
+                                  onClick={() => openMailMergeModal(guest)}
+                                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2"
+                                >
+                                  {guest.surveySent ? (
+                                    <>
+                                      <span className="w-2 h-2 rounded-full bg-white animate-pulse"></span>
+                                      Anket Gönderildi
+                                    </>
+                                  ) : (
+                                    <>
+                                      <FileText size={16} />
+                                      Anket/Mektup Hazırla
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                               <div className="grid grid-cols-4 gap-6 mb-6 text-sm">
                                 <div>
                                   <span className="block text-xs text-slate-400 uppercase tracking-wider mb-1">Rezervasyon ID</span>
@@ -504,8 +661,8 @@ export function GuestListModule() {
                                   <span className="text-slate-700">{guest.AGENCY}</span>
                                 </div>
                                 <div>
-                                  <span className="block text-xs text-slate-400 uppercase tracking-wider mb-1">Toplam Tutar</span>
-                                  <span className="text-slate-700">{guest.TOTALPRICE?.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}</span>
+                                  <span className="block text-xs text-slate-400 uppercase tracking-wider mb-1">Uyruk</span>
+                                  <span className="text-slate-700 font-medium">{guest.NATIONALITY || '-'}</span>
                                 </div>
                               </div>
 
@@ -620,6 +777,67 @@ export function GuestListModule() {
           )}
         </div>
       </div>
+
+      {/* Mail Merge Modal */}
+      {isMailMergeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+              <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <FileText size={20} className="text-emerald-600" />
+                Anket/Mektup Önizleme
+              </h3>
+              <button 
+                onClick={() => setIsMailMergeModalOpen(false)}
+                className="p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 rounded-lg transition-colors"
+              >
+                <LogOut size={20} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-8 bg-slate-100/50">
+              {isGeneratingLetter ? (
+                <div className="flex flex-col items-center justify-center h-64 gap-4 text-slate-500">
+                  <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm font-medium">Şablon hazırlanıyor...</p>
+                </div>
+              ) : (
+                <div 
+                  id="mail-merge-content"
+                  className="bg-[#ffffff] p-12 shadow-sm border border-[#e2e8f0] min-h-[800px] font-serif text-[#1e293b] whitespace-pre-wrap leading-relaxed"
+                >
+                  {generatedLetterContent}
+                </div>
+              )}
+            </div>
+            
+            <div className="px-6 py-4 border-t border-slate-200 bg-white flex justify-end gap-3">
+              <button
+                onClick={() => setIsMailMergeModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+              >
+                İptal
+              </button>
+              <button
+                onClick={handleSavePdf}
+                disabled={isGeneratingLetter || !generatedLetterContent}
+                className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                <LogOut size={16} className="rotate-90" />
+                PDF Kaydet
+              </button>
+              <button
+                onClick={handleMarkAsSent}
+                disabled={isGeneratingLetter || !generatedLetterContent}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                <Star size={16} />
+                Gönderildi Olarak İşaretle
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

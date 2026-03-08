@@ -35,8 +35,18 @@ export interface GuestData {
   CONTACTPERSON?: string;
   CONTACTPHONE?: string;
   CONTACTEMAIL?: string;
+  NATIONALITY?: string;
   hasComment?: boolean;
   comments?: CommentData[];
+  surveySent?: boolean;
+}
+
+export interface LetterTemplate {
+  id: string;
+  name: string;
+  languageCode: string;
+  content: string;
+  createdAt: string;
 }
 
 export interface ApiSettings {

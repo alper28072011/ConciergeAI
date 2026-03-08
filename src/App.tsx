@@ -6,15 +6,16 @@
 import React, { useState, useEffect } from 'react';
 import { SettingsModal } from './components/SettingsModal';
 import { ApiSettings } from './types';
-import { Settings, Hotel, Mail, Users } from 'lucide-react';
+import { Settings, Hotel, Mail, Users, LayoutTemplate } from 'lucide-react';
 import { doc, onSnapshot, setDoc } from "firebase/firestore";
 import { db } from './firebase';
 import { LetterModule } from './modules/LetterModule';
 import { GuestListModule } from './modules/GuestListModule';
+import { TemplateModule } from './modules/TemplateModule';
 
 export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [activeModule, setActiveModule] = useState<'letters' | 'guestlist'>('letters');
+  const [activeModule, setActiveModule] = useState<'letters' | 'guestlist' | 'templates'>('letters');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -123,6 +124,17 @@ export default function App() {
               Misafir Listesi
             </span>
           </button>
+
+          <button 
+            onClick={() => setActiveModule('templates')}
+            className={`p-3 rounded-xl transition-all duration-200 group relative flex justify-center ${activeModule === 'templates' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`}
+            title="Şablon Yöneticisi"
+          >
+            <LayoutTemplate size={22} strokeWidth={activeModule === 'templates' ? 2.5 : 2} />
+            <span className="absolute left-14 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+              Şablon Yöneticisi
+            </span>
+          </button>
         </div>
 
         <div className="mt-auto mb-4">
@@ -145,7 +157,7 @@ export default function App() {
         <header className="bg-white h-16 flex items-center justify-between px-8 shrink-0 border-b border-slate-200 z-10">
           <div>
             <h1 className="font-bold text-xl text-slate-800 tracking-tight">
-              {activeModule === 'letters' ? 'Misafir Mektubu Asistanı' : 'Misafir Listesi'}
+              {activeModule === 'letters' ? 'Misafir Mektubu Asistanı' : activeModule === 'guestlist' ? 'Misafir Listesi' : 'Şablon Yöneticisi'}
             </h1>
             <p className="text-xs text-slate-500 font-medium mt-0.5">Otel CRM Platformu</p>
           </div>
@@ -163,7 +175,9 @@ export default function App() {
 
         {/* Module Content */}
         <main className="flex-1 flex overflow-hidden relative bg-slate-50">
-          {activeModule === 'letters' ? <LetterModule /> : <GuestListModule />}
+          {activeModule === 'letters' && <LetterModule />}
+          {activeModule === 'guestlist' && <GuestListModule />}
+          {activeModule === 'templates' && <TemplateModule />}
         </main>
       </div>
 
