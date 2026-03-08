@@ -3,8 +3,9 @@ import { ApiSettings, GuestData, CommentData } from './types';
 export const buildDynamicPayload = (
   templateString: string,
   activeSettings: ApiSettings,
-  startDate: string,
-  endDate: string
+  columnFilters: Record<string, string> = {},
+  startDate?: string,
+  endDate?: string
 ): any => {
   if (!templateString) {
     throw new Error("Payload şablonu boş olamaz.");
@@ -12,28 +13,67 @@ export const buildDynamicPayload = (
 
   let processedString = templateString;
 
-  // 0. Auto-fix Legacy Hardcoded Dates (User Request Fix)
-  // If the user has old templates with hardcoded 2024 dates, we replace them dynamically
-  // This ensures the filter works even if they haven't updated their settings
+  // 0. Auto-fix Legacy Hardcoded Dates
   processedString = processedString.replace(/"Value":\s*"2024-01-01"/g, `"Value": "{{START_DATE}}"`);
   processedString = processedString.replace(/"Value":\s*"2024-12-31"/g, `"Value": "{{END_DATE}}"`);
 
   // 1. Replace Placeholders
-  // Use a global regex replacement to ensure all instances are replaced
   processedString = processedString.replace(/{{LOGIN_TOKEN}}/g, activeSettings.loginToken || '');
   processedString = processedString.replace(/{{HOTELID}}/g, activeSettings.hotelId || '');
-  processedString = processedString.replace(/{{START_DATE}}/g, startDate || '');
-  processedString = processedString.replace(/{{END_DATE}}/g, endDate || '');
+  
+  if (startDate !== undefined) processedString = processedString.replace(/{{START_DATE}}/g, startDate || '');
+  if (endDate !== undefined) processedString = processedString.replace(/{{END_DATE}}/g, endDate || '');
 
   // 2. Parse JSON
+  let payload: any;
   try {
-    const payload = JSON.parse(processedString);
-    return payload;
+    payload = JSON.parse(processedString);
   } catch (e) {
     console.error("JSON Parse Error in buildDynamicPayload:", e);
     console.error("Processed String was:", processedString);
     return null;
   }
+
+  // 3. Clean up existing Filters (remove empty values or unresolved placeholders)
+  const filterKey = payload.Where ? 'Where' : 'Filters';
+  if (payload[filterKey] && Array.isArray(payload[filterKey])) {
+    payload[filterKey] = payload[filterKey].filter((f: any) => {
+      // If startDate/endDate were not provided, remove filters that still have the placeholder
+      if (typeof f.Value === 'string' && (f.Value.includes('{{START_DATE}}') || f.Value.includes('{{END_DATE}}'))) {
+        return false;
+      }
+      // Also remove empty filters that might be left over
+      if (f.Value === "" || f.Value === null || f.Value === undefined) {
+        return false;
+      }
+      return true;
+    });
+  } else {
+    payload.Where = [];
+  }
+
+  const targetKey = payload.Where ? 'Where' : 'Filters';
+
+  // 4. Append dynamic column filters
+  Object.entries(columnFilters).forEach(([key, value]) => {
+    if (value && typeof value === 'string' && value.trim() !== '') {
+      let finalValue = value.trim();
+      let operator = "=";
+      
+      // If the user types a wildcard, use 'like'
+      if (finalValue.includes('%')) {
+        operator = "like";
+      }
+
+      payload[targetKey].push({
+        Column: key,
+        Operator: operator,
+        Value: finalValue
+      });
+    }
+  });
+
+  return payload;
 };
 
 export const formatTRDate = (dateString: string) => {

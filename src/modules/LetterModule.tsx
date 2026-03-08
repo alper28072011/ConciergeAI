@@ -50,6 +50,7 @@ export function LetterModule() {
       const payload = buildDynamicPayload(
         settings.commentPayloadTemplate,
         settings,
+        {},
         startDate,
         endDate
       );

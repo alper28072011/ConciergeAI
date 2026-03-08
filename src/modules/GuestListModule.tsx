@@ -15,23 +15,8 @@ export function GuestListModule() {
   // Expanded row for details
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
-  // Default dates: today and 1 month ago
-  const today = new Date();
-  const oneMonthAgo = new Date();
-  oneMonthAgo.setMonth(today.getMonth() - 1);
-  
-  const formatDate = (d: Date) => {
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-  
-  // Search Form State
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [searchRoom, setSearchRoom] = useState('');
-  const [searchName, setSearchName] = useState('');
+  // Dynamic Column Filters State
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [searchHasComment, setSearchHasComment] = useState<'all' | 'yes' | 'no'>('all');
 
   // Clear results when tab changes, but DO NOT auto-fetch
@@ -40,12 +25,14 @@ export function GuestListModule() {
     setExpandedRowId(null);
   }, [activeTab]);
 
-  const handleSearch = async () => {
-    if (!startDate && !endDate && !searchRoom && !searchName && searchHasComment === 'all') {
-      alert('Lütfen arama yapmak için en az bir kriter (Tarih, Oda No veya Misafir Adı) belirleyin.');
-      return;
-    }
+  const handleFilterChange = (column: string, value: string) => {
+    setColumnFilters(prev => ({
+      ...prev,
+      [column]: value
+    }));
+  };
 
+  const handleSearch = async () => {
     const savedSettings = localStorage.getItem('hotelApiSettings');
     if (!savedSettings) {
       alert('API ayarları bulunamadı. Lütfen önce ayarları yapın.');
@@ -77,24 +64,9 @@ export function GuestListModule() {
     setExpandedRowId(null);
 
     try {
-      // 1. Prepare Guest Payload
-      const guestPayload = buildDynamicPayload(guestTemplate, settings, startDate, endDate);
+      // 1. Prepare Guest Payload using the new dynamic engine
+      const guestPayload = buildDynamicPayload(guestTemplate, settings, columnFilters);
       if (!guestPayload) throw new Error("Guest payload failed.");
-
-      // Clean up empty filters (if user left dates blank, the replaced value is "")
-      if (guestPayload.Filters && Array.isArray(guestPayload.Filters)) {
-        guestPayload.Filters = guestPayload.Filters.filter((f: any) => f.Value !== "" && f.Value !== null && f.Value !== undefined);
-      } else {
-        guestPayload.Filters = [];
-      }
-
-      // Inject Advanced Filters into Guest Payload
-      if (searchRoom) {
-        guestPayload.Filters.push({ Column: "ROOMNO", Operator: "like", Value: searchRoom });
-      }
-      if (searchName) {
-        guestPayload.Filters.push({ Column: "GUESTNAMES", Operator: "like", Value: searchName });
-      }
 
       // Inject Required Fields for Guest
       if (guestPayload.Select && Array.isArray(guestPayload.Select)) {
@@ -107,38 +79,20 @@ export function GuestListModule() {
       // We fetch a large chunk for the search result
       guestPayload.Paging = { ItemsPerPage: 2000, Current: 1 };
 
-      // 2. Prepare Comment Payload (Wide Date Range or Fallback if empty)
-      let wideStartDate = "2000-01-01";
-      if (startDate) {
-        const fromDateObj = new Date(startDate);
-        fromDateObj.setMonth(fromDateObj.getMonth() - 3);
-        wideStartDate = fromDateObj.toISOString().split('T')[0];
-      }
+      // 2. Prepare Comment Payload
+      // We only pass safe columns to comment filters to avoid 500 errors (e.g., TOTALPRICE doesn't exist in comments)
+      const commentFilters: Record<string, string> = {};
+      if (columnFilters['ROOMNO']) commentFilters['ROOMNO'] = columnFilters['ROOMNO'];
+      if (columnFilters['GUESTNAMES']) commentFilters['GUESTNAMES'] = columnFilters['GUESTNAMES'];
+      if (columnFilters['CHECKIN']) commentFilters['CHECKIN'] = columnFilters['CHECKIN'];
+      if (columnFilters['CHECKOUT']) commentFilters['CHECKOUT'] = columnFilters['CHECKOUT'];
       
-      let wideEndDate = "2099-12-31";
-      if (endDate) {
-        const toDateObj = new Date(endDate);
-        toDateObj.setMonth(toDateObj.getMonth() + 1);
-        wideEndDate = toDateObj.toISOString().split('T')[0];
-      }
-
-      const commentPayload = buildDynamicPayload(settings.commentPayloadTemplate, settings, wideStartDate, wideEndDate);
+      // Provide a wide date range to prevent API 500 errors (full table scans) if the template requires dates
+      const wideStartDate = "2020-01-01";
+      const wideEndDate = "2030-12-31";
+      
+      const commentPayload = buildDynamicPayload(settings.commentPayloadTemplate, settings, commentFilters, wideStartDate, wideEndDate);
       if (!commentPayload) throw new Error("Comment payload failed.");
-
-      // Clean up empty filters for comments too
-      if (commentPayload.Filters && Array.isArray(commentPayload.Filters)) {
-        commentPayload.Filters = commentPayload.Filters.filter((f: any) => f.Value !== "" && f.Value !== null && f.Value !== undefined);
-      } else {
-        commentPayload.Filters = [];
-      }
-
-      // Inject Advanced Filters into Comment Payload to optimize fetching
-      if (searchRoom) {
-        commentPayload.Filters.push({ Column: "ROOMNO", Operator: "like", Value: searchRoom });
-      }
-      if (searchName) {
-        commentPayload.Filters.push({ Column: "GUESTNAMES", Operator: "like", Value: searchName });
-      }
 
       // Inject Required Fields for Comment
       if (commentPayload.Select && Array.isArray(commentPayload.Select)) {
@@ -156,12 +110,12 @@ export function GuestListModule() {
         let allComments: CommentData[] = [];
         let commentPage = 1;
         let hasMore = true;
-        while (hasMore && commentPage <= 10) { // Max 50k comments
-          commentPayload.Paging = { ItemsPerPage: 5000, Current: commentPage };
+        while (hasMore && commentPage <= 10) { // Max 20k comments
+          commentPayload.Paging = { ItemsPerPage: 2000, Current: commentPage };
           const res = await executeElektraQuery(commentPayload);
           if (Array.isArray(res) && res.length > 0) {
             allComments = [...allComments, ...res];
-            if (res.length < 5000) hasMore = false;
+            if (res.length < 2000) hasMore = false;
             else commentPage++;
           } else {
             hasMore = false;
@@ -238,8 +192,8 @@ export function GuestListModule() {
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden">
-      {/* Tab Navigation */}
-      <div className="bg-white border-b border-slate-200 px-6 pt-4 shrink-0">
+      {/* Tab Navigation & Top Bar */}
+      <div className="bg-white border-b border-slate-200 px-6 pt-4 shrink-0 flex justify-between items-end">
         <div className="flex gap-6">
           <button
             onClick={() => setActiveTab('inhouse')}
@@ -275,64 +229,14 @@ export function GuestListModule() {
             Ayrılanlar
           </button>
         </div>
-      </div>
 
-      {/* Advanced Search Bar */}
-      <div className="bg-white border-b border-slate-200 p-4 shrink-0">
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="flex-1 min-w-[100px] max-w-[120px]">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Oda No</label>
-            <input 
-              type="text" 
-              placeholder="Örn: 101"
-              value={searchRoom}
-              onChange={(e) => setSearchRoom(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-            />
-          </div>
-          
-          <div className="flex-1 min-w-[150px]">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Giriş Tarihi</label>
-            <div className="relative">
-              <Calendar className="absolute left-2.5 top-2.5 text-slate-400" size={16} />
-              <input 
-                type="date" 
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-              />
-            </div>
-          </div>
-
-          <div className="flex-1 min-w-[150px]">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Çıkış Tarihi</label>
-            <div className="relative">
-              <Calendar className="absolute left-2.5 top-2.5 text-slate-400" size={16} />
-              <input 
-                type="date" 
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-              />
-            </div>
-          </div>
-
-          <div className="flex-1 min-w-[150px]">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Misafir Adı</label>
-            <input 
-              type="text" 
-              placeholder="Örn: John Doe"
-              value={searchName}
-              onChange={(e) => setSearchName(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-            />
-          </div>
-          <div className="flex-1 min-w-[150px]">
-            <label className="block text-xs font-medium text-slate-500 mb-1">Yorum Durumu</label>
+        <div className="pb-3 flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-slate-500">Yorum Durumu:</label>
             <select 
               value={searchHasComment}
               onChange={(e) => setSearchHasComment(e.target.value as any)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+              className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
             >
               <option value="all">Tümü</option>
               <option value="yes">Yorum Yapanlar</option>
@@ -342,7 +246,7 @@ export function GuestListModule() {
           <button 
             onClick={handleSearch}
             disabled={isFetching}
-            className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed h-[38px]"
+            className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isFetching ? (
               <div className="animate-spin w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
@@ -352,57 +256,138 @@ export function GuestListModule() {
             Sorgula
           </button>
         </div>
-        
-        {guests.length > 0 && (
-          <div className="mt-4 text-sm text-slate-500 flex items-center justify-between">
-            <span>Toplam <strong>{processedData.length}</strong> misafir listeleniyor</span>
-            {searchHasComment !== 'all' && (
-              <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
-                Filtre: {searchHasComment === 'yes' ? 'Sadece Yorum Yapanlar' : 'Yorum Yapmayanlar'}
-              </span>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* Table Container */}
+      {guests.length > 0 && (
+        <div className="px-6 py-2 bg-white border-b border-slate-200 text-sm text-slate-500 flex items-center justify-between shrink-0">
+          <span>Toplam <strong>{processedData.length}</strong> misafir listeleniyor</span>
+          {searchHasComment !== 'all' && (
+            <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
+              Filtre: {searchHasComment === 'yes' ? 'Sadece Yorum Yapanlar' : 'Yorum Yapmayanlar'}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Table Container - Data Grid */}
       <div className="flex-1 overflow-auto p-6">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-w-[1000px]">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider sticky top-0 z-10">
-                <th className="p-4 w-10 bg-slate-50"></th>
-                <th className="p-4 cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50" onClick={() => handleSort('ROOMNO')}>
-                  <div className="flex items-center gap-1">Oda <ArrowUpDown size={12} /></div>
+                <th className="p-3 w-10 bg-slate-50 align-top"></th>
+                
+                <th className="p-3 bg-slate-50 align-top min-w-[100px]">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('ROOMNO')}>
+                      Oda <ArrowUpDown size={12} />
+                    </div>
+                    <input 
+                      type="text" 
+                      className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs font-normal text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all bg-white"
+                      value={columnFilters['ROOMNO'] || ''} 
+                      onChange={(e) => handleFilterChange('ROOMNO', e.target.value)} 
+                    />
+                  </div>
                 </th>
-                <th className="p-4 cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50" onClick={() => handleSort('GUESTNAMES')}>
-                  <div className="flex items-center gap-1">Misafir Adı <ArrowUpDown size={12} /></div>
+
+                <th className="p-3 bg-slate-50 align-top min-w-[200px]">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('GUESTNAMES')}>
+                      Misafir Adı <ArrowUpDown size={12} />
+                    </div>
+                    <input 
+                      type="text" 
+                      className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs font-normal text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all bg-white"
+                      value={columnFilters['GUESTNAMES'] || ''} 
+                      onChange={(e) => handleFilterChange('GUESTNAMES', e.target.value)} 
+                    />
+                  </div>
                 </th>
-                <th className="p-4 cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50" onClick={() => handleSort('CHECKIN')}>
-                  <div className="flex items-center gap-1">Giriş <ArrowUpDown size={12} /></div>
+
+                <th className="p-3 bg-slate-50 align-top min-w-[140px]">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('CHECKIN')}>
+                      Giriş Tarihi <ArrowUpDown size={12} />
+                    </div>
+                    <input 
+                      type="date" 
+                      className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs font-normal text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all bg-white"
+                      value={columnFilters['CHECKIN'] || ''} 
+                      onChange={(e) => handleFilterChange('CHECKIN', e.target.value)} 
+                    />
+                  </div>
                 </th>
-                <th className="p-4 cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50" onClick={() => handleSort('CHECKOUT')}>
-                  <div className="flex items-center gap-1">Çıkış <ArrowUpDown size={12} /></div>
+
+                <th className="p-3 bg-slate-50 align-top min-w-[140px]">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('CHECKOUT')}>
+                      Çıkış Tarihi <ArrowUpDown size={12} />
+                    </div>
+                    <input 
+                      type="date" 
+                      className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs font-normal text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all bg-white"
+                      value={columnFilters['CHECKOUT'] || ''} 
+                      onChange={(e) => handleFilterChange('CHECKOUT', e.target.value)} 
+                    />
+                  </div>
                 </th>
-                <th className="p-4 cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50" onClick={() => handleSort('AGENCY')}>
-                  <div className="flex items-center gap-1">Acenta <ArrowUpDown size={12} /></div>
+
+                <th className="p-3 bg-slate-50 align-top min-w-[150px]">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('AGENCY')}>
+                      Acenta <ArrowUpDown size={12} />
+                    </div>
+                    <input 
+                      type="text" 
+                      className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs font-normal text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all bg-white"
+                      value={columnFilters['AGENCY'] || ''} 
+                      onChange={(e) => handleFilterChange('AGENCY', e.target.value)} 
+                    />
+                  </div>
                 </th>
-                <th className="p-4 cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50" onClick={() => handleSort('ROOMTYPE')}>
-                  <div className="flex items-center gap-1">Oda Tipi <ArrowUpDown size={12} /></div>
+
+                <th className="p-3 bg-slate-50 align-top min-w-[120px]">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('ROOMTYPE')}>
+                      Oda Tipi <ArrowUpDown size={12} />
+                    </div>
+                    <input 
+                      type="text" 
+                      className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs font-normal text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all bg-white"
+                      value={columnFilters['ROOMTYPE'] || ''} 
+                      onChange={(e) => handleFilterChange('ROOMTYPE', e.target.value)} 
+                    />
+                  </div>
                 </th>
-                <th className="p-4 cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50" onClick={() => handleSort('TOTALPRICE')}>
-                  <div className="flex items-center gap-1">Tutar <ArrowUpDown size={12} /></div>
+
+                <th className="p-3 bg-slate-50 align-top min-w-[120px]">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('TOTALPRICE')}>
+                      Tutar <ArrowUpDown size={12} />
+                    </div>
+                    <input 
+                      type="text" 
+                      className="w-full border border-slate-200 rounded px-2 py-1.5 text-xs font-normal text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-all bg-white"
+                      value={columnFilters['TOTALPRICE'] || ''} 
+                      onChange={(e) => handleFilterChange('TOTALPRICE', e.target.value)} 
+                    />
+                  </div>
                 </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {processedData.length === 0 && !isFetching ? (
                 <tr>
-                  <td colSpan={8} className="p-12 text-center text-slate-400">
-                    <div className="flex flex-col items-center justify-center gap-3">
-                      <Search size={32} className="text-slate-300" />
-                      <p>Arama kriterlerinize uygun misafir bulunamadı.</p>
-                      <p className="text-xs">Lütfen yukarıdaki panelden kriterleri belirleyip "Sorgula" butonuna basın.</p>
+                  <td colSpan={8} className="p-16 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-4">
+                      <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center border border-slate-100">
+                        <Search size={24} className="text-slate-300" />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="font-medium text-slate-500">Arama kriterlerinize uygun misafir bulunamadı.</p>
+                        <p className="text-xs">Lütfen sütun başlıklarındaki filtreleri doldurup "Sorgula" butonuna basın.</p>
+                      </div>
                     </div>
                   </td>
                 </tr>
