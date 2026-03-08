@@ -15,6 +15,13 @@ export function GuestListModule() {
   // Expanded row for details
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
 
+  // Pagination & Lazy Loading State
+  const [fetchLimit, setFetchLimit] = useState<number>(100);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [hasMoreData, setHasMoreData] = useState<boolean>(true);
+  const [cachedComments, setCachedComments] = useState<CommentData[]>([]);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+
   // Dynamic Column Filters State
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [searchHasComment, setSearchHasComment] = useState<'all' | 'yes' | 'no'>('all');
@@ -32,7 +39,7 @@ export function GuestListModule() {
     }));
   };
 
-  const handleSearch = async () => {
+  const handleSearch = async (isLoadMore = false) => {
     const savedSettings = localStorage.getItem('hotelApiSettings');
     if (!savedSettings) {
       alert('API ayarları bulunamadı. Lütfen önce ayarları yapın.');
@@ -59,9 +66,16 @@ export function GuestListModule() {
       return;
     }
 
-    setIsFetching(true);
-    setGuests([]);
-    setExpandedRowId(null);
+    const targetPage = isLoadMore === true ? currentPage + 1 : 1;
+
+    if (isLoadMore !== true) {
+      setIsFetching(true);
+      setGuests([]);
+      setExpandedRowId(null);
+      setHasMoreData(true);
+    } else {
+      setIsLoadingMore(true);
+    }
 
     try {
       // 1. Prepare Guest Payload using the new dynamic engine
@@ -76,8 +90,8 @@ export function GuestListModule() {
         });
       }
 
-      // We fetch a large chunk for the search result
-      guestPayload.Paging = { ItemsPerPage: 2000, Current: 1 };
+      // We fetch a chunk based on fetchLimit and targetPage
+      guestPayload.Paging = { ItemsPerPage: fetchLimit, Current: targetPage };
 
       // 2. Prepare Comment Payload
       // We only pass safe columns to comment filters to avoid 500 errors (e.g., TOTALPRICE doesn't exist in comments)
@@ -124,12 +138,28 @@ export function GuestListModule() {
         return allComments;
       };
 
-      const [guestRes, commentsList] = await Promise.all([
-        executeElektraQuery(guestPayload),
-        fetchAllComments()
-      ]);
+      let commentsList = cachedComments;
+      let guestRes: any;
+
+      if (isLoadMore !== true) {
+        // Fetch both concurrently on first load
+        const [gRes, cList] = await Promise.all([
+          executeElektraQuery(guestPayload),
+          fetchAllComments()
+        ]);
+        guestRes = gRes;
+        commentsList = cList;
+        setCachedComments(cList);
+      } else {
+        // Only fetch guests on load more
+        guestRes = await executeElektraQuery(guestPayload);
+      }
 
       const guestsList: GuestData[] = Array.isArray(guestRes) ? guestRes : [];
+
+      if (guestsList.length < fetchLimit) {
+        setHasMoreData(false);
+      }
 
       // 4. Cross-Match Logic
       let processedGuests = guestsList.map(guest => {
@@ -153,13 +183,26 @@ export function GuestListModule() {
         index === self.findIndex((t) => t.RESID === guest.RESID)
       );
 
-      setGuests(uniqueGuests);
+      if (isLoadMore === true) {
+        setGuests(prev => {
+          const combined = [...prev, ...uniqueGuests];
+          // deduplicate combined just in case
+          return combined.filter((guest, index, self) =>
+            index === self.findIndex((t) => t.RESID === guest.RESID)
+          );
+        });
+        setCurrentPage(targetPage);
+      } else {
+        setGuests(uniqueGuests);
+        setCurrentPage(1);
+      }
 
     } catch (error: any) {
       console.error('Fetch error:', error);
       alert(`Sorgulama sırasında bir hata oluştu: ${error.message}`);
     } finally {
       setIsFetching(false);
+      setIsLoadingMore(false);
     }
   };
 
@@ -232,6 +275,21 @@ export function GuestListModule() {
 
         <div className="pb-3 flex items-center gap-4">
           <div className="flex items-center gap-2">
+            <label className="text-xs font-medium text-slate-500">Kayıt Sayısı:</label>
+            <select 
+              value={fetchLimit}
+              onChange={(e) => setFetchLimit(Number(e.target.value))}
+              className="px-2 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:border-emerald-500 transition-all"
+            >
+              <option value={100}>100 Kayıt</option>
+              <option value={500}>500 Kayıt</option>
+              <option value={1000}>1.000 Kayıt</option>
+              <option value={2000}>2.000 Kayıt</option>
+              <option value={5000}>5.000 Kayıt</option>
+              <option value={10000}>10.000 Kayıt</option>
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
             <label className="text-xs font-medium text-slate-500">Yorum Durumu:</label>
             <select 
               value={searchHasComment}
@@ -244,7 +302,7 @@ export function GuestListModule() {
             </select>
           </div>
           <button 
-            onClick={handleSearch}
+            onClick={() => handleSearch(false)}
             disabled={isFetching}
             className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
@@ -543,6 +601,23 @@ export function GuestListModule() {
               )}
             </tbody>
           </table>
+          
+          {guests.length > 0 && hasMoreData && (
+            <div className="p-4 flex justify-center border-t border-slate-200 bg-white">
+              <button
+                onClick={() => handleSearch(true)}
+                disabled={isLoadingMore}
+                className="px-6 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 text-sm font-medium shadow-sm disabled:opacity-50"
+              >
+                {isLoadingMore ? (
+                  <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <ChevronDown size={16} />
+                )}
+                Daha Fazla Yükle
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

@@ -10,6 +10,12 @@ export function LetterModule() {
   const [comments, setComments] = useState<CommentData[]>([]);
   const [isFetching, setIsFetching] = useState(false);
 
+  // Pagination & Lazy Loading State
+  const [fetchLimit, setFetchLimit] = useState<number>(100);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [hasMoreData, setHasMoreData] = useState<boolean>(true);
+  const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
+
   // Default dates: today and 1 month ago
   const today = new Date();
   const oneMonthAgo = new Date();
@@ -25,7 +31,7 @@ export function LetterModule() {
   const [startDate, setStartDate] = useState(formatDate(oneMonthAgo));
   const [endDate, setEndDate] = useState(formatDate(today));
 
-  const fetchComments = async () => {
+  const fetchComments = async (isLoadMore = false) => {
     const savedSettings = localStorage.getItem('hotelApiSettings');
     if (!savedSettings) {
       alert('Lütfen önce API ayarlarını yapın.');
@@ -45,29 +51,87 @@ export function LetterModule() {
       return;
     }
 
-    setIsFetching(true);
+    const targetPage = isLoadMore === true ? currentPage + 1 : 1;
+
+    if (isLoadMore !== true) {
+      setIsFetching(true);
+      setComments([]);
+      setSelectedCommentId(null);
+      setHasMoreData(true);
+    } else {
+      setIsLoadingMore(true);
+    }
+
     try {
+      // Create dynamic payload with date filters
+      const dateFilters: Record<string, string> = {};
+      
       const payload = buildDynamicPayload(
         settings.commentPayloadTemplate,
         settings,
-        {},
+        dateFilters,
         startDate,
         endDate
       );
 
+      if (!payload) throw new Error("Payload oluşturulamadı.");
+
+      // Add dynamic date filters if they don't exist in the template
+      if (!payload.Where) payload.Where = [];
+      
+      // Remove any existing COMMENTDATE filters to avoid duplicates
+      payload.Where = payload.Where.filter((w: any) => w.Column !== 'COMMENTDATE');
+      
+      // Add the new date filters
+      if (startDate) {
+        payload.Where.push({
+          Column: "COMMENTDATE",
+          Operator: ">=",
+          Value: startDate
+        });
+      }
+      
+      if (endDate) {
+        payload.Where.push({
+          Column: "COMMENTDATE",
+          Operator: "<=",
+          Value: endDate
+        });
+      }
+
+      // Add Paging
+      payload.Paging = { ItemsPerPage: fetchLimit, Current: targetPage };
+
       const data = await executeElektraQuery(payload);
       
-      if (Array.isArray(data)) {
-        setComments(data);
+      const fetchedComments: CommentData[] = Array.isArray(data) ? data : [];
+
+      if (fetchedComments.length < fetchLimit) {
+        setHasMoreData(false);
+      }
+
+      if (isLoadMore === true) {
+        setComments(prev => {
+          const combined = [...prev, ...fetchedComments];
+          // Deduplicate
+          return combined.filter((comment, index, self) =>
+            index === self.findIndex((t) => t.ID === comment.ID)
+          );
+        });
+        setCurrentPage(targetPage);
       } else {
-        setComments([]);
-        alert('Belirtilen tarih aralığında yorum bulunamadı veya veri formatı hatalı.');
+        setComments(fetchedComments);
+        setCurrentPage(1);
+        if (fetchedComments.length === 0) {
+          alert('Belirtilen tarih aralığında yorum bulunamadı veya veri formatı hatalı.');
+        }
       }
     } catch (error: any) {
       console.error('Fetch error:', error);
       alert(`Veri çekilirken bir hata oluştu: ${error.message}`);
     } finally {
       setIsFetching(false);
+      setIsLoadingMore(false);
     }
   };
 
@@ -85,6 +149,10 @@ export function LetterModule() {
         onEndDateChange={setEndDate}
         onFetch={fetchComments}
         isFetching={isFetching}
+        fetchLimit={fetchLimit}
+        setFetchLimit={setFetchLimit}
+        hasMoreData={hasMoreData}
+        isLoadingMore={isLoadingMore}
       />
       <DetailPanel comment={selectedComment} />
     </div>

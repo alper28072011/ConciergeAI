@@ -11,8 +11,12 @@ interface SidebarProps {
   endDate: string;
   onStartDateChange: (date: string) => void;
   onEndDateChange: (date: string) => void;
-  onFetch: () => void;
+  onFetch: (isLoadMore?: boolean) => void;
   isFetching: boolean;
+  fetchLimit: number;
+  setFetchLimit: (limit: number) => void;
+  hasMoreData: boolean;
+  isLoadingMore: boolean;
 }
 
 export function Sidebar({ 
@@ -24,7 +28,11 @@ export function Sidebar({
   onStartDateChange,
   onEndDateChange,
   onFetch,
-  isFetching
+  isFetching,
+  fetchLimit,
+  setFetchLimit,
+  hasMoreData,
+  isLoadingMore
 }: SidebarProps) {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [showDateInputs, setShowDateInputs] = useState(false);
@@ -134,9 +142,22 @@ export function Sidebar({
               )}
             </div>
 
+            {/* Fetch Limit Dropdown */}
+            <select 
+              value={fetchLimit}
+              onChange={(e) => setFetchLimit(Number(e.target.value))}
+              className="bg-white border border-slate-200 text-slate-700 px-2 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 hover:border-slate-300 transition-all shadow-sm focus:outline-none"
+            >
+              <option value={100}>100</option>
+              <option value={500}>500</option>
+              <option value={1000}>1K</option>
+              <option value={5000}>5K</option>
+              <option value={10000}>10K</option>
+            </select>
+
             {/* Refresh Button */}
             <button 
-              onClick={onFetch}
+              onClick={() => onFetch(false)}
               disabled={isFetching}
               className="flex items-center justify-center bg-slate-900 text-white w-10 h-10 rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-70 shadow-sm shrink-0"
               title="Yorumları Getir"
@@ -210,6 +231,23 @@ export function Sidebar({
             </div>
           </div>
         ))}
+        
+        {comments.length > 0 && hasMoreData && (
+          <div className="pt-2 pb-4 flex justify-center">
+            <button
+              onClick={() => onFetch(true)}
+              disabled={isLoadingMore}
+              className="w-full py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 text-sm font-medium shadow-sm disabled:opacity-50"
+            >
+              {isLoadingMore ? (
+                <div className="w-4 h-4 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <ChevronDown size={16} />
+              )}
+              Daha Fazla Yükle
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
