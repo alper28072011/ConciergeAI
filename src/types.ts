@@ -44,8 +44,7 @@ export interface GuestData {
 export interface LetterTemplate {
   id: string;
   name: string;
-  languageCode: string;
-  content: string;
+  contents: Record<string, string>;
   createdAt: string;
 }
 

@@ -32,10 +32,19 @@ export function GuestListModule() {
   const [generatedLetterContent, setGeneratedLetterContent] = useState('');
   const [isGeneratingLetter, setIsGeneratingLetter] = useState(false);
 
+  // Bulk Selection & Bulk Mail Merge State
+  const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
+  const [isBulkMailMergeOpen, setIsBulkMailMergeOpen] = useState(false);
+  const [bulkTemplates, setBulkTemplates] = useState<any[]>([]);
+  const [selectedBulkTemplateId, setSelectedBulkTemplateId] = useState<string>('');
+  const [bulkGeneratedLetters, setBulkGeneratedLetters] = useState<{guest: GuestData, content: string}[]>([]);
+  const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
+
   // Clear results when tab changes, but DO NOT auto-fetch
   useEffect(() => {
     setGuests([]);
     setExpandedRowId(null);
+    setSelectedGuestIds([]);
   }, [activeTab]);
 
   const handleFilterChange = (column: string, value: string) => {
@@ -278,25 +287,33 @@ export function GuestListModule() {
       }
 
       // 2. Find matching template based on NATIONALITY
-      const guestNationality = guest.NATIONALITY || 'ENG';
-      let matchedTemplate = templates.find(t => t.languageCode === guestNationality);
+      const guestNationality = (guest.NATIONALITY || 'ENG').toUpperCase();
       
-      // Fallback to ENG if no match
-      if (!matchedTemplate) {
-        matchedTemplate = templates.find(t => t.languageCode === 'ENG');
-      }
+      // We don't know which template the user wants for a single guest yet, 
+      // so we'll just pick the first one for now, or ideally we should let them choose.
+      // For simplicity, let's pick the first template available.
+      let matchedTemplate = templates[0];
       
-      // Fallback to the first available template if no ENG
       if (!matchedTemplate) {
-        matchedTemplate = templates[0];
+        setGeneratedLetterContent('Sistemde hiç şablon bulunamadı.');
+        setIsGeneratingLetter(false);
+        return;
       }
 
       // 3. Replace Placeholders (Mail Merge)
-      let content = matchedTemplate.content;
-      content = content.replace(/{{GUEST_NAME}}/g, guest.GUESTNAMES || '');
-      content = content.replace(/{{ROOM_NO}}/g, guest.ROOMNO || '');
-      content = content.replace(/{{CHECKIN}}/g, formatTRDate(guest.CHECKIN) || '');
-      content = content.replace(/{{CHECKOUT}}/g, formatTRDate(guest.CHECKOUT) || '');
+      let content = '';
+      if (matchedTemplate.contents && matchedTemplate.contents[guestNationality]) {
+        content = matchedTemplate.contents[guestNationality];
+      } else if (matchedTemplate.contents && matchedTemplate.contents['ENG']) {
+        content = matchedTemplate.contents['ENG'];
+      } else if (matchedTemplate.contents) {
+        content = Object.values(matchedTemplate.contents)[0] as string || '';
+      }
+
+      content = content.replace(/{{GUESTNAMES}}/g, guest.GUESTNAMES || 'Misafir');
+      content = content.replace(/{{ROOMNO}}/g, guest.ROOMNO || '-');
+      content = content.replace(/{{CHECKIN}}/g, formatTRDate(guest.CHECKIN || ''));
+      content = content.replace(/{{CHECKOUT}}/g, formatTRDate(guest.CHECKOUT || ''));
       content = content.replace(/{{AGENCY}}/g, guest.AGENCY || '');
 
       setGeneratedLetterContent(content);
@@ -365,6 +382,151 @@ export function GuestListModule() {
       setIsMailMergeModalOpen(false);
     } catch (error) {
       console.error("Error saving log:", error);
+      alert('İşlem kaydedilirken bir hata oluştu.');
+    }
+  };
+
+  const handleSelectAll = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.checked) {
+      setSelectedGuestIds(processedData.map(g => g.RESID));
+    } else {
+      setSelectedGuestIds([]);
+    }
+  };
+
+  const handleSelectGuest = (id: string) => {
+    setSelectedGuestIds(prev => 
+      prev.includes(id) ? prev.filter(gId => gId !== id) : [...prev, id]
+    );
+  };
+
+  const openBulkMailMergeModal = async () => {
+    setIsBulkMailMergeOpen(true);
+    setBulkGeneratedLetters([]);
+    setSelectedBulkTemplateId('');
+    
+    try {
+      const { collection, getDocs } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      const querySnapshot = await getDocs(collection(db, 'letter_templates'));
+      const templates: any[] = [];
+      querySnapshot.forEach((doc) => {
+        templates.push({ id: doc.id, ...doc.data() });
+      });
+      setBulkTemplates(templates);
+    } catch (error) {
+      console.error("Error fetching templates:", error);
+      alert("Şablonlar yüklenirken bir hata oluştu.");
+    }
+  };
+
+  const handleGenerateBulkLetters = async () => {
+    if (!selectedBulkTemplateId) {
+      alert("Lütfen bir şablon seçin.");
+      return;
+    }
+
+    setIsGeneratingBulk(true);
+    const template = bulkTemplates.find(t => t.id === selectedBulkTemplateId);
+    if (!template || !template.contents) {
+      alert("Şablon içeriği bulunamadı.");
+      setIsGeneratingBulk(false);
+      return;
+    }
+
+    const selectedGuests = processedData.filter(g => selectedGuestIds.includes(g.RESID));
+    const generated: {guest: GuestData, content: string}[] = [];
+
+    for (const guest of selectedGuests) {
+      const nationality = guest.NATIONALITY?.toUpperCase() || 'ENG';
+      let content = '';
+
+      if (template.contents[nationality]) {
+        content = template.contents[nationality];
+      } else if (template.contents['ENG']) {
+        content = template.contents['ENG'];
+      } else {
+        content = Object.values(template.contents)[0] as string || '';
+      }
+
+      content = content.replace(/{{GUESTNAMES}}/g, guest.GUESTNAMES || 'Misafir');
+      content = content.replace(/{{ROOMNO}}/g, guest.ROOMNO || '-');
+      content = content.replace(/{{CHECKIN}}/g, formatTRDate(guest.CHECKIN || ''));
+      content = content.replace(/{{CHECKOUT}}/g, formatTRDate(guest.CHECKOUT || ''));
+      content = content.replace(/{{AGENCY}}/g, guest.AGENCY || '');
+
+      generated.push({ guest, content });
+    }
+
+    setBulkGeneratedLetters(generated);
+    setIsGeneratingBulk(false);
+  };
+
+  const handleSaveBulkPdf = async () => {
+    const html2pdf = (await import('html2pdf.js')).default;
+    const element = document.getElementById('bulk-mail-merge-content');
+    if (!element) return;
+
+    const opt: any = {
+      margin:       1,
+      filename:     `Toplu_Mektuplar_${new Date().toISOString().split('T')[0]}.pdf`,
+      image:        { type: 'jpeg', quality: 0.98 },
+      html2canvas:  { 
+        scale: 2,
+        onclone: (clonedDoc: Document) => {
+          const styles = clonedDoc.querySelectorAll('style, link[rel="stylesheet"]');
+          styles.forEach(s => s.remove());
+          
+          const el = clonedDoc.getElementById('bulk-mail-merge-content');
+          if (el) {
+            el.style.backgroundColor = '#ffffff';
+            el.style.color = '#1e293b';
+            el.style.fontFamily = 'serif';
+            el.style.whiteSpace = 'pre-wrap';
+            el.style.lineHeight = '1.625';
+            el.style.fontSize = '14px';
+          }
+        }
+      },
+      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+    };
+
+    html2pdf().set(opt).from(element).save();
+  };
+
+  const handleMarkBulkAsSent = async () => {
+    if (bulkGeneratedLetters.length === 0) return;
+
+    try {
+      const { collection, writeBatch, doc, serverTimestamp } = await import('firebase/firestore');
+      const { db } = await import('../firebase');
+      
+      const batch = writeBatch(db);
+      const template = bulkTemplates.find(t => t.id === selectedBulkTemplateId);
+      const templateName = template?.name || 'Toplu Şablon';
+
+      bulkGeneratedLetters.forEach(({ guest }) => {
+        const logRef = doc(collection(db, 'survey_logs'));
+        batch.set(logRef, {
+          guestId: guest.RESID,
+          guestName: guest.GUESTNAMES,
+          roomNo: guest.ROOMNO,
+          action: `Toplu Anket Üretildi (${templateName})`,
+          createdAt: serverTimestamp()
+        });
+      });
+
+      await batch.commit();
+
+      // Update local state
+      const sentIds = bulkGeneratedLetters.map(g => g.guest.RESID);
+      setGuests(prev => prev.map(g => sentIds.includes(g.RESID) ? { ...g, surveySent: true } : g));
+      
+      alert(`${bulkGeneratedLetters.length} misafir başarıyla gönderildi olarak işaretlendi.`);
+      setIsBulkMailMergeOpen(false);
+      setSelectedGuestIds([]);
+    } catch (error) {
+      console.error("Error saving bulk logs:", error);
       alert('İşlem kaydedilirken bir hata oluştu.');
     }
   };
@@ -457,11 +619,22 @@ export function GuestListModule() {
 
       {guests.length > 0 && (
         <div className="px-6 py-2 bg-white border-b border-slate-200 text-sm text-slate-500 flex items-center justify-between shrink-0">
-          <span>Toplam <strong>{processedData.length}</strong> misafir listeleniyor</span>
-          {searchHasComment !== 'all' && (
-            <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
-              Filtre: {searchHasComment === 'yes' ? 'Sadece Yorum Yapanlar' : 'Yorum Yapmayanlar'}
-            </span>
+          <div className="flex items-center gap-4">
+            <span>Toplam <strong>{processedData.length}</strong> misafir listeleniyor</span>
+            {searchHasComment !== 'all' && (
+              <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
+                Filtre: {searchHasComment === 'yes' ? 'Sadece Yorum Yapanlar' : 'Yorum Yapmayanlar'}
+              </span>
+            )}
+          </div>
+          {selectedGuestIds.length > 0 && (
+            <button
+              onClick={openBulkMailMergeModal}
+              className="px-4 py-1.5 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4"
+            >
+              <FileText size={14} />
+              Toplu Şablon Üret ({selectedGuestIds.length} Misafir)
+            </button>
           )}
         </div>
       )}
@@ -472,6 +645,17 @@ export function GuestListModule() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider sticky top-0 z-10">
+                <th className="p-3 w-10 bg-slate-50 align-top">
+                  <div className="flex flex-col gap-2 items-center">
+                    <div className="h-4"></div>
+                    <input 
+                      type="checkbox" 
+                      className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                      checked={processedData.length > 0 && selectedGuestIds.length === processedData.length}
+                      onChange={handleSelectAll}
+                    />
+                  </div>
+                </th>
                 <th className="p-3 w-10 bg-slate-50 align-top"></th>
                 
                 <th className="p-3 bg-slate-50 align-top min-w-[100px]">
@@ -576,7 +760,7 @@ export function GuestListModule() {
             <tbody className="divide-y divide-slate-100">
               {processedData.length === 0 && !isFetching ? (
                 <tr>
-                  <td colSpan={8} className="p-16 text-center text-slate-400">
+                  <td colSpan={9} className="p-16 text-center text-slate-400">
                     <div className="flex flex-col items-center justify-center gap-4">
                       <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center border border-slate-100">
                         <Search size={24} className="text-slate-300" />
@@ -595,6 +779,14 @@ export function GuestListModule() {
                       className={`hover:bg-slate-50 transition-colors cursor-pointer group ${expandedRowId === guest.RESID ? 'bg-slate-50' : ''}`}
                       onClick={() => toggleRow(guest.RESID)}
                     >
+                      <td className="p-4 text-center" onClick={(e) => e.stopPropagation()}>
+                        <input 
+                          type="checkbox" 
+                          className="w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          checked={selectedGuestIds.includes(guest.RESID)}
+                          onChange={() => handleSelectGuest(guest.RESID)}
+                        />
+                      </td>
                       <td className="p-4 text-center text-slate-400">
                         {expandedRowId === guest.RESID ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                       </td>
@@ -622,7 +814,7 @@ export function GuestListModule() {
                     </tr>
                     {expandedRowId === guest.RESID && (
                       <tr className="bg-slate-50/50">
-                        <td colSpan={8} className="p-0">
+                        <td colSpan={9} className="p-0">
                           <div className="p-6 border-t border-b border-slate-200 shadow-inner bg-slate-50">
                             <div className="max-w-4xl mx-auto">
                               <div className="flex items-center justify-between mb-4">
@@ -833,6 +1025,99 @@ export function GuestListModule() {
               >
                 <Star size={16} />
                 Gönderildi Olarak İşaretle
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Mail Merge Modal */}
+      {isBulkMailMergeOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+              <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <FileText size={20} className="text-emerald-600" />
+                Toplu Şablon Üretimi ({selectedGuestIds.length} Misafir)
+              </h3>
+              <button 
+                onClick={() => setIsBulkMailMergeOpen(false)}
+                className="p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 rounded-lg transition-colors"
+              >
+                <LogOut size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6 border-b border-slate-200 bg-white flex items-end gap-4">
+              <div className="flex-1">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Kullanılacak Şablonu Seçin</label>
+                <select 
+                  value={selectedBulkTemplateId}
+                  onChange={(e) => setSelectedBulkTemplateId(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all bg-white"
+                >
+                  <option value="">-- Şablon Seçin --</option>
+                  {bulkTemplates.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={handleGenerateBulkLetters}
+                disabled={!selectedBulkTemplateId || isGeneratingBulk}
+                className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                {isGeneratingBulk ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <FileText size={16} />
+                )}
+                Üret
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-8 bg-slate-100/50">
+              {bulkGeneratedLetters.length > 0 ? (
+                <div id="bulk-mail-merge-content" className="space-y-8">
+                  {bulkGeneratedLetters.map((item, index) => (
+                    <div key={index} className="bg-[#ffffff] p-12 shadow-sm border border-[#e2e8f0] min-h-[800px] font-serif text-[#1e293b] whitespace-pre-wrap leading-relaxed relative">
+                      <div className="absolute top-4 right-4 text-xs font-sans font-bold text-slate-400 border border-slate-200 px-2 py-1 rounded bg-slate-50">
+                        {item.guest.GUESTNAMES} ({item.guest.NATIONALITY || 'Bilinmiyor'})
+                      </div>
+                      {item.content}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                  <FileText size={48} className="mb-4 opacity-20" />
+                  <p>Şablon seçip "Üret" butonuna basarak mektupları oluşturun.</p>
+                </div>
+              )}
+            </div>
+            
+            <div className="px-6 py-4 border-t border-slate-200 bg-white flex justify-end gap-3">
+              <button
+                onClick={() => setIsBulkMailMergeOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"
+              >
+                İptal
+              </button>
+              <button
+                onClick={handleSaveBulkPdf}
+                disabled={bulkGeneratedLetters.length === 0}
+                className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                <LogOut size={16} className="rotate-90" />
+                Tümünü PDF Olarak Kaydet
+              </button>
+              <button
+                onClick={handleMarkBulkAsSent}
+                disabled={bulkGeneratedLetters.length === 0}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                <Star size={16} />
+                Tümünü Gönderildi İşaretle
               </button>
             </div>
           </div>
