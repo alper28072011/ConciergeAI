@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Download, Users, CalendarDays, LogOut, Star } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star } from 'lucide-react';
 import { GuestData, CommentData, ApiSettings, GuestListTab } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { buildDynamicPayload, formatTRDate, findGuestComments } from '../utils';
@@ -8,14 +8,6 @@ export function GuestListModule() {
   const [guests, setGuests] = useState<GuestData[]>([]);
   const [isFetching, setIsFetching] = useState(false);
   const [activeTab, setActiveTab] = useState<GuestListTab>('inhouse');
-  
-  // Pagination state
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const tableContainerRef = useRef<HTMLDivElement>(null);
-
-  // Filter state: key is the column name (e.g., 'GUESTNAMES'), value is the search string
-  const [filters, setFilters] = useState<Record<string, string>>({});
   
   // Sorting state
   const [sortConfig, setSortConfig] = useState<{ key: keyof GuestData; direction: 'asc' | 'desc' } | null>(null);
@@ -35,14 +27,28 @@ export function GuestListModule() {
     return `${year}-${month}-${day}`;
   };
   
-  const [startDate, setStartDate] = useState(formatDate(oneMonthAgo));
-  const [endDate, setEndDate] = useState(formatDate(today));
+  // Search Form State
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [searchRoom, setSearchRoom] = useState('');
+  const [searchName, setSearchName] = useState('');
+  const [searchHasComment, setSearchHasComment] = useState<'all' | 'yes' | 'no'>('all');
 
-  const fetchGuestsAndComments = async (pageNumber: number) => {
+  // Clear results when tab changes, but DO NOT auto-fetch
+  useEffect(() => {
+    setGuests([]);
+    setExpandedRowId(null);
+  }, [activeTab]);
+
+  const handleSearch = async () => {
+    if (!startDate && !endDate && !searchRoom && !searchName && searchHasComment === 'all') {
+      alert('Lütfen arama yapmak için en az bir kriter (Tarih, Oda No veya Misafir Adı) belirleyin.');
+      return;
+    }
+
     const savedSettings = localStorage.getItem('hotelApiSettings');
     if (!savedSettings) {
-      // Silent fail or minimal alert, as this runs automatically
-      console.warn('API settings not found.');
+      alert('API ayarları bulunamadı. Lütfen önce ayarları yapın.');
       return;
     }
 
@@ -50,83 +56,129 @@ export function GuestListModule() {
     try {
       settings = JSON.parse(savedSettings);
     } catch (e) {
-      console.error('API settings parse error.');
+      alert('API ayarları okunamadı.');
       return;
     }
 
-    // Determine which template to use based on active tab
     let guestTemplate = '';
     switch (activeTab) {
-      case 'inhouse':
-        guestTemplate = settings.inhousePayloadTemplate || '';
-        break;
-      case 'reservation':
-        guestTemplate = settings.reservationPayloadTemplate || '';
-        break;
-      case 'checkout':
-        guestTemplate = settings.checkoutPayloadTemplate || '';
-        break;
+      case 'inhouse': guestTemplate = settings.inhousePayloadTemplate || ''; break;
+      case 'reservation': guestTemplate = settings.reservationPayloadTemplate || ''; break;
+      case 'checkout': guestTemplate = settings.checkoutPayloadTemplate || ''; break;
     }
 
-    if (!guestTemplate) {
-      console.warn(`Template not found for tab: ${activeTab}`);
-      return;
-    }
-
-    if (!settings.commentPayloadTemplate) {
-      console.warn('Comment template not found.');
+    if (!guestTemplate || !settings.commentPayloadTemplate) {
+      alert('Gerekli payload şablonları eksik.');
       return;
     }
 
     setIsFetching(true);
+    setGuests([]);
+    setExpandedRowId(null);
+
     try {
-      // 1. Prepare Payloads
+      // 1. Prepare Guest Payload
       const guestPayload = buildDynamicPayload(guestTemplate, settings, startDate, endDate);
-      const commentPayload = buildDynamicPayload(settings.commentPayloadTemplate, settings, startDate, endDate);
-
       if (!guestPayload) throw new Error("Guest payload failed.");
-      if (!commentPayload) throw new Error("Comment payload failed.");
 
-      // *** CRITICAL FIX: Inject Missing Fields for Cross-Matching ***
-      // The user's saved template might be missing these fields, so we force them in.
+      // Clean up empty filters (if user left dates blank, the replaced value is "")
+      if (guestPayload.Filters && Array.isArray(guestPayload.Filters)) {
+        guestPayload.Filters = guestPayload.Filters.filter((f: any) => f.Value !== "" && f.Value !== null && f.Value !== undefined);
+      } else {
+        guestPayload.Filters = [];
+      }
+
+      // Inject Advanced Filters into Guest Payload
+      if (searchRoom) {
+        guestPayload.Filters.push({ Column: "ROOMNO", Operator: "like", Value: searchRoom });
+      }
+      if (searchName) {
+        guestPayload.Filters.push({ Column: "GUESTNAMES", Operator: "like", Value: searchName });
+      }
+
+      // Inject Required Fields for Guest
       if (guestPayload.Select && Array.isArray(guestPayload.Select)) {
-        const requiredFields = ['RESGUESTID', 'CONTACTGUESTID', 'CONTACTPHONE', 'CONTACTEMAIL'];
+        const requiredFields = ['RESGUESTID', 'CONTACTGUESTID', 'CONTACTPHONE', 'CONTACTEMAIL', 'ROOMNO', 'CHECKIN', 'CHECKOUT', 'GUESTNAMES', 'RESID'];
         requiredFields.forEach(field => {
-          if (!guestPayload.Select.includes(field)) {
-            guestPayload.Select.push(field);
-          }
+          if (!guestPayload.Select.includes(field)) guestPayload.Select.push(field);
         });
       }
 
-      // Inject Paging for Guest List
-      if (!guestPayload.Paging) {
-        guestPayload.Paging = { ItemsPerPage: 100, Current: pageNumber };
-      } else {
-        guestPayload.Paging.Current = pageNumber;
-        // Ensure ItemsPerPage is set if missing, though template usually has it
-        if (!guestPayload.Paging.ItemsPerPage) guestPayload.Paging.ItemsPerPage = 100;
+      // We fetch a large chunk for the search result
+      guestPayload.Paging = { ItemsPerPage: 2000, Current: 1 };
+
+      // 2. Prepare Comment Payload (Wide Date Range or Fallback if empty)
+      let wideStartDate = "2000-01-01";
+      if (startDate) {
+        const fromDateObj = new Date(startDate);
+        fromDateObj.setMonth(fromDateObj.getMonth() - 3);
+        wideStartDate = fromDateObj.toISOString().split('T')[0];
+      }
+      
+      let wideEndDate = "2099-12-31";
+      if (endDate) {
+        const toDateObj = new Date(endDate);
+        toDateObj.setMonth(toDateObj.getMonth() + 1);
+        wideEndDate = toDateObj.toISOString().split('T')[0];
       }
 
-      // *** CRITICAL FIX: Increase Comment Limit ***
-      // To ensure we don't miss comments due to pagination, we request a larger batch.
-      if (!commentPayload.Paging) {
-        commentPayload.Paging = { ItemsPerPage: 2000, Current: 1 };
+      const commentPayload = buildDynamicPayload(settings.commentPayloadTemplate, settings, wideStartDate, wideEndDate);
+      if (!commentPayload) throw new Error("Comment payload failed.");
+
+      // Clean up empty filters for comments too
+      if (commentPayload.Filters && Array.isArray(commentPayload.Filters)) {
+        commentPayload.Filters = commentPayload.Filters.filter((f: any) => f.Value !== "" && f.Value !== null && f.Value !== undefined);
       } else {
-        commentPayload.Paging.ItemsPerPage = 2000;
-        commentPayload.Paging.Current = 1;
+        commentPayload.Filters = [];
       }
 
-      // 2. Execute Requests in Parallel
-      const [guestData, commentData] = await Promise.all([
+      // Inject Advanced Filters into Comment Payload to optimize fetching
+      if (searchRoom) {
+        commentPayload.Filters.push({ Column: "ROOMNO", Operator: "like", Value: searchRoom });
+      }
+      if (searchName) {
+        commentPayload.Filters.push({ Column: "GUESTNAMES", Operator: "like", Value: searchName });
+      }
+
+      // Inject Required Fields for Comment
+      if (commentPayload.Select && Array.isArray(commentPayload.Select)) {
+        const requiredCommentFields = [
+          'ROOMNO', 'CHECKIN', 'CHECKOUT', 'GUESTNAMES', 'RESID', 
+          'HOTELID', 'COMMENTDATE', 'COMMENT', 'ANSWER', 'SCORE', 'COMMENTSOURCEID_NAME'
+        ];
+        requiredCommentFields.forEach(field => {
+          if (!commentPayload.Select.includes(field)) commentPayload.Select.push(field);
+        });
+      }
+
+      // 3. Fetch Data Concurrently
+      const fetchAllComments = async () => {
+        let allComments: CommentData[] = [];
+        let commentPage = 1;
+        let hasMore = true;
+        while (hasMore && commentPage <= 10) { // Max 50k comments
+          commentPayload.Paging = { ItemsPerPage: 5000, Current: commentPage };
+          const res = await executeElektraQuery(commentPayload);
+          if (Array.isArray(res) && res.length > 0) {
+            allComments = [...allComments, ...res];
+            if (res.length < 5000) hasMore = false;
+            else commentPage++;
+          } else {
+            hasMore = false;
+          }
+        }
+        return allComments;
+      };
+
+      const [guestRes, commentsList] = await Promise.all([
         executeElektraQuery(guestPayload),
-        executeElektraQuery(commentPayload)
+        fetchAllComments()
       ]);
 
-      const guestsList: GuestData[] = Array.isArray(guestData) ? guestData : [];
-      const commentsList: CommentData[] = Array.isArray(commentData) ? commentData : [];
+      const guestsList: GuestData[] = Array.isArray(guestRes) ? guestRes : [];
 
-      // 3. Cross-Match Logic
-      const processedGuests = guestsList.map(guest => {
+      // 4. Cross-Match Logic
+      let processedGuests = guestsList.map(guest => {
         const matchedComments = findGuestComments(guest, commentsList);
         return {
           ...guest,
@@ -135,73 +187,26 @@ export function GuestListModule() {
         };
       });
 
-      // Update State
-      if (pageNumber === 1) {
-        setGuests(processedGuests);
-      } else {
-        setGuests(prev => [...prev, ...processedGuests]);
+      // 5. Local Filter for "Has Comment"
+      if (searchHasComment === 'yes') {
+        processedGuests = processedGuests.filter(g => g.hasComment);
+      } else if (searchHasComment === 'no') {
+        processedGuests = processedGuests.filter(g => !g.hasComment);
       }
 
-      // Check if we have more data
-      // If we received fewer items than requested (e.g. 100), it means we reached the end
-      const itemsPerPage = guestPayload.Paging.ItemsPerPage || 100;
-      if (guestsList.length < itemsPerPage) {
-        setHasMore(false);
-      } else {
-        setHasMore(true);
-      }
+      // 6. Deduplicate
+      const uniqueGuests = processedGuests.filter((guest, index, self) =>
+        index === self.findIndex((t) => t.RESID === guest.RESID)
+      );
 
-      setExpandedRowId(null); // Reset expansion only on new fetch? Maybe not needed for append.
-      // Actually, resetting expansion on append might be annoying if user is looking at a row.
-      // Only reset on page 1.
-      if (pageNumber === 1) {
-        setExpandedRowId(null);
-      }
+      setGuests(uniqueGuests);
 
     } catch (error: any) {
       console.error('Fetch error:', error);
-      // alert(`Veri çekilirken bir hata oluştu: ${error.message}`); // Don't spam alerts on scroll
+      alert(`Sorgulama sırasında bir hata oluştu: ${error.message}`);
     } finally {
       setIsFetching(false);
     }
-  };
-
-  // Reset and Fetch when Tab or Dates change
-  useEffect(() => {
-    setPage(1);
-    setGuests([]);
-    setHasMore(true);
-    fetchGuestsAndComments(1);
-  }, [activeTab, startDate, endDate]);
-
-  // Infinite Scroll Handler
-  const handleScroll = useCallback(() => {
-    if (tableContainerRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = tableContainerRef.current;
-      // Check if scrolled near bottom (within 50px)
-      if (scrollTop + clientHeight >= scrollHeight - 50) {
-        if (!isFetching && hasMore) {
-          const nextPage = page + 1;
-          setPage(nextPage);
-          fetchGuestsAndComments(nextPage);
-        }
-      }
-    }
-  }, [isFetching, hasMore, page, activeTab, startDate, endDate]); // Dependencies for closure
-
-  // Attach scroll listener
-  useEffect(() => {
-    const container = tableContainerRef.current;
-    if (container) {
-      container.addEventListener('scroll', handleScroll);
-      return () => container.removeEventListener('scroll', handleScroll);
-    }
-  }, [handleScroll]);
-
-
-  // Handle Filter Change
-  const handleFilterChange = (key: string, value: string) => {
-    setFilters(prev => ({ ...prev, [key]: value }));
   };
 
   // Handle Sort
@@ -213,31 +218,19 @@ export function GuestListModule() {
     setSortConfig({ key, direction });
   };
 
-  // Filter and Sort Data
+  // Sort Data
   const processedData = useMemo(() => {
-    // 1. Filter
-    let data = guests.filter(guest => {
-      return Object.entries(filters).every(([key, value]) => {
-        if (!value) return true;
-        const guestValue = String(guest[key as keyof GuestData] || '').toLowerCase();
-        return guestValue.includes(String(value).toLowerCase());
-      });
+    if (!sortConfig) return guests;
+    
+    return [...guests].sort((a, b) => {
+      const aValue = a[sortConfig.key] || '';
+      const bValue = b[sortConfig.key] || '';
+      
+      if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+      if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+      return 0;
     });
-
-    // 2. Sort
-    if (sortConfig) {
-      data.sort((a, b) => {
-        const aValue = a[sortConfig.key] || '';
-        const bValue = b[sortConfig.key] || '';
-        
-        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-      });
-    }
-
-    return data;
-  }, [guests, filters, sortConfig]);
+  }, [guests, sortConfig]);
 
   const toggleRow = (id: string) => {
     setExpandedRowId(expandedRowId === id ? null : id);
@@ -246,7 +239,7 @@ export function GuestListModule() {
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden">
       {/* Tab Navigation */}
-      <div className="bg-white border-b border-slate-200 px-6 pt-4">
+      <div className="bg-white border-b border-slate-200 px-6 pt-4 shrink-0">
         <div className="flex gap-6">
           <button
             onClick={() => setActiveTab('inhouse')}
@@ -284,51 +277,99 @@ export function GuestListModule() {
         </div>
       </div>
 
-      {/* Top Bar: Filters & Actions */}
-      <div className="bg-white border-b border-slate-200 p-4 flex flex-wrap items-center justify-between gap-4 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <Calendar className="absolute left-2.5 top-2.5 text-slate-400" size={16} />
+      {/* Advanced Search Bar */}
+      <div className="bg-white border-b border-slate-200 p-4 shrink-0">
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="flex-1 min-w-[100px] max-w-[120px]">
+            <label className="block text-xs font-medium text-slate-500 mb-1">Oda No</label>
             <input 
-              type="date" 
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+              type="text" 
+              placeholder="Örn: 101"
+              value={searchRoom}
+              onChange={(e) => setSearchRoom(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
             />
           </div>
-          <span className="text-slate-300">-</span>
-          <div className="relative">
-            <Calendar className="absolute left-2.5 top-2.5 text-slate-400" size={16} />
-            <input 
-              type="date" 
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-              className="pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
-            />
-          </div>
-          {/* Query button removed as per request, auto-fetch is active */}
-          {isFetching && (
-            <div className="flex items-center gap-2 text-slate-500 text-sm ml-2">
-              <div className="animate-spin w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full" />
-              Yükleniyor...
+          
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-xs font-medium text-slate-500 mb-1">Giriş Tarihi</label>
+            <div className="relative">
+              <Calendar className="absolute left-2.5 top-2.5 text-slate-400" size={16} />
+              <input 
+                type="date" 
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+              />
             </div>
-          )}
+          </div>
+
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-xs font-medium text-slate-500 mb-1">Çıkış Tarihi</label>
+            <div className="relative">
+              <Calendar className="absolute left-2.5 top-2.5 text-slate-400" size={16} />
+              <input 
+                type="date" 
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-xs font-medium text-slate-500 mb-1">Misafir Adı</label>
+            <input 
+              type="text" 
+              placeholder="Örn: John Doe"
+              value={searchName}
+              onChange={(e) => setSearchName(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+            />
+          </div>
+          <div className="flex-1 min-w-[150px]">
+            <label className="block text-xs font-medium text-slate-500 mb-1">Yorum Durumu</label>
+            <select 
+              value={searchHasComment}
+              onChange={(e) => setSearchHasComment(e.target.value as any)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+            >
+              <option value="all">Tümü</option>
+              <option value="yes">Yorum Yapanlar</option>
+              <option value="no">Yorum Yapmayanlar</option>
+            </select>
+          </div>
+          <button 
+            onClick={handleSearch}
+            disabled={isFetching}
+            className="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed h-[38px]"
+          >
+            {isFetching ? (
+              <div className="animate-spin w-4 h-4 border-2 border-white/30 border-t-white rounded-full" />
+            ) : (
+              <Search size={16} />
+            )}
+            Sorgula
+          </button>
         </div>
         
-        <div className="text-sm text-slate-500">
-          Toplam <strong>{processedData.length}</strong> misafir listeleniyor
-        </div>
+        {guests.length > 0 && (
+          <div className="mt-4 text-sm text-slate-500 flex items-center justify-between">
+            <span>Toplam <strong>{processedData.length}</strong> misafir listeleniyor</span>
+            {searchHasComment !== 'all' && (
+              <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
+                Filtre: {searchHasComment === 'yes' ? 'Sadece Yorum Yapanlar' : 'Yorum Yapmayanlar'}
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Table Container */}
-      <div 
-        ref={tableContainerRef}
-        className="flex-1 overflow-auto p-6"
-      >
+      <div className="flex-1 overflow-auto p-6">
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-w-[1000px]">
           <table className="w-full text-left border-collapse">
             <thead>
-              {/* Header Row 1: Titles */}
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider sticky top-0 z-10">
                 <th className="p-4 w-10 bg-slate-50"></th>
                 <th className="p-4 cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50" onClick={() => handleSort('ROOMNO')}>
@@ -352,79 +393,17 @@ export function GuestListModule() {
                 <th className="p-4 cursor-pointer hover:bg-slate-100 transition-colors bg-slate-50" onClick={() => handleSort('TOTALPRICE')}>
                   <div className="flex items-center gap-1">Tutar <ArrowUpDown size={12} /></div>
                 </th>
-                <th className="p-4 text-center bg-slate-50">Durum</th>
-              </tr>
-              
-              {/* Header Row 2: Filters */}
-              <tr className="bg-white border-b border-slate-200 sticky top-[49px] z-10 shadow-sm">
-                <th className="p-2 bg-slate-50/50">
-                  <Filter size={14} className="mx-auto text-slate-300" />
-                </th>
-                <th className="p-2 bg-white">
-                  <input 
-                    type="text" 
-                    placeholder="Ara..." 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:outline-none focus:border-emerald-500"
-                    onChange={(e) => handleFilterChange('ROOMNO', e.target.value)}
-                  />
-                </th>
-                <th className="p-2 bg-white">
-                  <input 
-                    type="text" 
-                    placeholder="Ara..." 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:outline-none focus:border-emerald-500"
-                    onChange={(e) => handleFilterChange('GUESTNAMES', e.target.value)}
-                  />
-                </th>
-                <th className="p-2 bg-white">
-                  <input 
-                    type="text" 
-                    placeholder="Yıl-Ay-Gün" 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:outline-none focus:border-emerald-500"
-                    onChange={(e) => handleFilterChange('CHECKIN', e.target.value)}
-                  />
-                </th>
-                <th className="p-2 bg-white">
-                  <input 
-                    type="text" 
-                    placeholder="Yıl-Ay-Gün" 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:outline-none focus:border-emerald-500"
-                    onChange={(e) => handleFilterChange('CHECKOUT', e.target.value)}
-                  />
-                </th>
-                <th className="p-2 bg-white">
-                  <input 
-                    type="text" 
-                    placeholder="Ara..." 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:outline-none focus:border-emerald-500"
-                    onChange={(e) => handleFilterChange('AGENCY', e.target.value)}
-                  />
-                </th>
-                <th className="p-2 bg-white">
-                  <input 
-                    type="text" 
-                    placeholder="Ara..." 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:outline-none focus:border-emerald-500"
-                    onChange={(e) => handleFilterChange('ROOMTYPE', e.target.value)}
-                  />
-                </th>
-                <th className="p-2 bg-white">
-                  {/* Price filter could be range, but text for now */}
-                  <input 
-                    type="text" 
-                    placeholder="Ara..." 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:outline-none focus:border-emerald-500"
-                    onChange={(e) => handleFilterChange('TOTALPRICE', e.target.value)}
-                  />
-                </th>
-                <th className="p-2 bg-white"></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {processedData.length === 0 && !isFetching ? (
                 <tr>
-                  <td colSpan={9} className="p-8 text-center text-slate-400">
-                    Veri bulunamadı.
+                  <td colSpan={8} className="p-12 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-3">
+                      <Search size={32} className="text-slate-300" />
+                      <p>Arama kriterlerinize uygun misafir bulunamadı.</p>
+                      <p className="text-xs">Lütfen yukarıdaki panelden kriterleri belirleyip "Sorgula" butonuna basın.</p>
+                    </div>
                   </td>
                 </tr>
               ) : (
@@ -458,13 +437,10 @@ export function GuestListModule() {
                       <td className="p-4 text-sm text-slate-600 font-mono">
                         {guest.TOTALPRICE?.toLocaleString('tr-TR', { style: 'currency', currency: 'TRY' })}
                       </td>
-                      <td className="p-4 text-center">
-                        {/* Status column - kept empty or for other status */}
-                      </td>
                     </tr>
                     {expandedRowId === guest.RESID && (
                       <tr className="bg-slate-50/50">
-                        <td colSpan={9} className="p-0">
+                        <td colSpan={8} className="p-0">
                           <div className="p-6 border-t border-b border-slate-200 shadow-inner bg-slate-50">
                             <div className="max-w-4xl mx-auto">
                               <h4 className="text-sm font-semibold text-slate-800 mb-4 flex items-center gap-2">
@@ -579,16 +555,6 @@ export function GuestListModule() {
                     )}
                   </React.Fragment>
                 ))
-              )}
-              {isFetching && page > 1 && (
-                 <tr>
-                  <td colSpan={9} className="p-4 text-center text-slate-500">
-                    <div className="flex items-center justify-center gap-2">
-                      <div className="animate-spin w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full" />
-                      Daha fazla yükleniyor...
-                    </div>
-                  </td>
-                </tr>
               )}
             </tbody>
           </table>

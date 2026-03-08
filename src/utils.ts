@@ -48,46 +48,70 @@ export const formatTRDate = (dateString: string) => {
 };
 
 export const findGuestComments = (guest: GuestData, allComments: CommentData[]): CommentData[] => {
+  if (!allComments || allComments.length === 0) return [];
+
+  // Tarihlerden saat bilgisini temizleyip sadece YYYY-MM-DD formatını alan yardımcı fonksiyon
+  const normalizeDate = (dateStr: string | undefined) => {
+    if (!dateStr) return '';
+    
+    if (dateStr.includes('T')) {
+      return dateStr.split('T')[0];
+    }
+    
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+      return dateStr;
+    }
+
+    try {
+      const d = new Date(dateStr);
+      if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+    } catch (e) {
+      // Parse edilemedi
+    }
+    
+    return dateStr;
+  };
+
+  const guestRoom = String(guest.ROOMNO || '').trim().toUpperCase();
+  const guestCheckIn = normalizeDate(guest.CHECKIN);
+  const guestCheckOut = normalizeDate(guest.CHECKOUT);
+
   return allComments.filter(comment => {
-    // 1. ALTIN ANAHTAR (Kesin Eşleşme): GUESTID
-    if (comment.GUESTID) {
-      const cGuestId = String(comment.GUESTID);
-      if ((guest.RESGUESTID && String(guest.RESGUESTID) === cGuestId) || 
-          (guest.CONTACTGUESTID && String(guest.CONTACTGUESTID) === cGuestId)) {
+    const commentRoom = String(comment.ROOMNO || '').trim().toUpperCase();
+    
+    // 1. Kriter: Oda Numarası Kesinlikle Eşleşmeli
+    if (!guestRoom || !commentRoom || guestRoom !== commentRoom) return false;
+
+    const commentCheckIn = normalizeDate(comment.CHECKIN);
+    const commentCheckOut = normalizeDate(comment.CHECKOUT);
+    const commentDate = normalizeDate(comment.COMMENTDATE);
+
+    // 2. Kriter: Eğer yorumda CheckIn ve CheckOut varsa, BİREBİR eşleşme ara (En güvenilir)
+    if (commentCheckIn && commentCheckOut) {
+      if (guestCheckIn === commentCheckIn && guestCheckOut === commentCheckOut) {
         return true;
       }
     }
 
-    // 2. Email Eşleşmesi (Boşlukları silip küçük harfe çevirerek)
-    const gEmail = guest.CONTACTEMAIL?.toLowerCase().trim();
-    const cEmail = comment.EMAIL?.toLowerCase().trim();
-    if (gEmail && cEmail && gEmail === cEmail) return true;
-
-    // 3. Telefon Eşleşmesi (Tüm boşluk, +, -, (, ) karakterlerini temizleyerek)
-    const cleanPhone = (p?: string) => p ? p.replace(/[\s\-\+\(\)]/g, '') : '';
-    const gPhone = cleanPhone(guest.CONTACTPHONE);
-    const cPhone = cleanPhone(comment.PHONE);
-    if (gPhone && cPhone && gPhone === cPhone) return true;
-
-    // 4. Lookup String Parçalama ve İsim/Oda Analizi
-    if (comment.RESNAMEID_LOOKUP && guest.ROOMNO) {
-      const parts = comment.RESNAMEID_LOOKUP.split('-');
-      const lookupRoom = parts[0];
-      const lookupName = parts[1] ? parts[1].toLowerCase().trim() : '';
-      const guestNames = (guest.GUESTNAMES || guest.CONTACTPERSON || '').toLowerCase();
-
-      if (lookupRoom === String(guest.ROOMNO)) {
-        // Oda aynıysa ve isim de içeriyorsa kesin bu kişidir
-        if (lookupName && guestNames.includes(lookupName)) return true;
-      }
-    }
-
-    // 5. Fallback: Sadece Oda No ve CheckIn Tarihi (Sadece YYYY-MM-DD kısmını alarak saatleri yoksay)
-    if (guest.ROOMNO && comment.ROOMNO && String(guest.ROOMNO) === String(comment.ROOMNO)) {
-      const guestCheckIn = guest.CHECKIN?.split(' ')[0]?.split('T')[0];
-      const commentCheckIn = comment.CHECKIN?.split(' ')[0]?.split('T')[0];
+    // 3. Kriter (Fallback): Eğer yorumda CheckIn/CheckOut yoksa veya eşleşmediyse, 
+    // Yorum Tarihi (COMMENTDATE), misafirin konaklama tarihleri arasında mı diye bak.
+    // (Çıkıştan sonraki 14 gün içinde yapılmış yorumları da o konaklamaya say)
+    if (guestCheckIn && guestCheckOut && commentDate) {
+      const gIn = new Date(guestCheckIn).getTime();
+      const gOut = new Date(guestCheckOut).getTime();
+      const cDate = new Date(commentDate).getTime();
       
-      if (guestCheckIn && commentCheckIn && guestCheckIn === commentCheckIn) return true;
+      // Çıkış tarihine 14 gün tolerans ekle (Misafir çıktıktan sonra yorum yapabilir)
+      const gOutTolerated = gOut + (14 * 24 * 60 * 60 * 1000);
+
+      if (cDate >= gIn && cDate <= gOutTolerated) {
+        return true;
+      }
     }
 
     return false;
