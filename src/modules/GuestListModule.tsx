@@ -326,38 +326,49 @@ export function GuestListModule() {
   };
 
   const handleSavePdf = async () => {
-    const html2pdf = (await import('html2pdf.js')).default;
-    const element = document.getElementById('mail-merge-content');
-    if (!element) return;
+    try {
+      const htmlToImage = await import('html-to-image');
+      const { jsPDF } = await import('jspdf');
+      
+      const element = document.getElementById('mail-merge-content');
+      if (!element) return;
 
-    const opt: any = {
-      margin:       1,
-      filename:     `${selectedGuestForMail?.GUESTNAMES || 'Misafir'}_Mektup.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { 
-        scale: 2,
-        onclone: (clonedDoc: Document) => {
-          // Remove all stylesheets to prevent html2canvas from parsing oklch colors (Tailwind v4)
-          const styles = clonedDoc.querySelectorAll('style, link[rel="stylesheet"]');
-          styles.forEach(s => s.remove());
-          
-          // Apply inline styles to the target element since we removed the stylesheets
-          const el = clonedDoc.getElementById('mail-merge-content');
-          if (el) {
-            el.style.backgroundColor = '#ffffff';
-            el.style.color = '#1e293b';
-            el.style.padding = '48px';
-            el.style.fontFamily = 'serif';
-            el.style.whiteSpace = 'pre-wrap';
-            el.style.lineHeight = '1.625';
-            el.style.fontSize = '14px';
-          }
+      // html-to-image works best with elements already in the DOM.
+      // We pass the element directly and use the 'style' option to force A4 dimensions during capture.
+      const imgData = await htmlToImage.toJpeg(element, {
+        quality: 1.0,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+        style: {
+          width: '794px', // A4 width at 96 DPI
+          minHeight: '1123px', // A4 height at 96 DPI
+          padding: '75px', // ~20mm margin
+          margin: '0',
+          border: 'none',
+          boxShadow: 'none',
+          transform: 'none',
+          boxSizing: 'border-box',
+          overflow: 'visible',
+          position: 'static'
         }
-      },
-      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-    };
+      });
 
-    html2pdf().set(opt).from(element).save();
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const pdfWidth = 210;
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`${selectedGuestForMail?.GUESTNAMES || 'Misafir'}_Mektup.pdf`);
+    } catch (error) {
+      console.error("Error generating PDF:", error);
+      alert("PDF oluşturulurken bir hata oluştu.");
+    }
   };
 
   const handleMarkAsSent = async () => {
@@ -463,35 +474,61 @@ export function GuestListModule() {
   };
 
   const handleSaveBulkPdf = async () => {
-    const html2pdf = (await import('html2pdf.js')).default;
-    const element = document.getElementById('bulk-mail-merge-content');
-    if (!element) return;
+    setIsGeneratingBulk(true);
+    try {
+      const htmlToImage = await import('html-to-image');
+      const { jsPDF } = await import('jspdf');
+      
+      const letters = document.querySelectorAll('.letter-container');
+      if (letters.length === 0) return;
 
-    const opt: any = {
-      margin:       1,
-      filename:     `Toplu_Mektuplar_${new Date().toISOString().split('T')[0]}.pdf`,
-      image:        { type: 'jpeg', quality: 0.98 },
-      html2canvas:  { 
-        scale: 2,
-        onclone: (clonedDoc: Document) => {
-          const styles = clonedDoc.querySelectorAll('style, link[rel="stylesheet"]');
-          styles.forEach(s => s.remove());
-          
-          const el = clonedDoc.getElementById('bulk-mail-merge-content');
-          if (el) {
-            el.style.backgroundColor = '#ffffff';
-            el.style.color = '#1e293b';
-            el.style.fontFamily = 'serif';
-            el.style.whiteSpace = 'pre-wrap';
-            el.style.lineHeight = '1.625';
-            el.style.fontSize = '14px';
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      for (let i = 0; i < letters.length; i++) {
+        const letter = letters[i] as HTMLElement;
+        
+        // Pass the existing DOM element directly to avoid blank rendering issues.
+        // Use the 'style' option to force A4 dimensions during the internal cloning process.
+        const imgData = await htmlToImage.toJpeg(letter, {
+          quality: 1.0,
+          pixelRatio: 2,
+          backgroundColor: '#ffffff',
+          style: {
+            width: '794px', // A4 width at 96 DPI
+            minHeight: '1123px', // A4 height at 96 DPI
+            padding: '75px', // ~20mm margin
+            margin: '0',
+            border: 'none',
+            boxShadow: 'none',
+            transform: 'none',
+            boxSizing: 'border-box',
+            overflow: 'visible',
+            position: 'static'
           }
+        });
+        
+        if (i > 0) {
+          pdf.addPage();
         }
-      },
-      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-    };
+        
+        const pdfWidth = 210;
+        const imgProps = pdf.getImageProperties(imgData);
+        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      }
 
-    html2pdf().set(opt).from(element).save();
+      pdf.save(`Toplu_Mektuplar_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (error) {
+      console.error("Error generating bulk PDF:", error);
+      alert("PDF oluşturulurken bir hata oluştu.");
+    } finally {
+      setIsGeneratingBulk(false);
+    }
   };
 
   const handleMarkBulkAsSent = async () => {
@@ -996,10 +1033,9 @@ export function GuestListModule() {
               ) : (
                 <div 
                   id="mail-merge-content"
-                  className="bg-[#ffffff] p-12 shadow-sm border border-[#e2e8f0] min-h-[800px] font-serif text-[#1e293b] whitespace-pre-wrap leading-relaxed"
-                >
-                  {generatedLetterContent}
-                </div>
+                  className="bg-[#ffffff] p-12 shadow-sm border border-[#e2e8f0] min-h-[297mm] font-serif text-[#1e293b] leading-relaxed prose prose-slate max-w-none"
+                  dangerouslySetInnerHTML={{ __html: generatedLetterContent }}
+                />
               )}
             </div>
             
@@ -1080,12 +1116,19 @@ export function GuestListModule() {
               {bulkGeneratedLetters.length > 0 ? (
                 <div id="bulk-mail-merge-content" className="space-y-8">
                   {bulkGeneratedLetters.map((item, index) => (
-                    <div key={index} className="bg-[#ffffff] p-12 shadow-sm border border-[#e2e8f0] min-h-[800px] font-serif text-[#1e293b] whitespace-pre-wrap leading-relaxed relative">
-                      <div className="absolute top-4 right-4 text-xs font-sans font-bold text-slate-400 border border-slate-200 px-2 py-1 rounded bg-slate-50">
-                        {item.guest.GUESTNAMES} ({item.guest.NATIONALITY || 'Bilinmiyor'})
+                    <React.Fragment key={index}>
+                      <div 
+                        className="letter-container bg-[#ffffff] p-12 shadow-sm border border-[#e2e8f0] min-h-[297mm] font-serif text-[#1e293b] leading-relaxed relative prose prose-slate max-w-none"
+                      >
+                        <div className="absolute top-4 right-4 text-xs font-sans font-bold text-slate-400 border border-slate-200 px-2 py-1 rounded bg-slate-50">
+                          {item.guest.GUESTNAMES} ({item.guest.NATIONALITY || 'Bilinmiyor'})
+                        </div>
+                        <div dangerouslySetInnerHTML={{ __html: item.content }} />
                       </div>
-                      {item.content}
-                    </div>
+                      {index < bulkGeneratedLetters.length - 1 && (
+                        <div className="html2pdf__page-break"></div>
+                      )}
+                    </React.Fragment>
                   ))}
                 </div>
               ) : (

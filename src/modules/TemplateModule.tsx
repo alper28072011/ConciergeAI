@@ -3,6 +3,8 @@ import { LetterTemplate } from '../types';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
 import { Save, Trash2, Plus, FileText, Copy, CheckCircle2, LayoutTemplate, Globe, X } from 'lucide-react';
+import ReactQuill from 'react-quill-new';
+import 'react-quill-new/dist/quill.snow.css';
 
 export function TemplateModule() {
   const [templates, setTemplates] = useState<LetterTemplate[]>([]);
@@ -141,6 +143,16 @@ export function TemplateModule() {
 
   const handleContentChange = (value: string) => {
     setContents(prev => ({ ...prev, [activeLang]: value }));
+  };
+
+  const quillModules = {
+    toolbar: [
+      ['bold', 'italic', 'underline'],
+      [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+      [{ 'align': [] }],
+      ['link', 'image'],
+      ['clean']
+    ],
   };
 
   const smartTags = ['{{GUESTNAMES}}', '{{ROOMNO}}', '{{CHECKIN}}', '{{CHECKOUT}}', '{{AGENCY}}'];
@@ -341,13 +353,16 @@ export function TemplateModule() {
                         ))}
                       </div>
                     </div>
-                    <textarea 
-                      value={contents[activeLang] || ''}
-                      onChange={(e) => handleContentChange(e.target.value)}
-                      rows={15}
-                      placeholder={`Sayın {{GUESTNAMES}}, otelimize hoş geldiniz...\n\n(${activeLang} dilinde içerik girin)`}
-                      className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-sans resize-y"
-                    />
+                    <div className="bg-white rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500 transition-all">
+                      <ReactQuill 
+                        theme="snow"
+                        value={contents[activeLang] || ''}
+                        onChange={handleContentChange}
+                        modules={quillModules}
+                        placeholder={`Sayın {{GUESTNAMES}}, otelimize hoş geldiniz...\n\n(${activeLang} dilinde içerik girin)`}
+                        className="h-[300px] font-sans"
+                      />
+                    </div>
                     <p className="text-xs text-slate-500">
                       İpucu: Yukarıdaki akıllı etiketleri kopyalayıp metin içine yapıştırarak misafire özel alanlar oluşturabilirsiniz.
                     </p>
