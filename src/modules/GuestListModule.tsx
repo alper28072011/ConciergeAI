@@ -1,8 +1,11 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText } from 'lucide-react';
+import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText, Brain, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { GuestData, CommentData, ApiSettings, GuestListTab } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { buildDynamicPayload, formatTRDate, findGuestComments } from '../utils';
+import { GoogleGenAI, Type } from "@google/genai";
+import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { db } from '../firebase';
 
 export function GuestListModule() {
   const [guests, setGuests] = useState<GuestData[]>([]);
@@ -176,28 +179,41 @@ export function GuestListModule() {
         setHasMoreData(false);
       }
 
-      // 4. Fetch Survey Logs
+      // 4. Fetch Survey Logs and Guest Interactions
       let surveyLogs: any[] = [];
+      let guestInteractions: Record<string, any> = {};
       try {
-        const { collection, getDocs } = await import('firebase/firestore');
-        const { db } = await import('../firebase');
-        const querySnapshot = await getDocs(collection(db, 'survey_logs'));
-        querySnapshot.forEach(doc => {
+        const [surveySnapshot, interactionsSnapshot] = await Promise.all([
+          getDocs(collection(db, 'survey_logs')),
+          getDocs(collection(db, 'guest_interactions'))
+        ]);
+        
+        surveySnapshot.forEach(doc => {
           surveyLogs.push(doc.data());
         });
+        
+        interactionsSnapshot.forEach(doc => {
+          guestInteractions[doc.id] = doc.data();
+        });
       } catch (e) {
-        console.error("Error fetching survey logs:", e);
+        console.error("Error fetching firebase data:", e);
       }
 
       // 5. Cross-Match Logic
       let processedGuests = guestsList.map(guest => {
         const matchedComments = findGuestComments(guest, commentsList);
         const hasSurveySent = surveyLogs.some(log => log.guestId === guest.RESID);
+        const interaction = guestInteractions[guest.RESID] || {};
+        
         return {
           ...guest,
           hasComment: matchedComments.length > 0,
           comments: matchedComments,
-          surveySent: hasSurveySent
+          surveySent: hasSurveySent,
+          sentimentScore: interaction.sentimentScore,
+          sentimentAnalysisDate: interaction.sentimentAnalysisDate,
+          generatedLetter: interaction.generatedLetter,
+          letterSentDate: interaction.letterSentDate
         };
       });
 
@@ -263,17 +279,94 @@ export function GuestListModule() {
     setExpandedRowId(expandedRowId === id ? null : id);
   };
 
+  const handleAnalyzeSentiment = async (guest: GuestData) => {
+    if (!guest.comments || guest.comments.length === 0) {
+      alert("Analiz edilecek yorum bulunamadı.");
+      return;
+    }
+
+    if (guest.sentimentScore !== undefined) {
+      const confirmReanalyze = window.confirm("Bu misafir için daha önce duygu analizi yapılmış. Tekrar analiz etmek istiyor musunuz? (Token tüketimi artacaktır)");
+      if (!confirmReanalyze) return;
+    }
+
+    const savedSettings = localStorage.getItem('hotelApiSettings');
+    const settings: ApiSettings = savedSettings ? JSON.parse(savedSettings) : {};
+    const apiKey = process.env.GEMINI_API_KEY || settings.geminiApiKey;
+
+    if (!apiKey) {
+      alert("Gemini API anahtarı bulunamadı. Lütfen ayarlardan yapılandırın.");
+      return;
+    }
+
+    setIsFetching(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const commentText = guest.comments.map(c => c.COMMENT).join("\n\n");
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Aşağıdaki otel misafir yorumunu analiz et ve misafirin genel memnuniyetini 0 ile 1 arasında bir sayı olarak ver. 
+        0: Tamamen memnuniyetsiz, 1: Tamamen memnun.
+        Sadece sayıyı döndür, başka açıklama yapma.
+        
+        Yorum:
+        ${commentText}`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              score: { type: Type.NUMBER, description: "0-1 arası memnuniyet puanı" }
+            },
+            required: ["score"]
+          }
+        }
+      });
+
+      const result = JSON.parse(response.text);
+      const score = result.score;
+
+      // Save to Firebase
+      const interactionRef = doc(db, 'guest_interactions', guest.RESID);
+      await setDoc(interactionRef, {
+        sentimentScore: score,
+        sentimentAnalysisDate: new Date().toISOString()
+      }, { merge: true });
+
+      // Update local state
+      setGuests(prev => prev.map(g => g.RESID === guest.RESID ? { 
+        ...g, 
+        sentimentScore: score, 
+        sentimentAnalysisDate: new Date().toISOString() 
+      } : g));
+
+      alert(`Analiz tamamlandı. Memnuniyet Oranı: %${(score * 100).toFixed(0)}`);
+    } catch (error) {
+      console.error("Sentiment analysis error:", error);
+      alert("Duygu analizi sırasında bir hata oluştu.");
+    } finally {
+      setIsFetching(false);
+    }
+  };
+
   const openMailMergeModal = async (guest: GuestData) => {
+    if (guest.generatedLetter) {
+      const confirmRegenerate = window.confirm("Bu misafir için daha önce mektup üretilmiş. Tekrar üretmek istiyor musunuz?");
+      if (!confirmRegenerate) {
+        setSelectedGuestForMail(guest);
+        setGeneratedLetterContent(guest.generatedLetter);
+        setIsMailMergeModalOpen(true);
+        return;
+      }
+    }
+
     setSelectedGuestForMail(guest);
     setIsGeneratingLetter(true);
     setIsMailMergeModalOpen(true);
     setGeneratedLetterContent('');
 
     try {
-      // 1. Fetch templates from Firebase
-      const { collection, getDocs } = await import('firebase/firestore');
-      const { db } = await import('../firebase');
-      
       const querySnapshot = await getDocs(collection(db, 'letter_templates'));
       const templates: any[] = [];
       querySnapshot.forEach((doc) => {
@@ -317,6 +410,15 @@ export function GuestListModule() {
       content = content.replace(/{{AGENCY}}/g, guest.AGENCY || '');
 
       setGeneratedLetterContent(content);
+
+      // Save generated letter to Firebase
+      const interactionRef = doc(db, 'guest_interactions', guest.RESID);
+      await setDoc(interactionRef, {
+        generatedLetter: content
+      }, { merge: true });
+
+      // Update local state
+      setGuests(prev => prev.map(g => g.RESID === guest.RESID ? { ...g, generatedLetter: content } : g));
     } catch (error) {
       console.error("Error generating letter:", error);
       setGeneratedLetterContent('Şablon oluşturulurken bir hata oluştu.');
@@ -386,8 +488,18 @@ export function GuestListModule() {
         createdAt: serverTimestamp()
       });
 
+      // Update interaction log
+      const interactionRef = doc(db, 'guest_interactions', selectedGuestForMail.RESID);
+      await setDoc(interactionRef, {
+        letterSentDate: new Date().toISOString()
+      }, { merge: true });
+
       // Update local state to reflect the change
-      setGuests(prev => prev.map(g => g.RESID === selectedGuestForMail.RESID ? { ...g, surveySent: true } : g));
+      setGuests(prev => prev.map(g => g.RESID === selectedGuestForMail.RESID ? { 
+        ...g, 
+        surveySent: true,
+        letterSentDate: new Date().toISOString()
+      } : g));
       
       alert('Başarıyla gönderildi olarak işaretlendi.');
       setIsMailMergeModalOpen(false);
@@ -467,7 +579,20 @@ export function GuestListModule() {
       content = content.replace(/{{AGENCY}}/g, guest.AGENCY || '');
 
       generated.push({ guest, content });
+
+      // Save to Firebase
+      const interactionRef = doc(db, 'guest_interactions', guest.RESID);
+      await setDoc(interactionRef, {
+        generatedLetter: content
+      }, { merge: true });
     }
+
+    // Update local state for all generated guests
+    const generatedIds = generated.map(g => g.guest.RESID);
+    setGuests(prev => prev.map(g => {
+      const gen = generated.find(item => item.guest.RESID === g.RESID);
+      return gen ? { ...g, generatedLetter: gen.content } : g;
+    }));
 
     setBulkGeneratedLetters(generated);
     setIsGeneratingBulk(false);
@@ -694,6 +819,13 @@ export function GuestListModule() {
                   </div>
                 </th>
                 <th className="p-3 w-10 bg-slate-50 align-top"></th>
+                <th className="p-3 bg-slate-50 align-top min-w-[120px]">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex items-center gap-1">
+                      Durum & Analiz
+                    </div>
+                  </div>
+                </th>
                 
                 <th className="p-3 bg-slate-50 align-top min-w-[100px]">
                   <div className="flex flex-col gap-2">
@@ -797,7 +929,7 @@ export function GuestListModule() {
             <tbody className="divide-y divide-slate-100">
               {processedData.length === 0 && !isFetching ? (
                 <tr>
-                  <td colSpan={9} className="p-16 text-center text-slate-400">
+                  <td colSpan={10} className="p-16 text-center text-slate-400">
                     <div className="flex flex-col items-center justify-center gap-4">
                       <div className="w-16 h-16 rounded-full bg-slate-50 flex items-center justify-center border border-slate-100">
                         <Search size={24} className="text-slate-300" />
@@ -827,6 +959,66 @@ export function GuestListModule() {
                       <td className="p-4 text-center text-slate-400">
                         {expandedRowId === guest.RESID ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                       </td>
+                      <td className="p-4">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1.5">
+                            {guest.hasComment ? (
+                              <MessageSquare size={14} className="text-blue-500" title="Yorum Var" />
+                            ) : (
+                              <MessageSquare size={14} className="text-slate-200" title="Yorum Yok" />
+                            )}
+                            
+                            {guest.sentimentScore !== undefined ? (
+                              <Brain size={14} className="text-purple-500" title={`Analiz Edildi: %${(guest.sentimentScore * 100).toFixed(0)}`} />
+                            ) : (
+                              <Brain size={14} className="text-slate-200" title="Analiz Edilmedi" />
+                            )}
+
+                            {guest.generatedLetter ? (
+                              <FileText size={14} className="text-amber-500" title="Mektup Üretildi" />
+                            ) : (
+                              <FileText size={14} className="text-slate-200" title="Mektup Üretilmedi" />
+                            )}
+
+                            {guest.surveySent ? (
+                              <CheckCircle2 size={14} className="text-emerald-500" title="Mektup Gönderildi" />
+                            ) : (
+                              <CheckCircle2 size={14} className="text-slate-200" title="Mektup Gönderilmedi" />
+                            )}
+                          </div>
+                          
+                          {guest.sentimentScore !== undefined && (
+                            <div className="flex flex-col gap-0.5 mt-1">
+                              <div className="flex justify-between items-center text-[10px] font-bold text-slate-500">
+                                <span>Memnuniyet</span>
+                                <span>%{(guest.sentimentScore * 100).toFixed(0)}</span>
+                              </div>
+                              <div className="w-full h-1 bg-slate-100 rounded-full overflow-hidden">
+                                <div 
+                                  className={`h-full transition-all duration-500 ${
+                                    guest.sentimentScore > 0.7 ? 'bg-emerald-500' : 
+                                    guest.sentimentScore > 0.4 ? 'bg-amber-500' : 'bg-red-500'
+                                  }`}
+                                  style={{ width: `${guest.sentimentScore * 100}%` }}
+                                />
+                              </div>
+                            </div>
+                          )}
+
+                          {guest.hasComment && guest.sentimentScore === undefined && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleAnalyzeSentiment(guest);
+                              }}
+                              className="mt-1 text-[10px] font-bold text-purple-600 hover:text-purple-700 flex items-center gap-0.5"
+                            >
+                              <RefreshCw size={10} />
+                              Analiz Et
+                            </button>
+                          )}
+                        </div>
+                      </td>
                       <td className="p-4 text-sm font-medium text-slate-900 relative">
                         {guest.ROOMNO}
                         {guest.hasComment && (
@@ -851,7 +1043,7 @@ export function GuestListModule() {
                     </tr>
                     {expandedRowId === guest.RESID && (
                       <tr className="bg-slate-50/50">
-                        <td colSpan={9} className="p-0">
+                        <td colSpan={10} className="p-0">
                           <div className="p-6 border-t border-b border-slate-200 shadow-inner bg-slate-50">
                             <div className="max-w-4xl mx-auto">
                               <div className="flex items-center justify-between mb-4">

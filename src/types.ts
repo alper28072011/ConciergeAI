@@ -39,6 +39,10 @@ export interface GuestData {
   hasComment?: boolean;
   comments?: CommentData[];
   surveySent?: boolean;
+  sentimentScore?: number;
+  sentimentAnalysisDate?: string;
+  generatedLetter?: string;
+  letterSentDate?: string;
 }
 
 export interface LetterTemplate {
