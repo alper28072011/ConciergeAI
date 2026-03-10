@@ -400,6 +400,24 @@ The letter should be empathetic, professional, and address the guest's feedback 
               </div>
             </div>
             <p className="text-slate-800 text-lg leading-relaxed">{comment.COMMENT}</p>
+            
+            {/* Grouped Details Badges */}
+            {comment.details && comment.details.length > 0 && (
+              <div className="mt-4 flex flex-wrap gap-2">
+                {comment.details.map((detail, dIdx) => (
+                  <span 
+                    key={dIdx} 
+                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                      detail.type === 'Positive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                      detail.type === 'Negative' ? 'bg-red-50 text-red-700 border-red-200' :
+                      'bg-slate-50 text-slate-700 border-slate-200'
+                    }`}
+                  >
+                    {detail.depName} {detail.groupName ? `- ${detail.groupName}` : ''}
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 

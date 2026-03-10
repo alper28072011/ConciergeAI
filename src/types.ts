@@ -19,6 +19,12 @@ export interface CommentData {
   SMSCONFIRMED?: boolean;
   WHATSAPPCONFIRMED?: boolean;
   SCORE?: number;
+  details?: {
+    depName: string;
+    groupName: string;
+    type: string;
+    detail: string;
+  }[];
 }
 
 export interface CommentDetailData {

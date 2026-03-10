@@ -3,7 +3,7 @@ import { Sidebar } from '../components/Sidebar';
 import { DetailPanel } from '../components/DetailPanel';
 import { CommentData, ApiSettings } from '../types';
 import { executeElektraQuery } from '../services/api';
-import { buildDynamicPayload } from '../utils';
+import { buildDynamicPayload, groupCommentDetails } from '../utils';
 import { collection, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -61,8 +61,8 @@ export function LetterModule() {
       return;
     }
 
-    if (!settings.commentPayloadTemplate) {
-      alert('Yorum listesi şablonu bulunamadı. Lütfen ayarlardan kontrol edin.');
+    if (!settings.commentPayloadTemplate || !settings.commentDetailPayloadTemplate) {
+      alert('Yorum listesi veya detay şablonu bulunamadı. Lütfen ayarlardan kontrol edin.');
       return;
     }
 
@@ -117,9 +117,56 @@ export function LetterModule() {
       // Add Paging
       payload.Paging = { ItemsPerPage: fetchLimit, Current: targetPage };
 
-      const data = await executeElektraQuery(payload);
+      // Prepare Comment Detail Payload
+      const detailPayload = buildDynamicPayload(
+        settings.commentDetailPayloadTemplate,
+        settings,
+        dateFilters,
+        startDate,
+        endDate
+      );
+
+      if (!detailPayload) throw new Error("Detail Payload oluşturulamadı.");
+
+      if (!detailPayload.Where) detailPayload.Where = [];
+      detailPayload.Where = detailPayload.Where.filter((w: any) => w.Column !== 'COMMENTDATE');
       
-      const fetchedComments: CommentData[] = Array.isArray(data) ? data : [];
+      if (startDate) {
+        detailPayload.Where.push({
+          Column: "COMMENTDATE",
+          Operator: ">=",
+          Value: startDate
+        });
+      }
+      
+      if (endDate) {
+        detailPayload.Where.push({
+          Column: "COMMENTDATE",
+          Operator: "<=",
+          Value: endDate
+        });
+      }
+
+      // Fetch details up to 2000 items to ensure we get most details for the current page
+      detailPayload.Paging = { ItemsPerPage: 2000, Current: 1 };
+
+      const [data, detailData] = await Promise.all([
+        executeElektraQuery(payload),
+        executeElektraQuery(detailPayload)
+      ]);
+      
+      let fetchedComments: CommentData[] = Array.isArray(data) ? data : [];
+      const rawDetails = Array.isArray(detailData) ? detailData : [];
+      
+      const groupedDetails = groupCommentDetails(rawDetails);
+
+      fetchedComments = fetchedComments.map(comment => {
+        const matchedDetail = groupedDetails.find(d => String(d.COMMENTID) === String(comment.ID));
+        if (matchedDetail && matchedDetail.details) {
+          return { ...comment, details: matchedDetail.details };
+        }
+        return comment;
+      });
 
       if (fetchedComments.length < fetchLimit) {
         setHasMoreData(false);

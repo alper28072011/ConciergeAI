@@ -956,16 +956,6 @@ export function GuestListModule() {
                       </td>
                       <td className="p-4 text-sm font-medium text-slate-900 relative">
                         {guest.ROOMNO}
-                        {guest.hasComment && (
-                          <div className="absolute -top-1 -right-1 group/tooltip z-20">
-                             <div className="bg-emerald-100 p-1 rounded-full shadow-sm animate-pulse">
-                               <MessageSquare size={14} className="text-emerald-600 fill-emerald-200" />
-                             </div>
-                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-slate-800 text-white text-[10px] rounded opacity-0 group-hover/tooltip:opacity-100 transition-opacity whitespace-nowrap pointer-events-none">
-                               Misafir yorum yaptı ({guest.comments?.length})
-                             </div>
-                          </div>
-                        )}
                       </td>
                       <td className="p-4 text-sm text-slate-700 font-medium">{guest.GUESTNAMES}</td>
                       <td className="p-4 text-sm text-slate-500">{formatTRDate(guest.CHECKIN)}</td>
