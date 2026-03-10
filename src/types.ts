@@ -21,6 +21,38 @@ export interface CommentData {
   SCORE?: number;
 }
 
+export interface CommentDetailData {
+  ID: number;
+  HOTELID: number;
+  DETAILTYPE: string;
+  DEPNAME: string;
+  GROUPNAME: string;
+  DETAIL: string;
+  COMMENTID: number;
+  COMMENTDATE: string;
+  COMMENT: string;
+  ANSWER: string;
+  SOURCENAME: string;
+  FULLNAME: string;
+  RESID: number;
+}
+
+export interface GroupedCommentDetail {
+  COMMENTID: number;
+  COMMENTDATE: string;
+  COMMENT: string;
+  ANSWER: string;
+  SOURCENAME: string;
+  FULLNAME: string;
+  RESID: number;
+  details: {
+    depName: string;
+    groupName: string;
+    type: string;
+    detail: string;
+  }[];
+}
+
 export interface GuestData {
   RESID: string;
   ROOMNO: string;
@@ -37,7 +69,7 @@ export interface GuestData {
   CONTACTEMAIL?: string;
   NATIONALITY?: string;
   hasComment?: boolean;
-  comments?: CommentData[];
+  comments?: GroupedCommentDetail[];
   surveySent?: boolean;
   sentimentScore?: number;
   sentimentAnalysisDate?: string;
@@ -57,6 +89,7 @@ export interface ApiSettings {
   loginToken: string;
   hotelId: string;
   commentPayloadTemplate?: string;
+  commentDetailPayloadTemplate?: string;
   inhousePayloadTemplate?: string;
   reservationPayloadTemplate?: string;
   checkoutPayloadTemplate?: string;

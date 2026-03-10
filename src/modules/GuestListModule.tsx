@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText, Brain, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 import { GuestData, CommentData, ApiSettings, GuestListTab } from '../types';
 import { executeElektraQuery } from '../services/api';
-import { buildDynamicPayload, formatTRDate, findGuestComments } from '../utils';
+import { buildDynamicPayload, formatTRDate, groupCommentDetails } from '../utils';
 import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -78,7 +78,7 @@ export function GuestListModule() {
       case 'checkout': guestTemplate = settings.checkoutPayloadTemplate || ''; break;
     }
 
-    if (!guestTemplate || !settings.commentPayloadTemplate) {
+    if (!guestTemplate || !settings.commentDetailPayloadTemplate) {
       alert('Gerekli payload şablonları eksik.');
       return;
     }
@@ -113,23 +113,21 @@ export function GuestListModule() {
       // 2. Prepare Comment Payload
       // We only pass safe columns to comment filters to avoid 500 errors (e.g., TOTALPRICE doesn't exist in comments)
       const commentFilters: Record<string, string> = {};
-      if (columnFilters['ROOMNO']) commentFilters['ROOMNO'] = columnFilters['ROOMNO'];
-      if (columnFilters['GUESTNAMES']) commentFilters['GUESTNAMES'] = columnFilters['GUESTNAMES'];
-      if (columnFilters['CHECKIN']) commentFilters['CHECKIN'] = columnFilters['CHECKIN'];
-      if (columnFilters['CHECKOUT']) commentFilters['CHECKOUT'] = columnFilters['CHECKOUT'];
+      if (columnFilters['RESID']) commentFilters['RESID'] = columnFilters['RESID'];
       
       // Provide a wide date range to prevent API 500 errors (full table scans) if the template requires dates
       const wideStartDate = "2020-01-01";
       const wideEndDate = "2030-12-31";
       
-      const commentPayload = buildDynamicPayload(settings.commentPayloadTemplate, settings, commentFilters, wideStartDate, wideEndDate);
-      if (!commentPayload) throw new Error("Comment payload failed.");
+      const commentPayload = buildDynamicPayload(settings.commentDetailPayloadTemplate, settings, commentFilters, wideStartDate, wideEndDate);
+      if (!commentPayload) throw new Error("Comment Detail payload failed.");
 
-      // Inject Required Fields for Comment
+      // Inject Required Fields for Comment Detail
       if (commentPayload.Select && Array.isArray(commentPayload.Select)) {
         const requiredCommentFields = [
-          'ROOMNO', 'CHECKIN', 'CHECKOUT', 'GUESTNAMES', 'RESID', 
-          'HOTELID', 'COMMENTDATE', 'COMMENT', 'ANSWER', 'SCORE', 'COMMENTSOURCEID_NAME'
+          'ID', 'HOTELID', 'DETAILTYPE', 'DEPNAME', 'GROUPNAME', 'DETAIL', 
+          'COMMENTID', 'COMMENTDATE', 'COMMENT', 'ANSWER', 'SOURCENAME', 
+          'FULLNAME', 'RESID'
         ];
         requiredCommentFields.forEach(field => {
           if (!commentPayload.Select.includes(field)) commentPayload.Select.push(field);
@@ -138,7 +136,7 @@ export function GuestListModule() {
 
       // 3. Fetch Data Concurrently
       const fetchAllComments = async () => {
-        let allComments: CommentData[] = [];
+        let allComments: any[] = [];
         let commentPage = 1;
         let hasMore = true;
         while (hasMore && commentPage <= 10) { // Max 20k comments
@@ -205,8 +203,10 @@ export function GuestListModule() {
       }
 
       // 5. Cross-Match Logic
+      const groupedDetails = groupCommentDetails(commentsList as any);
+
       let processedGuests = guestsList.map(guest => {
-        const matchedComments = findGuestComments(guest, commentsList);
+        const matchedComments = groupedDetails.filter(detail => String(detail.RESID) === String(guest.RESID));
         const hasSurveySent = surveyLogs.some(log => log.guestId === guest.RESID);
         const interaction = guestInteractions[guest.RESID] || {};
         
@@ -215,7 +215,7 @@ export function GuestListModule() {
 
         if (sentimentScore === undefined && matchedComments.length > 0) {
           for (const comment of matchedComments) {
-            const note = agendaNotes[comment.ID];
+            const note = agendaNotes[comment.COMMENTID];
             if (note && note.sentimentScore !== undefined) {
               sentimentScore = note.sentimentScore;
               sentimentAnalysisDate = note.sentimentAnalysisDate;
@@ -1036,7 +1036,7 @@ export function GuestListModule() {
                                   
                                   <div className="space-y-6 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
                                     {guest.comments.map((comment, idx) => (
-                                      <div key={comment.ID || idx} className="relative pl-10">
+                                      <div key={comment.COMMENTID || idx} className="relative pl-10">
                                         {/* Timeline Dot */}
                                         <div className="absolute left-2 top-4 w-4 h-4 rounded-full bg-white border-2 border-emerald-500 z-10"></div>
                                         
@@ -1045,14 +1045,8 @@ export function GuestListModule() {
                                           <div className="bg-slate-50/80 px-4 py-3 border-b border-slate-100 flex justify-between items-center">
                                             <div className="flex items-center gap-3">
                                               <span className="text-xs font-bold text-slate-600 bg-white border border-slate-200 px-2 py-1 rounded-md shadow-sm">
-                                                {comment.COMMENTSOURCEID_NAME || 'Yorum'}
+                                                {comment.SOURCENAME || 'Yorum'}
                                               </span>
-                                              {comment.SCORE && (
-                                                <div className="flex items-center gap-1 bg-amber-50 text-amber-600 px-2 py-1 rounded-md border border-amber-100">
-                                                  <Star size={12} fill="currentColor" />
-                                                  <span className="text-xs font-bold">{comment.SCORE} / 10</span>
-                                                </div>
-                                              )}
                                             </div>
                                             <span className="text-xs text-slate-400 font-medium font-mono">
                                               {formatTRDate(comment.COMMENTDATE)}
@@ -1073,6 +1067,24 @@ export function GuestListModule() {
                                                 </p>
                                               </div>
                                             </div>
+
+                                            {/* Grouped Details Badges */}
+                                            {comment.details && comment.details.length > 0 && (
+                                              <div className="mt-4 pl-11 flex flex-wrap gap-2">
+                                                {comment.details.map((detail, dIdx) => (
+                                                  <span 
+                                                    key={dIdx} 
+                                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                                                      detail.type === 'Positive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                                      detail.type === 'Negative' ? 'bg-red-50 text-red-700 border-red-200' :
+                                                      'bg-slate-50 text-slate-700 border-slate-200'
+                                                    }`}
+                                                  >
+                                                    {detail.depName} {detail.groupName ? `- ${detail.groupName}` : ''}
+                                                  </span>
+                                                ))}
+                                              </div>
+                                            )}
 
                                             {comment.ANSWER && (
                                               <div className="mt-4 pl-11">

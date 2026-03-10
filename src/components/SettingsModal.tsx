@@ -34,6 +34,24 @@ const DEFAULT_COMMENT_TEMPLATE = JSON.stringify({
   "Paging": { "ItemsPerPage": 100, "Current": 1 }
 }, null, 2);
 
+const DEFAULT_COMMENT_DETAIL_TEMPLATE = JSON.stringify({
+  "Action": "Select",
+  "Object": "QA_HOTEL_GUEST_COMMENT_DETAIL",
+  "LoginToken": "{{LOGIN_TOKEN}}",
+  "Select": [
+    "ID", "HOTELID", "DETAILTYPE", "DEPNAME", "GROUPNAME", "DETAIL", 
+    "COMMENTID", "COMMENTDATE", "COMMENT", "ANSWER", "SOURCENAME", 
+    "FULLNAME", "RESID"
+  ],
+  "Where": [
+    { "Column": "COMMENTDATE", "Operator": ">=", "Value": "{{START_DATE}}" },
+    { "Column": "COMMENTDATE", "Operator": "<=", "Value": "{{END_DATE}}" },
+    { "Column": "HOTELID", "Operator": "=", "Value": "{{HOTELID}}" }
+  ],
+  "OrderBy": [{ "Column": "COMMENTDATE", "Direction": "DESC" }],
+  "Paging": { "ItemsPerPage": 1000, "Current": 1 }
+}, null, 2);
+
 const DEFAULT_INHOUSE_TEMPLATE = JSON.stringify({
   "Action": "Select",
   "Object": "QA_HOTEL_RESERVATION_CHECKOUT",
@@ -88,6 +106,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     loginToken: '',
     hotelId: '',
     commentPayloadTemplate: DEFAULT_COMMENT_TEMPLATE,
+    commentDetailPayloadTemplate: DEFAULT_COMMENT_DETAIL_TEMPLATE,
     inhousePayloadTemplate: DEFAULT_INHOUSE_TEMPLATE,
     reservationPayloadTemplate: DEFAULT_RESERVATION_TEMPLATE,
     checkoutPayloadTemplate: DEFAULT_CHECKOUT_TEMPLATE,
@@ -119,6 +138,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           loginToken: parsed.loginToken || parsed.token || '',
           hotelId: parsed.hotelId || '',
           commentPayloadTemplate: commentTemplate,
+          commentDetailPayloadTemplate: parsed.commentDetailPayloadTemplate || DEFAULT_COMMENT_DETAIL_TEMPLATE,
           inhousePayloadTemplate: parsed.inhousePayloadTemplate || DEFAULT_INHOUSE_TEMPLATE,
           reservationPayloadTemplate: parsed.reservationPayloadTemplate || DEFAULT_RESERVATION_TEMPLATE,
           checkoutPayloadTemplate: parsed.checkoutPayloadTemplate || DEFAULT_CHECKOUT_TEMPLATE,
@@ -164,6 +184,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
       let defaultValue = '';
       switch (name) {
         case 'commentPayloadTemplate': defaultValue = DEFAULT_COMMENT_TEMPLATE; break;
+        case 'commentDetailPayloadTemplate': defaultValue = DEFAULT_COMMENT_DETAIL_TEMPLATE; break;
         case 'inhousePayloadTemplate': defaultValue = DEFAULT_INHOUSE_TEMPLATE; break;
         case 'reservationPayloadTemplate': defaultValue = DEFAULT_RESERVATION_TEMPLATE; break;
         case 'checkoutPayloadTemplate': defaultValue = DEFAULT_CHECKOUT_TEMPLATE; break;
@@ -190,6 +211,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
 
   const handleSave = async () => {
     if (!validateJson(settings.commentPayloadTemplate || '{}', 'Yorum Listesi Şablonu')) return;
+    if (!validateJson(settings.commentDetailPayloadTemplate || '{}', 'Yorum Detayları (Köprü) Şablonu')) return;
     if (!validateJson(settings.inhousePayloadTemplate || '{}', 'Konaklayanlar Şablonu')) return;
     if (!validateJson(settings.reservationPayloadTemplate || '{}', 'Rezervasyon Şablonu')) return;
     if (!validateJson(settings.checkoutPayloadTemplate || '{}', 'Ayrılanlar Şablonu')) return;
@@ -335,6 +357,10 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
 
             <div className="space-y-3">
               {renderAccordionItem('Yorum Listesi Şablonu', 'commentPayloadTemplate')}
+              <div className="relative">
+                {renderAccordionItem('Yorum Detayları (Köprü) İstek Şablonu', 'commentDetailPayloadTemplate')}
+                <p className="text-[10px] text-slate-500 mt-1 ml-1">Bu şablon, Misafirler ve Yorumlar arasında %100 kesin eşleşme (RESID üzerinden) sağlamak için kullanılır.</p>
+              </div>
               {renderAccordionItem('Konaklayanlar (Inhouse) Şablonu', 'inhousePayloadTemplate')}
               {renderAccordionItem('Rezervasyon Şablonu', 'reservationPayloadTemplate')}
               {renderAccordionItem('Ayrılanlar (Checkout) Şablonu', 'checkoutPayloadTemplate')}

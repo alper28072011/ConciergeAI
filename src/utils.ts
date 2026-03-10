@@ -1,4 +1,4 @@
-import { ApiSettings, GuestData, CommentData } from './types';
+import { ApiSettings, GuestData, CommentData, CommentDetailData, GroupedCommentDetail } from './types';
 
 export const buildDynamicPayload = (
   templateString: string,
@@ -87,73 +87,34 @@ export const formatTRDate = (dateString: string) => {
   }).format(date);
 };
 
-export const findGuestComments = (guest: GuestData, allComments: CommentData[]): CommentData[] => {
-  if (!allComments || allComments.length === 0) return [];
+export const groupCommentDetails = (rawDetails: CommentDetailData[]): GroupedCommentDetail[] => {
+  if (!rawDetails || rawDetails.length === 0) return [];
 
-  // Tarihlerden saat bilgisini temizleyip sadece YYYY-MM-DD formatını alan yardımcı fonksiyon
-  const normalizeDate = (dateStr: string | undefined) => {
-    if (!dateStr) return '';
-    
-    if (dateStr.includes('T')) {
-      return dateStr.split('T')[0];
+  const groupedMap = rawDetails.reduce((acc, curr) => {
+    if (!acc[curr.COMMENTID]) {
+      acc[curr.COMMENTID] = {
+        COMMENTID: curr.COMMENTID,
+        COMMENTDATE: curr.COMMENTDATE,
+        COMMENT: curr.COMMENT,
+        ANSWER: curr.ANSWER,
+        SOURCENAME: curr.SOURCENAME,
+        FULLNAME: curr.FULLNAME,
+        RESID: curr.RESID,
+        details: []
+      };
     }
     
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      return dateStr;
+    if (curr.DEPNAME || curr.GROUPNAME || curr.DETAILTYPE) {
+      acc[curr.COMMENTID].details.push({
+        depName: curr.DEPNAME || '',
+        groupName: curr.GROUPNAME || '',
+        type: curr.DETAILTYPE || '',
+        detail: curr.DETAIL || ''
+      });
     }
 
-    try {
-      const d = new Date(dateStr);
-      if (!isNaN(d.getTime())) {
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-      }
-    } catch (e) {
-      // Parse edilemedi
-    }
-    
-    return dateStr;
-  };
+    return acc;
+  }, {} as Record<number, GroupedCommentDetail>);
 
-  const guestRoom = String(guest.ROOMNO || '').trim().toUpperCase();
-  const guestCheckIn = normalizeDate(guest.CHECKIN);
-  const guestCheckOut = normalizeDate(guest.CHECKOUT);
-
-  return allComments.filter(comment => {
-    const commentRoom = String(comment.ROOMNO || '').trim().toUpperCase();
-    
-    // 1. Kriter: Oda Numarası Kesinlikle Eşleşmeli
-    if (!guestRoom || !commentRoom || guestRoom !== commentRoom) return false;
-
-    const commentCheckIn = normalizeDate(comment.CHECKIN);
-    const commentCheckOut = normalizeDate(comment.CHECKOUT);
-    const commentDate = normalizeDate(comment.COMMENTDATE);
-
-    // 2. Kriter: Eğer yorumda CheckIn ve CheckOut varsa, BİREBİR eşleşme ara (En güvenilir)
-    if (commentCheckIn && commentCheckOut) {
-      if (guestCheckIn === commentCheckIn && guestCheckOut === commentCheckOut) {
-        return true;
-      }
-    }
-
-    // 3. Kriter (Fallback): Eğer yorumda CheckIn/CheckOut yoksa veya eşleşmediyse, 
-    // Yorum Tarihi (COMMENTDATE), misafirin konaklama tarihleri arasında mı diye bak.
-    // (Çıkıştan sonraki 14 gün içinde yapılmış yorumları da o konaklamaya say)
-    if (guestCheckIn && guestCheckOut && commentDate) {
-      const gIn = new Date(guestCheckIn).getTime();
-      const gOut = new Date(guestCheckOut).getTime();
-      const cDate = new Date(commentDate).getTime();
-      
-      // Çıkış tarihine 14 gün tolerans ekle (Misafir çıktıktan sonra yorum yapabilir)
-      const gOutTolerated = gOut + (14 * 24 * 60 * 60 * 1000);
-
-      if (cDate >= gIn && cDate <= gOutTolerated) {
-        return true;
-      }
-    }
-
-    return false;
-  });
+  return Object.values(groupedMap);
 };
