@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CommentData } from '../types';
-import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone, Save, Database } from 'lucide-react';
+import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone, Save, Database, Brain } from 'lucide-react';
 import { GoogleGenAI } from '@google/genai';
 import { formatTRDate } from '../utils';
 import { doc, getDoc, setDoc } from "firebase/firestore";
@@ -19,6 +19,8 @@ export function DetailPanel({ comment }: DetailPanelProps) {
   const [translatedLetter, setTranslatedLetter] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [sentimentScore, setSentimentScore] = useState<number | null>(null);
   const [showTranslation, setShowTranslation] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isFetchingDB, setIsFetchingDB] = useState(false);
@@ -47,6 +49,7 @@ export function DetailPanel({ comment }: DetailPanelProps) {
             setExtraNotes(data.extraNotes || '');
             setGeneratedLetter(data.generatedLetter || '');
             setTargetLanguage(data.targetLanguage || 'İngilizce');
+            setSentimentScore(data.sentimentScore !== undefined ? data.sentimentScore : null);
             setSavedInAgenda(true);
           }
         } catch (error) {
@@ -75,12 +78,18 @@ export function DetailPanel({ comment }: DetailPanelProps) {
     if (!comment?.ID) return;
     setIsSaving(true);
     try {
-      await setDoc(doc(db, "agenda_notes", String(comment.ID)), {
+      const payload: any = {
         extraNotes,
         generatedLetter,
         targetLanguage,
         updatedAt: new Date().toISOString()
-      }, { merge: true });
+      };
+      
+      if (sentimentScore !== null && sentimentScore !== undefined) {
+        payload.sentimentScore = sentimentScore;
+      }
+
+      await setDoc(doc(db, "agenda_notes", String(comment.ID)), payload, { merge: true });
       setSavedInAgenda(true);
       alert('Ajandaya başarıyla kaydedildi.');
     } catch (error) {
@@ -132,6 +141,77 @@ export function DetailPanel({ comment }: DetailPanelProps) {
     }
 
     return null;
+  };
+
+  const handleAnalyzeSentiment = async () => {
+    if (!comment?.COMMENT) {
+      alert("Analiz edilecek yorum bulunamadı.");
+      return;
+    }
+
+    if (sentimentScore !== null) {
+      const confirmReanalyze = window.confirm("Bu yorum için daha önce duygu analizi yapılmış. Tekrar analiz etmek istiyor musunuz? (Token tüketimi artacaktır)");
+      if (!confirmReanalyze) return;
+    }
+
+    const apiKey = getApiKey();
+
+    if (!apiKey) {
+      alert("Gemini API anahtarı bulunamadı. Lütfen ayarlardan yapılandırın.");
+      return;
+    }
+
+    setIsAnalyzing(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: String(apiKey) });
+      
+      const prompt = `Aşağıdaki otel misafir yorumunu analiz et ve misafirin genel memnuniyetini 0 ile 1 arasında bir sayı olarak ver. 
+        0: Tamamen memnuniyetsiz, 1: Tamamen memnun.
+        Yanıtını kesinlikle aşağıdaki JSON formatında ver:
+        { "score": 0.8 }
+        
+        Yorum:
+        ${comment.COMMENT}`;
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+      });
+
+      let text = response.text;
+      if (!text) {
+        throw new Error("AI yanıtı boş döndü.");
+      }
+
+      // Clean markdown code blocks if present
+      text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+      const result = JSON.parse(text);
+      let score: number;
+      
+      if (typeof result === 'number') {
+        score = result;
+      } else if (result && typeof result.score === 'number') {
+        score = result.score;
+      } else {
+        throw new Error("Geçersiz format döndü.");
+      }
+
+      setSentimentScore(score);
+
+      // Save to Firebase immediately
+      await setDoc(doc(db, "agenda_notes", String(comment.ID)), {
+        sentimentScore: score,
+        sentimentAnalysisDate: new Date().toISOString()
+      }, { merge: true });
+
+      alert(`Analiz tamamlandı. Memnuniyet Oranı: %${(score * 100).toFixed(0)}`);
+    } catch (error) {
+      console.error("Sentiment analysis error:", error);
+      alert("Duygu analizi sırasında bir hata oluştu.");
+    } finally {
+      setIsAnalyzing(false);
+    }
   };
 
   const handleGenerate = async () => {
@@ -285,7 +365,39 @@ The letter should be empathetic, professional, and address the guest's feedback 
           </div>
 
           <div className="prose prose-slate max-w-none">
-            <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Misafir Yorumu</h4>
+            <div className="flex justify-between items-center mb-2">
+              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Misafir Yorumu</h4>
+              <div className="flex items-center gap-3">
+                {sentimentScore !== null && (
+                  <div className="flex items-center gap-2">
+                    <div className="text-xs font-bold text-slate-500">
+                      Memnuniyet: %{(sentimentScore * 100).toFixed(0)}
+                    </div>
+                    <div className="w-24 h-2 bg-slate-200 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-500 ${
+                          sentimentScore > 0.7 ? 'bg-emerald-500' : 
+                          sentimentScore > 0.4 ? 'bg-amber-500' : 'bg-red-500'
+                        }`}
+                        style={{ width: `${sentimentScore * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+                <button
+                  onClick={handleAnalyzeSentiment}
+                  disabled={isAnalyzing}
+                  className="text-xs font-medium text-purple-600 hover:text-purple-700 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {isAnalyzing ? (
+                    <div className="animate-spin rounded-full h-3 w-3 border-2 border-purple-600 border-t-transparent" />
+                  ) : (
+                    <Brain size={14} />
+                  )}
+                  {sentimentScore !== null ? 'Yeniden Analiz Et' : 'Duygu Analizi Yap'}
+                </button>
+              </div>
+            </div>
             <p className="text-slate-800 text-lg leading-relaxed">{comment.COMMENT}</p>
           </div>
         </div>

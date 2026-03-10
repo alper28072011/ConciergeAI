@@ -3,7 +3,6 @@ import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, F
 import { GuestData, CommentData, ApiSettings, GuestListTab } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { buildDynamicPayload, formatTRDate, findGuestComments } from '../utils';
-import { GoogleGenAI, Type } from "@google/genai";
 import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 
@@ -179,13 +178,15 @@ export function GuestListModule() {
         setHasMoreData(false);
       }
 
-      // 4. Fetch Survey Logs and Guest Interactions
+      // 4. Fetch Survey Logs, Guest Interactions, and Agenda Notes
       let surveyLogs: any[] = [];
       let guestInteractions: Record<string, any> = {};
+      let agendaNotes: Record<string, any> = {};
       try {
-        const [surveySnapshot, interactionsSnapshot] = await Promise.all([
+        const [surveySnapshot, interactionsSnapshot, agendaSnapshot] = await Promise.all([
           getDocs(collection(db, 'survey_logs')),
-          getDocs(collection(db, 'guest_interactions'))
+          getDocs(collection(db, 'guest_interactions')),
+          getDocs(collection(db, 'agenda_notes'))
         ]);
         
         surveySnapshot.forEach(doc => {
@@ -194,6 +195,10 @@ export function GuestListModule() {
         
         interactionsSnapshot.forEach(doc => {
           guestInteractions[doc.id] = doc.data();
+        });
+
+        agendaSnapshot.forEach(doc => {
+          agendaNotes[doc.id] = doc.data();
         });
       } catch (e) {
         console.error("Error fetching firebase data:", e);
@@ -205,13 +210,27 @@ export function GuestListModule() {
         const hasSurveySent = surveyLogs.some(log => log.guestId === guest.RESID);
         const interaction = guestInteractions[guest.RESID] || {};
         
+        let sentimentScore = interaction.sentimentScore;
+        let sentimentAnalysisDate = interaction.sentimentAnalysisDate;
+
+        if (sentimentScore === undefined && matchedComments.length > 0) {
+          for (const comment of matchedComments) {
+            const note = agendaNotes[comment.ID];
+            if (note && note.sentimentScore !== undefined) {
+              sentimentScore = note.sentimentScore;
+              sentimentAnalysisDate = note.sentimentAnalysisDate;
+              break;
+            }
+          }
+        }
+        
         return {
           ...guest,
           hasComment: matchedComments.length > 0,
           comments: matchedComments,
           surveySent: hasSurveySent,
-          sentimentScore: interaction.sentimentScore,
-          sentimentAnalysisDate: interaction.sentimentAnalysisDate,
+          sentimentScore: sentimentScore,
+          sentimentAnalysisDate: sentimentAnalysisDate,
           generatedLetter: interaction.generatedLetter,
           letterSentDate: interaction.letterSentDate
         };
@@ -279,77 +298,6 @@ export function GuestListModule() {
     setExpandedRowId(expandedRowId === id ? null : id);
   };
 
-  const handleAnalyzeSentiment = async (guest: GuestData) => {
-    if (!guest.comments || guest.comments.length === 0) {
-      alert("Analiz edilecek yorum bulunamadı.");
-      return;
-    }
-
-    if (guest.sentimentScore !== undefined) {
-      const confirmReanalyze = window.confirm("Bu misafir için daha önce duygu analizi yapılmış. Tekrar analiz etmek istiyor musunuz? (Token tüketimi artacaktır)");
-      if (!confirmReanalyze) return;
-    }
-
-    const savedSettings = localStorage.getItem('hotelApiSettings');
-    const settings: ApiSettings = savedSettings ? JSON.parse(savedSettings) : {};
-    const apiKey = process.env.GEMINI_API_KEY || settings.geminiApiKey;
-
-    if (!apiKey) {
-      alert("Gemini API anahtarı bulunamadı. Lütfen ayarlardan yapılandırın.");
-      return;
-    }
-
-    setIsFetching(true);
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const commentText = guest.comments.map(c => c.COMMENT).join("\n\n");
-      
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Aşağıdaki otel misafir yorumunu analiz et ve misafirin genel memnuniyetini 0 ile 1 arasında bir sayı olarak ver. 
-        0: Tamamen memnuniyetsiz, 1: Tamamen memnun.
-        Sadece sayıyı döndür, başka açıklama yapma.
-        
-        Yorum:
-        ${commentText}`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              score: { type: Type.NUMBER, description: "0-1 arası memnuniyet puanı" }
-            },
-            required: ["score"]
-          }
-        }
-      });
-
-      const result = JSON.parse(response.text);
-      const score = result.score;
-
-      // Save to Firebase
-      const interactionRef = doc(db, 'guest_interactions', guest.RESID);
-      await setDoc(interactionRef, {
-        sentimentScore: score,
-        sentimentAnalysisDate: new Date().toISOString()
-      }, { merge: true });
-
-      // Update local state
-      setGuests(prev => prev.map(g => g.RESID === guest.RESID ? { 
-        ...g, 
-        sentimentScore: score, 
-        sentimentAnalysisDate: new Date().toISOString() 
-      } : g));
-
-      alert(`Analiz tamamlandı. Memnuniyet Oranı: %${(score * 100).toFixed(0)}`);
-    } catch (error) {
-      console.error("Sentiment analysis error:", error);
-      alert("Duygu analizi sırasında bir hata oluştu.");
-    } finally {
-      setIsFetching(false);
-    }
-  };
-
   const openMailMergeModal = async (guest: GuestData) => {
     if (guest.generatedLetter) {
       const confirmRegenerate = window.confirm("Bu misafir için daha önce mektup üretilmiş. Tekrar üretmek istiyor musunuz?");
@@ -412,7 +360,7 @@ export function GuestListModule() {
       setGeneratedLetterContent(content);
 
       // Save generated letter to Firebase
-      const interactionRef = doc(db, 'guest_interactions', guest.RESID);
+      const interactionRef = doc(db, 'guest_interactions', String(guest.RESID));
       await setDoc(interactionRef, {
         generatedLetter: content
       }, { merge: true });
@@ -489,7 +437,7 @@ export function GuestListModule() {
       });
 
       // Update interaction log
-      const interactionRef = doc(db, 'guest_interactions', selectedGuestForMail.RESID);
+      const interactionRef = doc(db, 'guest_interactions', String(selectedGuestForMail.RESID));
       await setDoc(interactionRef, {
         letterSentDate: new Date().toISOString()
       }, { merge: true });
@@ -581,7 +529,7 @@ export function GuestListModule() {
       generated.push({ guest, content });
 
       // Save to Firebase
-      const interactionRef = doc(db, 'guest_interactions', guest.RESID);
+      const interactionRef = doc(db, 'guest_interactions', String(guest.RESID));
       await setDoc(interactionRef, {
         generatedLetter: content
       }, { merge: true });
@@ -1003,19 +951,6 @@ export function GuestListModule() {
                                 />
                               </div>
                             </div>
-                          )}
-
-                          {guest.hasComment && guest.sentimentScore === undefined && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleAnalyzeSentiment(guest);
-                              }}
-                              className="mt-1 text-[10px] font-bold text-purple-600 hover:text-purple-700 flex items-center gap-0.5"
-                            >
-                              <RefreshCw size={10} />
-                              Analiz Et
-                            </button>
                           )}
                         </div>
                       </td>
