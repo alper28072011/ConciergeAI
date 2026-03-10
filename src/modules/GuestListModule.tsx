@@ -909,30 +909,38 @@ export function GuestListModule() {
                       </td>
                       <td className="p-4">
                         <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-1.5">
-                            {guest.hasComment ? (
-                              <MessageSquare size={14} className="text-blue-500" title="Yorum Var" />
-                            ) : (
-                              <MessageSquare size={14} className="text-slate-200" title="Yorum Yok" />
-                            )}
+                          <div className="flex items-center gap-2">
+                            <div className="relative group/tooltip flex items-center justify-center">
+                              <MessageSquare size={14} className={guest.hasComment ? "text-blue-500" : "text-slate-200"} />
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-slate-800 text-white text-[10px] font-medium rounded-md opacity-0 group-hover/tooltip:opacity-100 transition-all duration-200 translate-y-1 group-hover/tooltip:translate-y-0 whitespace-nowrap pointer-events-none z-50 shadow-xl">
+                                {guest.hasComment ? "Yorum Var" : "Yorum Yok"}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+                              </div>
+                            </div>
                             
-                            {guest.sentimentScore !== undefined ? (
-                              <Brain size={14} className="text-purple-500" title={`Analiz Edildi: %${(guest.sentimentScore * 100).toFixed(0)}`} />
-                            ) : (
-                              <Brain size={14} className="text-slate-200" title="Analiz Edilmedi" />
-                            )}
+                            <div className="relative group/tooltip flex items-center justify-center">
+                              <Brain size={14} className={guest.sentimentScore !== undefined ? "text-purple-500" : "text-slate-200"} />
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-slate-800 text-white text-[10px] font-medium rounded-md opacity-0 group-hover/tooltip:opacity-100 transition-all duration-200 translate-y-1 group-hover/tooltip:translate-y-0 whitespace-nowrap pointer-events-none z-50 shadow-xl">
+                                {guest.sentimentScore !== undefined ? `Analiz Edildi: %${(guest.sentimentScore * 100).toFixed(0)}` : "Analiz Edilmedi"}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+                              </div>
+                            </div>
 
-                            {guest.generatedLetter ? (
-                              <FileText size={14} className="text-amber-500" title="Mektup Üretildi" />
-                            ) : (
-                              <FileText size={14} className="text-slate-200" title="Mektup Üretilmedi" />
-                            )}
+                            <div className="relative group/tooltip flex items-center justify-center">
+                              <FileText size={14} className={guest.generatedLetter ? "text-amber-500" : "text-slate-200"} />
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-slate-800 text-white text-[10px] font-medium rounded-md opacity-0 group-hover/tooltip:opacity-100 transition-all duration-200 translate-y-1 group-hover/tooltip:translate-y-0 whitespace-nowrap pointer-events-none z-50 shadow-xl">
+                                {guest.generatedLetter ? "Mektup Üretildi" : "Mektup Üretilmedi"}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+                              </div>
+                            </div>
 
-                            {guest.surveySent ? (
-                              <CheckCircle2 size={14} className="text-emerald-500" title="Mektup Gönderildi" />
-                            ) : (
-                              <CheckCircle2 size={14} className="text-slate-200" title="Mektup Gönderilmedi" />
-                            )}
+                            <div className="relative group/tooltip flex items-center justify-center">
+                              <CheckCircle2 size={14} className={guest.surveySent ? "text-emerald-500" : "text-slate-200"} />
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-slate-800 text-white text-[10px] font-medium rounded-md opacity-0 group-hover/tooltip:opacity-100 transition-all duration-200 translate-y-1 group-hover/tooltip:translate-y-0 whitespace-nowrap pointer-events-none z-50 shadow-xl">
+                                {guest.surveySent ? "Mektup Gönderildi" : "Mektup Gönderilmedi"}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+                              </div>
+                            </div>
                           </div>
                           
                           {guest.sentimentScore !== undefined && (
