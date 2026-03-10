@@ -3,7 +3,7 @@ import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, F
 import { GuestData, CommentData, ApiSettings, GuestListTab } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { buildDynamicPayload, formatTRDate, groupCommentDetails } from '../utils';
-import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export function GuestListModule() {
@@ -27,6 +27,17 @@ export function GuestListModule() {
   // Dynamic Column Filters State
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
+
+  // Firebase Real-time Cache
+  const [firebaseCache, setFirebaseCache] = useState<{
+    surveys: any[];
+    interactions: Record<string, any>;
+    agenda: Record<string, any>;
+  }>({
+    surveys: [],
+    interactions: {},
+    agenda: {}
+  });
 
   // Welcome Call Modal State
   const [isWelcomeCallModalOpen, setIsWelcomeCallModalOpen] = useState(false);
@@ -55,6 +66,37 @@ export function GuestListModule() {
     setExpandedRowId(null);
     setSelectedGuestIds([]);
   }, [activeTab]);
+
+  // Firebase Real-time Listener
+  useEffect(() => {
+    const unsubSurveys = onSnapshot(collection(db, 'survey_logs'), (snapshot) => {
+      const surveys: any[] = [];
+      snapshot.forEach(doc => surveys.push(doc.data()));
+      setFirebaseCache(prev => ({ ...prev, surveys }));
+    });
+
+    const unsubInteractions = onSnapshot(collection(db, 'guest_interactions'), (snapshot) => {
+      const interactions: Record<string, any> = {};
+      snapshot.forEach(doc => {
+        interactions[doc.id] = doc.data();
+      });
+      setFirebaseCache(prev => ({ ...prev, interactions }));
+    });
+
+    const unsubAgenda = onSnapshot(collection(db, 'agenda_notes'), (snapshot) => {
+      const agenda: Record<string, any> = {};
+      snapshot.forEach(doc => {
+        agenda[doc.id] = doc.data();
+      });
+      setFirebaseCache(prev => ({ ...prev, agenda }));
+    });
+
+    return () => {
+      unsubSurveys();
+      unsubInteractions();
+      unsubAgenda();
+    };
+  }, []);
 
   const handleFilterChange = (column: string, value: string) => {
     setColumnFilters(prev => ({
@@ -117,112 +159,69 @@ export function GuestListModule() {
       // We fetch a chunk based on fetchLimit and targetPage
       guestPayload.Paging = { ItemsPerPage: fetchLimit, Current: targetPage };
 
-      // 2. Prepare Comment Payload
-      // We only pass safe columns to comment filters to avoid 500 errors (e.g., TOTALPRICE doesn't exist in comments)
-      const commentFilters: Record<string, string> = {};
-      if (columnFilters['RESID']) commentFilters['RESID'] = columnFilters['RESID'];
-      
-      // Provide a wide date range to prevent API 500 errors (full table scans) if the template requires dates
-      const wideStartDate = "2020-01-01";
-      const wideEndDate = "2030-12-31";
-      
-      const commentPayload = buildDynamicPayload(settings.commentDetailPayloadTemplate, settings, commentFilters, wideStartDate, wideEndDate);
-      if (!commentPayload) throw new Error("Comment Detail payload failed.");
-
-      // Inject Required Fields for Comment Detail
-      if (commentPayload.Select && Array.isArray(commentPayload.Select)) {
-        const requiredCommentFields = [
-          'ID', 'HOTELID', 'DETAILTYPE', 'DEPNAME', 'GROUPNAME', 'DETAIL', 
-          'COMMENTID', 'COMMENTDATE', 'COMMENT', 'ANSWER', 'SOURCENAME', 
-          'FULLNAME', 'RESID'
-        ];
-        requiredCommentFields.forEach(field => {
-          if (!commentPayload.Select.includes(field)) commentPayload.Select.push(field);
-        });
-      }
-
-      // 3. Fetch Data Concurrently
-      const fetchAllComments = async () => {
-        let allComments: any[] = [];
-        let commentPage = 1;
-        let hasMore = true;
-        while (hasMore && commentPage <= 10) { // Max 20k comments
-          commentPayload.Paging = { ItemsPerPage: 2000, Current: commentPage };
-          const res = await executeElektraQuery(commentPayload);
-          if (Array.isArray(res) && res.length > 0) {
-            allComments = [...allComments, ...res];
-            if (res.length < 2000) hasMore = false;
-            else commentPage++;
-          } else {
-            hasMore = false;
-          }
-        }
-        return allComments;
-      };
-
-      let commentsList = cachedComments;
-      let guestRes: any;
-
-      if (isLoadMore !== true) {
-        // Fetch both concurrently on first load
-        const [gRes, cList] = await Promise.all([
-          executeElektraQuery(guestPayload),
-          fetchAllComments()
-        ]);
-        guestRes = gRes;
-        commentsList = cList;
-        setCachedComments(cList);
-      } else {
-        // Only fetch guests on load more
-        guestRes = await executeElektraQuery(guestPayload);
-      }
-
+      // 2. Fetch Guests First
+      const guestRes = await executeElektraQuery(guestPayload);
       const guestsList: GuestData[] = Array.isArray(guestRes) ? guestRes : [];
 
       if (guestsList.length < fetchLimit) {
         setHasMoreData(false);
       }
 
-      // 4. Fetch Survey Logs, Guest Interactions, and Agenda Notes
-      let surveyLogs: any[] = [];
-      let guestInteractions: Record<string, any> = {};
-      let agendaNotes: Record<string, any> = {};
-      try {
-        const [surveySnapshot, interactionsSnapshot, agendaSnapshot] = await Promise.all([
-          getDocs(collection(db, 'survey_logs')),
-          getDocs(collection(db, 'guest_interactions')),
-          getDocs(collection(db, 'agenda_notes'))
-        ]);
+      // 3. Extract RESIDs for Laser Targeting
+      const fetchedResIds = guestsList.map(g => g.RESID).filter(Boolean);
+      let commentsList: any[] = [];
+
+      if (fetchedResIds.length > 0) {
+        // Prepare Comment Payload with IN Operator
+        const commentFilters: Record<string, string> = {};
+        if (columnFilters['RESID']) commentFilters['RESID'] = columnFilters['RESID'];
         
-        surveySnapshot.forEach(doc => {
-          surveyLogs.push(doc.data());
-        });
-        
-        interactionsSnapshot.forEach(doc => {
-          guestInteractions[doc.id] = doc.data();
+        // No wide date ranges needed, we use IN operator
+        const commentPayload = buildDynamicPayload(settings.commentDetailPayloadTemplate, settings, commentFilters);
+        if (!commentPayload) throw new Error("Comment Detail payload failed.");
+
+        // Inject Required Fields for Comment Detail
+        if (commentPayload.Select && Array.isArray(commentPayload.Select)) {
+          const requiredCommentFields = [
+            'ID', 'HOTELID', 'DETAILTYPE', 'DEPNAME', 'GROUPNAME', 'DETAIL', 
+            'COMMENTID', 'COMMENTDATE', 'COMMENT', 'ANSWER', 'SOURCENAME', 
+            'FULLNAME', 'RESID'
+          ];
+          requiredCommentFields.forEach(field => {
+            if (!commentPayload.Select.includes(field)) commentPayload.Select.push(field);
+          });
+        }
+
+        // Add IN Operator
+        if (!commentPayload.Where) commentPayload.Where = [];
+        commentPayload.Where.push({
+          "Column": "RESID",
+          "Operator": "IN",
+          "Value": fetchedResIds
         });
 
-        agendaSnapshot.forEach(doc => {
-          agendaNotes[doc.id] = doc.data();
-        });
-      } catch (e) {
-        console.error("Error fetching firebase data:", e);
+        // High Pagination Limit
+        commentPayload.Paging = { ItemsPerPage: 5000, Current: 1 };
+
+        // Fetch Comments
+        const cList = await executeElektraQuery(commentPayload);
+        commentsList = Array.isArray(cList) ? cList : [];
       }
 
-      // 5. Cross-Match Logic
+      // 4. Cross-Match Logic using Firebase Cache
       const groupedDetails = groupCommentDetails(commentsList as any);
 
       let processedGuests = guestsList.map(guest => {
         const matchedComments = groupedDetails.filter(detail => String(detail.RESID) === String(guest.RESID));
-        const hasSurveySent = surveyLogs.some(log => log.guestId === guest.RESID);
-        const interaction = guestInteractions[guest.RESID] || {};
+        const hasSurveySent = firebaseCache.surveys.some(log => log.guestId === guest.RESID);
+        const interaction = firebaseCache.interactions[guest.RESID] || {};
         
         let sentimentScore = interaction.sentimentScore;
         let sentimentAnalysisDate = interaction.sentimentAnalysisDate;
 
         if (sentimentScore === undefined && matchedComments.length > 0) {
           for (const comment of matchedComments) {
-            const note = agendaNotes[comment.COMMENTID];
+            const note = firebaseCache.agenda[comment.COMMENTID];
             if (note && note.sentimentScore !== undefined) {
               sentimentScore = note.sentimentScore;
               sentimentAnalysisDate = note.sentimentAnalysisDate;
@@ -246,7 +245,7 @@ export function GuestListModule() {
         };
       });
 
-      // 7. Deduplicate
+      // 5. Deduplicate
       const uniqueGuests = processedGuests.filter((guest, index, self) =>
         index === self.findIndex((t) => t.RESID === guest.RESID)
       );
