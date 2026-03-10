@@ -81,6 +81,9 @@ export interface GuestData {
   sentimentAnalysisDate?: string;
   generatedLetter?: string;
   letterSentDate?: string;
+  welcomeCallStatus?: 'not_called' | 'answered_all_good' | 'answered_has_request' | 'no_answer';
+  welcomeCallNotes?: string;
+  welcomeCallDate?: string;
 }
 
 export interface LetterTemplate {

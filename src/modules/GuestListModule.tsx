@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText, Brain, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
+import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText, Brain, CheckCircle2, AlertCircle, RefreshCw, Phone, PhoneOff, PhoneForwarded } from 'lucide-react';
 import { GuestData, CommentData, ApiSettings, GuestListTab } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { buildDynamicPayload, formatTRDate, groupCommentDetails } from '../utils';
@@ -26,7 +26,14 @@ export function GuestListModule() {
 
   // Dynamic Column Filters State
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
-  const [searchHasComment, setSearchHasComment] = useState<'all' | 'yes' | 'no'>('all');
+  const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
+
+  // Welcome Call Modal State
+  const [isWelcomeCallModalOpen, setIsWelcomeCallModalOpen] = useState(false);
+  const [selectedGuestForCall, setSelectedGuestForCall] = useState<GuestData | null>(null);
+  const [callStatus, setCallStatus] = useState<'not_called' | 'answered_all_good' | 'answered_has_request' | 'no_answer'>('not_called');
+  const [callNotes, setCallNotes] = useState('');
+  const [isSavingCall, setIsSavingCall] = useState(false);
 
   // Mail Merge Modal State
   const [isMailMergeModalOpen, setIsMailMergeModalOpen] = useState(false);
@@ -232,16 +239,12 @@ export function GuestListModule() {
           sentimentScore: sentimentScore,
           sentimentAnalysisDate: sentimentAnalysisDate,
           generatedLetter: interaction.generatedLetter,
-          letterSentDate: interaction.letterSentDate
+          letterSentDate: interaction.letterSentDate,
+          welcomeCallStatus: interaction.welcomeCallStatus || 'not_called',
+          welcomeCallNotes: interaction.welcomeCallNotes || '',
+          welcomeCallDate: interaction.welcomeCallDate || ''
         };
       });
-
-      // 6. Local Filter for "Has Comment"
-      if (searchHasComment === 'yes') {
-        processedGuests = processedGuests.filter(g => g.hasComment);
-      } else if (searchHasComment === 'no') {
-        processedGuests = processedGuests.filter(g => !g.hasComment);
-      }
 
       // 7. Deduplicate
       const uniqueGuests = processedGuests.filter((guest, index, self) =>
@@ -282,9 +285,41 @@ export function GuestListModule() {
 
   // Sort Data
   const processedData = useMemo(() => {
-    if (!sortConfig) return guests;
+    let filtered = guests;
+
+    // Apply Quick Filters
+    switch (activeQuickFilter) {
+      case 'has_comment':
+        filtered = filtered.filter(g => g.hasComment);
+        break;
+      case 'no_comment':
+        filtered = filtered.filter(g => !g.hasComment);
+        break;
+      case 'analyzed':
+        filtered = filtered.filter(g => g.sentimentScore !== undefined);
+        break;
+      case 'high_sentiment':
+        filtered = filtered.filter(g => g.sentimentScore !== undefined && g.sentimentScore > 0.8);
+        break;
+      case 'low_sentiment':
+        filtered = filtered.filter(g => g.sentimentScore !== undefined && g.sentimentScore < 0.5);
+        break;
+      case 'survey_sent':
+        filtered = filtered.filter(g => g.surveySent);
+        break;
+      case 'no_welcome_call':
+        filtered = filtered.filter(g => !g.welcomeCallStatus || g.welcomeCallStatus === 'not_called');
+        break;
+      case 'has_request':
+        filtered = filtered.filter(g => g.welcomeCallStatus === 'answered_has_request');
+        break;
+      default:
+        break;
+    }
+
+    if (!sortConfig) return filtered;
     
-    return [...guests].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       const aValue = a[sortConfig.key] || '';
       const bValue = b[sortConfig.key] || '';
       
@@ -292,10 +327,47 @@ export function GuestListModule() {
       if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [guests, sortConfig]);
+  }, [guests, sortConfig, activeQuickFilter]);
 
   const toggleRow = (id: string) => {
     setExpandedRowId(expandedRowId === id ? null : id);
+  };
+
+  const openWelcomeCallModal = (guest: GuestData) => {
+    setSelectedGuestForCall(guest);
+    setCallStatus(guest.welcomeCallStatus || 'not_called');
+    setCallNotes(guest.welcomeCallNotes || '');
+    setIsWelcomeCallModalOpen(true);
+  };
+
+  const handleSaveWelcomeCall = async () => {
+    if (!selectedGuestForCall) return;
+    setIsSavingCall(true);
+
+    try {
+      const interactionRef = doc(db, 'guest_interactions', String(selectedGuestForCall.RESID));
+      const payload = {
+        welcomeCallStatus: callStatus,
+        welcomeCallNotes: callStatus === 'answered_has_request' ? callNotes : '',
+        welcomeCallDate: new Date().toISOString()
+      };
+
+      await setDoc(interactionRef, payload, { merge: true });
+
+      // Update local state
+      setGuests(prev => prev.map(g => 
+        g.RESID === selectedGuestForCall.RESID 
+          ? { ...g, ...payload }
+          : g
+      ));
+
+      setIsWelcomeCallModalOpen(false);
+    } catch (error) {
+      console.error("Error saving welcome call:", error);
+      alert("Kaydedilirken bir hata oluştu.");
+    } finally {
+      setIsSavingCall(false);
+    }
   };
 
   const openMailMergeModal = async (guest: GuestData) => {
@@ -697,20 +769,23 @@ export function GuestListModule() {
               <option value={10000}>10.000 Kayıt</option>
             </select>
           </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium text-slate-500">Sadece Sessiz Misafirler:</label>
-            <button
-              onClick={() => setSearchHasComment(searchHasComment === 'no' ? 'all' : 'no')}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${
-                searchHasComment === 'no' ? 'bg-emerald-600' : 'bg-slate-200'
-              }`}
+          <div className="flex items-center gap-3">
+            <label className="text-xs font-medium text-slate-500">Hızlı Filtreler:</label>
+            <select
+              value={activeQuickFilter}
+              onChange={(e) => setActiveQuickFilter(e.target.value)}
+              className="px-3 py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all cursor-pointer shadow-sm"
             >
-              <span
-                className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                  searchHasComment === 'no' ? 'translate-x-6' : 'translate-x-1'
-                }`}
-              />
-            </button>
+              <option value="all">Tümü</option>
+              <option value="has_comment">Yorum Yapanlar</option>
+              <option value="no_comment">Sessiz Misafirler (Yorum Yok)</option>
+              <option value="analyzed">Duygu Analizi Yapılanlar</option>
+              <option value="high_sentiment">Yüksek Memnuniyet (Score &gt; %80)</option>
+              <option value="low_sentiment">Riskli Misafirler (Score &lt; %50)</option>
+              <option value="survey_sent">Anket/Mektup Gönderilenler</option>
+              <option value="no_welcome_call">Welcome Call Yapılmayanlar</option>
+              <option value="has_request">Talebi Olan Misafirler</option>
+            </select>
           </div>
           <button 
             onClick={() => handleSearch(false)}
@@ -731,9 +806,9 @@ export function GuestListModule() {
         <div className="px-6 py-2 bg-white border-b border-slate-200 text-sm text-slate-500 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-4">
             <span>Toplam <strong>{processedData.length}</strong> misafir listeleniyor</span>
-            {searchHasComment !== 'all' && (
+            {activeQuickFilter !== 'all' && (
               <span className="bg-emerald-50 text-emerald-700 px-2 py-1 rounded text-xs font-medium">
-                Filtre: {searchHasComment === 'yes' ? 'Sadece Yorum Yapanlar' : 'Yorum Yapmayanlar'}
+                Filtre Aktif
               </span>
             )}
           </div>
@@ -941,6 +1016,24 @@ export function GuestListModule() {
                                 <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
                               </div>
                             </div>
+
+                            <div className="relative group/tooltip flex items-center justify-center">
+                              {guest.welcomeCallStatus === 'answered_all_good' ? (
+                                <Phone size={14} className="text-emerald-500" />
+                              ) : guest.welcomeCallStatus === 'answered_has_request' ? (
+                                <PhoneForwarded size={14} className="text-amber-500" />
+                              ) : guest.welcomeCallStatus === 'no_answer' ? (
+                                <PhoneOff size={14} className="text-red-500" />
+                              ) : (
+                                <Phone size={14} className="text-slate-200" />
+                              )}
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-slate-800 text-white text-[10px] font-medium rounded-md opacity-0 group-hover/tooltip:opacity-100 transition-all duration-200 translate-y-1 group-hover/tooltip:translate-y-0 whitespace-nowrap pointer-events-none z-50 shadow-xl">
+                                {guest.welcomeCallStatus === 'answered_all_good' ? "Ulaşıldı - Her Şey Yolunda" :
+                                 guest.welcomeCallStatus === 'answered_has_request' ? `Talebi Var: ${guest.welcomeCallNotes || 'Not yok'}` :
+                                 guest.welcomeCallStatus === 'no_answer' ? "Ulaşılamadı" : "Arama Yapılmadı"}
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+                              </div>
+                            </div>
                           </div>
                           
                           {guest.sentimentScore !== undefined && (
@@ -984,6 +1077,13 @@ export function GuestListModule() {
                                   <Search size={16} className="text-emerald-600" />
                                   Rezervasyon Detayları
                                 </h4>
+                                <button
+                                  onClick={() => openWelcomeCallModal(guest)}
+                                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2"
+                                >
+                                  <Phone size={16} />
+                                  Hoş Geldiniz Araması
+                                </button>
                                 <button
                                   onClick={() => openMailMergeModal(guest)}
                                   className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2"
@@ -1298,6 +1398,118 @@ export function GuestListModule() {
               >
                 <Star size={16} />
                 Tümünü Gönderildi İşaretle
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Welcome Call Modal */}
+      {isWelcomeCallModalOpen && selectedGuestForCall && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+              <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <Phone size={20} className="text-blue-600" />
+                Hoş Geldiniz Araması
+              </h3>
+              <button 
+                onClick={() => setIsWelcomeCallModalOpen(false)}
+                className="p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 rounded-lg transition-colors"
+              >
+                <LogOut size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto">
+              <div className="mb-6 flex items-center justify-between bg-blue-50 p-4 rounded-xl border border-blue-100">
+                <div>
+                  <span className="block text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Misafir</span>
+                  <span className="text-lg font-semibold text-slate-800">{selectedGuestForCall.GUESTNAMES}</span>
+                </div>
+                <div className="text-right">
+                  <span className="block text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Oda</span>
+                  <span className="text-lg font-semibold text-slate-800">{selectedGuestForCall.ROOMNO}</span>
+                </div>
+              </div>
+
+              <div className="space-y-4 mb-6">
+                <label className="block text-sm font-semibold text-slate-700">Arama Durumu</label>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div 
+                    onClick={() => setCallStatus('answered_all_good')}
+                    className={`cursor-pointer p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center gap-2 ${
+                      callStatus === 'answered_all_good' 
+                        ? 'border-emerald-500 bg-emerald-50 text-emerald-700' 
+                        : 'border-slate-200 hover:border-emerald-200 hover:bg-emerald-50/50 text-slate-600'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-full ${callStatus === 'answered_all_good' ? 'bg-emerald-100' : 'bg-slate-100'}`}>
+                      <Phone size={24} className={callStatus === 'answered_all_good' ? 'text-emerald-600' : 'text-slate-400'} />
+                    </div>
+                    <span className="text-sm font-medium">Ulaşıldı<br/>Her Şey Yolunda</span>
+                  </div>
+
+                  <div 
+                    onClick={() => setCallStatus('answered_has_request')}
+                    className={`cursor-pointer p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center gap-2 ${
+                      callStatus === 'answered_has_request' 
+                        ? 'border-amber-500 bg-amber-50 text-amber-700' 
+                        : 'border-slate-200 hover:border-amber-200 hover:bg-amber-50/50 text-slate-600'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-full ${callStatus === 'answered_has_request' ? 'bg-amber-100' : 'bg-slate-100'}`}>
+                      <PhoneForwarded size={24} className={callStatus === 'answered_has_request' ? 'text-amber-600' : 'text-slate-400'} />
+                    </div>
+                    <span className="text-sm font-medium">Ulaşıldı<br/>Özel Talebi Var</span>
+                  </div>
+
+                  <div 
+                    onClick={() => setCallStatus('no_answer')}
+                    className={`cursor-pointer p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center gap-2 ${
+                      callStatus === 'no_answer' 
+                        ? 'border-red-500 bg-red-50 text-red-700' 
+                        : 'border-slate-200 hover:border-red-200 hover:bg-red-50/50 text-slate-600'
+                    }`}
+                  >
+                    <div className={`p-2 rounded-full ${callStatus === 'no_answer' ? 'bg-red-100' : 'bg-slate-100'}`}>
+                      <PhoneOff size={24} className={callStatus === 'no_answer' ? 'text-red-600' : 'text-slate-400'} />
+                    </div>
+                    <span className="text-sm font-medium">Ulaşılamadı<br/>Odada Yok</span>
+                  </div>
+                </div>
+              </div>
+
+              {callStatus === 'answered_has_request' && (
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                  <label className="block text-sm font-semibold text-slate-700">Talepler / Notlar</label>
+                  <textarea
+                    value={callNotes}
+                    onChange={(e) => setCallNotes(e.target.value)}
+                    placeholder="Misafirin ekstra havlu, geç çıkış vb. taleplerini buraya yazın..."
+                    className="w-full h-32 px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none"
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+              <button
+                onClick={() => setIsWelcomeCallModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                İptal
+              </button>
+              <button
+                onClick={handleSaveWelcomeCall}
+                disabled={isSavingCall || (callStatus === 'answered_has_request' && !callNotes.trim())}
+                className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                {isSavingCall ? (
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <CheckCircle2 size={16} />
+                )}
+                Kaydet
               </button>
             </div>
           </div>
