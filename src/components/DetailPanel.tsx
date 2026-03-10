@@ -36,6 +36,7 @@ export function DetailPanel({ comment }: DetailPanelProps) {
       setShowTranslation(false);
       setTargetLanguage('İngilizce');
       setSavedInAgenda(false);
+      setSentimentScore(null);
 
       // Fetch from Firebase
       const fetchData = async () => {

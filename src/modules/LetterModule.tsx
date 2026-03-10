@@ -1,9 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { DetailPanel } from '../components/DetailPanel';
 import { CommentData, ApiSettings } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { buildDynamicPayload } from '../utils';
+import { collection, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
 
 export function LetterModule() {
   const [selectedCommentId, setSelectedCommentId] = useState<string | null>(null);
@@ -30,6 +32,19 @@ export function LetterModule() {
   
   const [startDate, setStartDate] = useState(formatDate(oneMonthAgo));
   const [endDate, setEndDate] = useState(formatDate(today));
+  const [agendaNotes, setAgendaNotes] = useState<Record<string, any>>({});
+
+  useEffect(() => {
+    const unsubscribe = onSnapshot(collection(db, 'agenda_notes'), (snapshot) => {
+      const notes: Record<string, any> = {};
+      snapshot.forEach((doc) => {
+        notes[doc.id] = doc.data();
+      });
+      setAgendaNotes(notes);
+    });
+
+    return () => unsubscribe();
+  }, []);
 
   const fetchComments = async (isLoadMore = false) => {
     const savedSettings = localStorage.getItem('hotelApiSettings');
@@ -153,6 +168,7 @@ export function LetterModule() {
         setFetchLimit={setFetchLimit}
         hasMoreData={hasMoreData}
         isLoadingMore={isLoadingMore}
+        agendaNotes={agendaNotes}
       />
       <DetailPanel comment={selectedComment} />
     </div>

@@ -17,6 +17,7 @@ interface SidebarProps {
   setFetchLimit: (limit: number) => void;
   hasMoreData: boolean;
   isLoadingMore: boolean;
+  agendaNotes?: Record<string, any>;
 }
 
 export function Sidebar({ 
@@ -32,7 +33,8 @@ export function Sidebar({
   fetchLimit,
   setFetchLimit,
   hasMoreData,
-  isLoadingMore
+  isLoadingMore,
+  agendaNotes = {}
 }: SidebarProps) {
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [showDateInputs, setShowDateInputs] = useState(false);
@@ -200,37 +202,52 @@ export function Sidebar({
             Gösterilecek yorum bulunamadı.
           </div>
         )}
-        {comments.map((comment) => (
-          <div
-            key={comment.ID || Math.random().toString()}
-            onClick={() => onSelect(comment.ID)}
-            className={`p-4 rounded-xl border cursor-pointer transition-all duration-200 ${
-              selectedId === comment.ID
-                ? 'bg-slate-50 border-slate-900 shadow-sm'
-                : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'
-            }`}
-          >
-            <div className="flex justify-between items-start mb-2 gap-2">
-              <h3 className="font-medium text-slate-900 truncate pr-2">{comment.RESNAMEID_LOOKUP || 'Misafir'}</h3>
-              {comment.ROOMNO && (
-                <div className="flex items-center gap-1 text-slate-700 bg-slate-100 px-2 py-1 rounded-md">
-                  <DoorOpen size={14} />
-                  <span className="text-xs font-bold whitespace-nowrap">Oda: {comment.ROOMNO}</span>
-                </div>
-              )}
+        {comments.map((comment) => {
+          const note = agendaNotes[String(comment.ID)];
+          const score = note?.sentimentScore;
+          
+          return (
+            <div
+              key={comment.ID || Math.random().toString()}
+              onClick={() => onSelect(comment.ID)}
+              className={`p-4 rounded-xl border cursor-pointer transition-all duration-200 ${
+                selectedId === comment.ID
+                  ? 'bg-slate-50 border-slate-900 shadow-sm'
+                  : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'
+              }`}
+            >
+              <div className="flex justify-between items-start mb-2 gap-2">
+                <h3 className="font-medium text-slate-900 truncate pr-2">{comment.RESNAMEID_LOOKUP || 'Misafir'}</h3>
+                {comment.ROOMNO && (
+                  <div className="flex items-center gap-1 text-slate-700 bg-slate-100 px-2 py-1 rounded-md">
+                    <DoorOpen size={14} />
+                    <span className="text-xs font-bold whitespace-nowrap">Oda: {comment.ROOMNO}</span>
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
+                <span className="flex items-center gap-1"><Globe size={12} /> {comment.NATIONALITY || 'Bilinmiyor'}</span>
+                <span className="flex items-center gap-1"><Calendar size={12} /> {formatTRDate(comment.COMMENTDATE)}</span>
+              </div>
+              <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">
+                {comment.COMMENT}
+              </p>
+              <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
+                <span className="text-xs font-medium text-slate-400">{comment.COMMENTSOURCEID_NAME}</span>
+                {score !== undefined && score !== null && (
+                  <div className={`text-xs font-bold px-2 py-1 rounded-md ${
+                    score >= 0.8 ? 'bg-emerald-100 text-emerald-700' :
+                    score >= 0.6 ? 'bg-blue-100 text-blue-700' :
+                    score >= 0.4 ? 'bg-yellow-100 text-yellow-700' :
+                    'bg-red-100 text-red-700'
+                  }`}>
+                    Memnuniyet: %{(score * 100).toFixed(0)}
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
-              <span className="flex items-center gap-1"><Globe size={12} /> {comment.NATIONALITY || 'Bilinmiyor'}</span>
-              <span className="flex items-center gap-1"><Calendar size={12} /> {formatTRDate(comment.COMMENTDATE)}</span>
-            </div>
-            <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">
-              {comment.COMMENT}
-            </p>
-            <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
-              <span className="text-xs font-medium text-slate-400">{comment.COMMENTSOURCEID_NAME}</span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
         
         {comments.length > 0 && hasMoreData && (
           <div className="pt-2 pb-4 flex justify-center">
