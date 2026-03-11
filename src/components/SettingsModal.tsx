@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ChevronDown, ChevronUp, Eye, EyeOff } from 'lucide-react';
-import { ApiSettings } from '../types';
-import { doc, setDoc } from "firebase/firestore";
+import { X, ChevronDown, ChevronUp, Eye, EyeOff, Brain, DollarSign, Activity, Settings2, Database } from 'lucide-react';
+import { ApiSettings, AILog } from '../types';
+import { doc, setDoc, collection, getDocs } from "firebase/firestore";
 import { db } from '../firebase';
+import { motion, AnimatePresence } from 'motion/react';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -110,12 +111,16 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     inhousePayloadTemplate: DEFAULT_INHOUSE_TEMPLATE,
     reservationPayloadTemplate: DEFAULT_RESERVATION_TEMPLATE,
     checkoutPayloadTemplate: DEFAULT_CHECKOUT_TEMPLATE,
-    geminiApiKey: ''
+    geminiApiKey: '',
+    geminiModel: 'gemini-2.5-flash'
   });
   
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [activeTab, setActiveTab] = useState<'api' | 'ai'>('api');
+  const [aiLogs, setAiLogs] = useState<AILog[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const bookmarkletRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
@@ -142,11 +147,33 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           inhousePayloadTemplate: parsed.inhousePayloadTemplate || DEFAULT_INHOUSE_TEMPLATE,
           reservationPayloadTemplate: parsed.reservationPayloadTemplate || DEFAULT_RESERVATION_TEMPLATE,
           checkoutPayloadTemplate: parsed.checkoutPayloadTemplate || DEFAULT_CHECKOUT_TEMPLATE,
-          geminiApiKey: parsed.geminiApiKey || ''
+          geminiApiKey: parsed.geminiApiKey || '',
+          geminiModel: parsed.geminiModel || 'gemini-2.5-flash'
         });
       } catch (e) {}
     }
   }, [isOpen]);
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'ai') {
+      const fetchLogs = async () => {
+        setIsLoadingLogs(true);
+        try {
+          const snapshot = await getDocs(collection(db, 'ai_usage_logs'));
+          const logs: AILog[] = [];
+          snapshot.forEach(doc => {
+            logs.push({ id: doc.id, ...doc.data() } as AILog);
+          });
+          setAiLogs(logs);
+        } catch (error) {
+          console.error("Error fetching AI logs:", error);
+        } finally {
+          setIsLoadingLogs(false);
+        }
+      };
+      fetchLogs();
+    }
+  }, [isOpen, activeTab]);
 
   useEffect(() => {
     if (bookmarkletRef.current) {
@@ -169,9 +196,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setSettings(prev => ({ ...prev, [e.target.name]: e.target.value }));
     // Clear error when user types
     if (e.target.name.includes('Template')) {
@@ -250,130 +275,264 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           <ChevronDown size={18} className="text-slate-400 group-hover:text-slate-600" />
         }
       </button>
-      {expandedSection === name && (
-        <div className="p-4 bg-white border-t border-slate-200 animate-in slide-in-from-top-2 duration-200 relative">
-          <textarea
-            name={name}
-            value={settings[name] as string}
-            onChange={handleChange}
-            className="w-full h-64 px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-xs font-mono bg-slate-50"
-            spellCheck={false}
-          />
-          <button 
-            onClick={() => resetToDefault(name)}
-            className="absolute top-6 right-6 text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded transition-colors"
+      <AnimatePresence>
+        {expandedSection === name && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
           >
-            Varsayılanı Yükle
-          </button>
-        </div>
-      )}
+            <div className="p-4 bg-white border-t border-slate-200 relative">
+              <textarea
+                name={name}
+                value={settings[name] as string}
+                onChange={handleChange}
+                className="w-full h-64 px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-xs font-mono bg-slate-50"
+                spellCheck={false}
+              />
+              <button 
+                onClick={() => resetToDefault(name)}
+                className="absolute top-6 right-6 text-[10px] bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded transition-colors"
+              >
+                Varsayılanı Yükle
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 backdrop-blur-sm p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-        <div className="flex justify-between items-center p-4 border-b border-slate-100 shrink-0">
-          <h2 className="text-lg font-semibold text-slate-800">API Bağlantı ve Sorgu Ayarları</h2>
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 backdrop-blur-sm p-4"
+        >
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col"
+          >
+            <div className="flex justify-between items-center p-4 border-b border-slate-100 shrink-0 bg-slate-50">
+          <div className="flex items-center gap-6">
+            <h2 className="text-lg font-semibold text-slate-800">Sistem Ayarları</h2>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setActiveTab('api')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
+                  activeTab === 'api' 
+                    ? 'bg-emerald-100 text-emerald-700' 
+                    : 'text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <Database size={16} />
+                API Bağlantı
+              </button>
+              <button
+                onClick={() => setActiveTab('ai')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
+                  activeTab === 'ai' 
+                    ? 'bg-purple-100 text-purple-700' 
+                    : 'text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <Brain size={16} />
+                Yapay Zeka & FinOps
+              </button>
+            </div>
+          </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
             <X size={20} />
           </button>
         </div>
         
         <div className="p-6 space-y-6 overflow-y-auto flex-1">
-          {/* Basic Settings */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Base URL</label>
-                <input type="text" name="baseUrl" value={settings.baseUrl} onChange={handleChange} placeholder="https://4001.hoteladvisor.net" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Hotel ID</label>
-                <input type="text" name="hotelId" value={settings.hotelId} onChange={handleChange} placeholder="21390" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Elektraweb Login Token</label>
-                <input type="password" name="loginToken" value={settings.loginToken} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Gemini API Anahtarı (Opsiyonel)</label>
-                <div className="relative">
-                  <input 
-                    type={showGeminiKey ? "text" : "password"} 
-                    name="geminiApiKey" 
-                    value={settings.geminiApiKey || ''} 
-                    onChange={handleChange} 
-                    placeholder="AI özellikleri için gerekli" 
-                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm pr-10" 
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowGeminiKey(!showGeminiKey)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
-                  >
-                    {showGeminiKey ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
+          {activeTab === 'api' ? (
+            <>
+              {/* Basic Settings */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Base URL</label>
+                    <input type="text" name="baseUrl" value={settings.baseUrl} onChange={handleChange} placeholder="https://4001.hoteladvisor.net" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Hotel ID</label>
+                    <input type="text" name="hotelId" value={settings.hotelId} onChange={handleChange} placeholder="21390" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Elektraweb Login Token</label>
+                    <input type="password" name="loginToken" value={settings.loginToken} onChange={handleChange} className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 h-fit">
+                  <h3 className="text-sm font-semibold text-slate-800 mb-2">Otomatik Bağlantı (Bookmarklet)</h3>
+                  <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+                    Tarayıcı güvenlik kuralları gereği, token'ı otomatik almak için bu butonu kullanın:
+                  </p>
+                  <div className="flex justify-center mb-2">
+                    <a 
+                      ref={bookmarkletRef}
+                      className="inline-flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-md text-xs font-bold hover:bg-emerald-700 transition-colors cursor-grab active:cursor-grabbing shadow-sm select-none"
+                      onClick={(e) => e.preventDefault()}
+                    >
+                      🔄 Elektraweb Sync
+                    </a>
+                  </div>
+                  <p className="text-[10px] text-slate-400 text-center">
+                    Butonu yer imleri çubuğuna sürükleyin, sonra Elektraweb sekmesinde tıklayın.
+                  </p>
                 </div>
               </div>
-            </div>
 
-            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 h-fit">
-              <h3 className="text-sm font-semibold text-slate-800 mb-2">Otomatik Bağlantı (Bookmarklet)</h3>
-              <p className="text-xs text-slate-500 mb-3 leading-relaxed">
-                Tarayıcı güvenlik kuralları gereği, token'ı otomatik almak için bu butonu kullanın:
-              </p>
-              <div className="flex justify-center mb-2">
-                <a 
-                  ref={bookmarkletRef}
-                  className="inline-flex items-center gap-2 bg-emerald-600 text-white px-4 py-2 rounded-md text-xs font-bold hover:bg-emerald-700 transition-colors cursor-grab active:cursor-grabbing shadow-sm select-none"
-                  onClick={(e) => e.preventDefault()}
-                >
-                  🔄 Elektraweb Sync
-                </a>
+              <hr className="border-slate-100" />
+
+              {/* JSON Templates Accordion */}
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-slate-800">Dinamik Sorgu Şablonları (JSON)</h3>
+                <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-xs border border-blue-100">
+                  <strong>Bilgi:</strong> Tarih alanlarına <code>{"{{START_DATE}}"}</code> ve <code>{"{{END_DATE}}"}</code>, 
+                  Login Token alanına <code>{"{{LOGIN_TOKEN}}"}</code>, Hotel ID için <code>{"{{HOTELID}}"}</code> yazabilirsiniz. 
+                  Sistem bu değerleri otomatik dolduracaktır.
+                </div>
+                
+                {jsonError && (
+                  <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm border border-red-100">
+                    {jsonError}
+                  </div>
+                )}
+
+                <div className="space-y-3">
+                  {renderAccordionItem('Yorum Listesi Şablonu', 'commentPayloadTemplate')}
+                  <div className="relative">
+                    {renderAccordionItem('Yorum Detayları (Köprü) İstek Şablonu', 'commentDetailPayloadTemplate')}
+                    <p className="text-[10px] text-slate-500 mt-1 ml-1">Bu şablon, Misafirler ve Yorumlar arasında %100 kesin eşleşme (RESID üzerinden) sağlamak için kullanılır.</p>
+                  </div>
+                  {renderAccordionItem('Konaklayanlar (Inhouse) Şablonu', 'inhousePayloadTemplate')}
+                  {renderAccordionItem('Rezervasyon Şablonu', 'reservationPayloadTemplate')}
+                  {renderAccordionItem('Ayrılanlar (Checkout) Şablonu', 'checkoutPayloadTemplate')}
+                </div>
               </div>
-              <p className="text-[10px] text-slate-400 text-center">
-                Butonu yer imleri çubuğuna sürükleyin, sonra Elektraweb sekmesinde tıklayın.
-              </p>
-            </div>
-          </div>
-
-          <hr className="border-slate-100" />
-
-          {/* JSON Templates Accordion */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-slate-800">Dinamik Sorgu Şablonları (JSON)</h3>
-            <div className="bg-blue-50 text-blue-700 p-3 rounded-lg text-xs border border-blue-100">
-              <strong>Bilgi:</strong> Tarih alanlarına <code>{"{{START_DATE}}"}</code> ve <code>{"{{END_DATE}}"}</code>, 
-              Login Token alanına <code>{"{{LOGIN_TOKEN}}"}</code>, Hotel ID için <code>{"{{HOTELID}}"}</code> yazabilirsiniz. 
-              Sistem bu değerleri otomatik dolduracaktır.
-            </div>
-            
-            {jsonError && (
-              <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm border border-red-100">
-                {jsonError}
+            </>
+          ) : (
+            <div className="space-y-8">
+              {/* AI Config */}
+              <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
+                <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                  <Settings2 size={20} className="text-purple-600" />
+                  Model ve Bağlantı Ayarları
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Gemini API Anahtarı</label>
+                    <div className="relative">
+                      <input 
+                        type={showGeminiKey ? "text" : "password"} 
+                        name="geminiApiKey" 
+                        value={settings.geminiApiKey || ''} 
+                        onChange={handleChange} 
+                        placeholder="AI özellikleri için gerekli" 
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm pr-10" 
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowGeminiKey(!showGeminiKey)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+                      >
+                        {showGeminiKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Aktif Yapay Zeka Modeli</label>
+                    <select
+                      name="geminiModel"
+                      value={settings.geminiModel || 'gemini-2.5-flash'}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-white"
+                    >
+                      <option value="gemini-2.5-flash-lite">Ultra Ekonomik & Hızlı (Gemini 2.5 Flash-Lite)</option>
+                      <option value="gemini-2.5-flash">Fiyat/Performans Dengesi (Gemini 2.5 Flash) - Önerilen</option>
+                      <option value="gemini-2.5-pro">Gelişmiş Mantık ve Strateji (Gemini 2.5 Pro)</option>
+                      <option value="gemini-3.1-pro-preview">Yeni Nesil Amiral Gemisi (Gemini 3.1 Pro Preview)</option>
+                    </select>
+                  </div>
+                </div>
               </div>
-            )}
 
-            <div className="space-y-3">
-              {renderAccordionItem('Yorum Listesi Şablonu', 'commentPayloadTemplate')}
-              <div className="relative">
-                {renderAccordionItem('Yorum Detayları (Köprü) İstek Şablonu', 'commentDetailPayloadTemplate')}
-                <p className="text-[10px] text-slate-500 mt-1 ml-1">Bu şablon, Misafirler ve Yorumlar arasında %100 kesin eşleşme (RESID üzerinden) sağlamak için kullanılır.</p>
+              {/* FinOps Dashboard */}
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800 mb-4 flex items-center gap-2">
+                  <Activity size={20} className="text-blue-600" />
+                  Tüketim ve Maliyet Dashboard'u (FinOps)
+                </h3>
+                
+                {isLoadingLogs ? (
+                  <div className="flex justify-center items-center py-12">
+                    <div className="animate-spin w-8 h-8 border-4 border-slate-200 border-t-blue-600 rounded-full"></div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-xl p-5 shadow-sm">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
+                          <Brain size={20} />
+                        </div>
+                        <h4 className="font-medium text-slate-600 text-sm">Toplam İşlem Sayısı</h4>
+                      </div>
+                      <p className="text-3xl font-bold text-slate-800">{aiLogs.length}</p>
+                      <p className="text-xs text-slate-500 mt-2">Mektup, Analiz, Çeviri vb.</p>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-xl p-5 shadow-sm">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="p-2 bg-purple-100 text-purple-600 rounded-lg">
+                          <Activity size={20} />
+                        </div>
+                        <h4 className="font-medium text-slate-600 text-sm">Toplam Harcanan Token</h4>
+                      </div>
+                      <p className="text-3xl font-bold text-slate-800">
+                        {(aiLogs.reduce((acc, log) => acc + log.inputTokens + log.outputTokens, 0)).toLocaleString()}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-2">Input + Output Tokenları</p>
+                    </div>
+
+                    <div className="bg-gradient-to-br from-slate-50 to-slate-100 border border-slate-200 rounded-xl p-5 shadow-sm">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div className="p-2 bg-emerald-100 text-emerald-600 rounded-lg">
+                          <DollarSign size={20} />
+                        </div>
+                        <h4 className="font-medium text-slate-600 text-sm">Toplam Tahmini Maliyet</h4>
+                      </div>
+                      <p className="text-3xl font-bold text-emerald-600">
+                        ${(aiLogs.reduce((acc, log) => acc + log.costUSD, 0)).toFixed(4)}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-2">Güncel model tarifelerine göre</p>
+                    </div>
+                  </div>
+                )}
               </div>
-              {renderAccordionItem('Konaklayanlar (Inhouse) Şablonu', 'inhousePayloadTemplate')}
-              {renderAccordionItem('Rezervasyon Şablonu', 'reservationPayloadTemplate')}
-              {renderAccordionItem('Ayrılanlar (Checkout) Şablonu', 'checkoutPayloadTemplate')}
             </div>
-          </div>
+          )}
         </div>
-
+        
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex justify-end shrink-0">
           <button onClick={handleSave} className="bg-slate-900 text-white px-6 py-2 rounded-lg text-sm font-medium hover:bg-slate-800 transition-colors shadow-sm">
             Ayarları Kaydet
           </button>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
+      )}
+    </AnimatePresence>
   );
 }

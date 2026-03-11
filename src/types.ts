@@ -103,6 +103,17 @@ export interface ApiSettings {
   reservationPayloadTemplate?: string;
   checkoutPayloadTemplate?: string;
   geminiApiKey?: string;
+  geminiModel?: 'gemini-2.5-flash-lite' | 'gemini-2.5-flash' | 'gemini-2.5-pro' | 'gemini-3.1-pro-preview';
+}
+
+export interface AILog {
+  id?: string;
+  action: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUSD: number;
+  timestamp: string;
 }
 
 export type GuestListTab = 'inhouse' | 'reservation' | 'checkout';

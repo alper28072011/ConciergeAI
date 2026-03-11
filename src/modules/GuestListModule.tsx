@@ -5,6 +5,7 @@ import { executeElektraQuery } from '../services/api';
 import { buildDynamicPayload, formatTRDate, groupCommentDetails } from '../utils';
 import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
+import { motion, AnimatePresence } from 'motion/react';
 
 export function GuestListModule() {
   const [guests, setGuests] = useState<GuestData[]>([]);
@@ -1066,11 +1067,19 @@ export function GuestListModule() {
                         {guest.NATIONALITY || '-'}
                       </td>
                     </tr>
-                    {expandedRowId === guest.RESID && (
-                      <tr className="bg-slate-50/50">
-                        <td colSpan={10} className="p-0">
-                          <div className="p-6 border-t border-b border-slate-200 shadow-inner bg-slate-50">
-                            <div className="max-w-4xl mx-auto">
+                    <AnimatePresence>
+                      {expandedRowId === guest.RESID && (
+                        <tr className="bg-slate-50/50" key={`expanded-${guest.RESID}`}>
+                          <td colSpan={10} className="p-0">
+                            <motion.div
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2, ease: "easeInOut" }}
+                              className="overflow-hidden"
+                            >
+                              <div className="p-6 border-t border-b border-slate-200 shadow-inner bg-slate-50">
+                                <div className="max-w-4xl mx-auto">
                               <div className="flex items-center justify-between mb-4">
                                 <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                                   <Search size={16} className="text-emerald-600" />
@@ -1215,9 +1224,11 @@ export function GuestListModule() {
                               )}
                             </div>
                           </div>
-                        </td>
-                      </tr>
-                    )}
+                            </motion.div>
+                          </td>
+                        </tr>
+                      )}
+                    </AnimatePresence>
                   </React.Fragment>
                 ))
               )}
@@ -1244,10 +1255,22 @@ export function GuestListModule() {
       </div>
 
       {/* Mail Merge Modal */}
-      {isMailMergeModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+      <AnimatePresence>
+        {isMailMergeModalOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              transition={{ type: "spring", stiffness: 300, damping: 30 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
+            >
+              <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
               <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
                 <FileText size={20} className="text-emerald-600" />
                 Anket/Mektup Önizleme
@@ -1299,14 +1322,27 @@ export function GuestListModule() {
                 Gönderildi Olarak İşaretle
               </button>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
       {/* Bulk Mail Merge Modal */}
+      <AnimatePresence>
       {isBulkMailMergeOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+        >
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
+          >
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
               <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
                 <FileText size={20} className="text-emerald-600" />
@@ -1399,13 +1435,26 @@ export function GuestListModule() {
                 Tümünü Gönderildi İşaretle
               </button>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
       {/* Welcome Call Modal */}
+      <AnimatePresence>
       {isWelcomeCallModalOpen && selectedGuestForCall && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4"
+        >
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.95, opacity: 0, y: 20 }}
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+            className="bg-white rounded-2xl shadow-xl w-full max-w-2xl flex flex-col overflow-hidden"
+          >
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
               <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
                 <Phone size={20} className="text-blue-600" />
@@ -1511,9 +1560,10 @@ export function GuestListModule() {
                 Kaydet
               </button>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

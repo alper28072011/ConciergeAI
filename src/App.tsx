@@ -12,6 +12,7 @@ import { db } from './firebase';
 import { LetterModule } from './modules/LetterModule';
 import { GuestListModule } from './modules/GuestListModule';
 import { TemplateModule } from './modules/TemplateModule';
+import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -175,9 +176,20 @@ export default function App() {
 
         {/* Module Content */}
         <main className="flex-1 flex overflow-hidden relative bg-slate-50">
-          {activeModule === 'letters' && <LetterModule />}
-          {activeModule === 'guestlist' && <GuestListModule />}
-          {activeModule === 'templates' && <TemplateModule />}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={activeModule}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="flex-1 flex w-full h-full"
+            >
+              {activeModule === 'letters' && <LetterModule />}
+              {activeModule === 'guestlist' && <GuestListModule />}
+              {activeModule === 'templates' && <TemplateModule />}
+            </motion.div>
+          </AnimatePresence>
         </main>
       </div>
 

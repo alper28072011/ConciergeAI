@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CommentData } from '../types';
 import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone, Save, Database, Brain } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
 import { formatTRDate } from '../utils';
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { db } from '../firebase';
+import { generateAIContent } from '../services/aiService';
 // @ts-ignore
 import html2pdf from 'html2pdf.js';
 
@@ -101,49 +101,6 @@ export function DetailPanel({ comment }: DetailPanelProps) {
     }
   };
 
-  const getApiKey = (): string | null => {
-    let key: string | null = null;
-    let source = '';
-
-    // 1. Try to get from LocalStorage (User Settings) - Priority #1
-    try {
-      const savedSettings = localStorage.getItem('hotelApiSettings');
-      if (savedSettings) {
-        const parsed = JSON.parse(savedSettings);
-        if (parsed.geminiApiKey && typeof parsed.geminiApiKey === 'string') {
-          key = parsed.geminiApiKey;
-          source = 'Settings';
-        }
-      }
-    } catch (e) {
-      console.error('Error parsing settings for API key:', e);
-    }
-
-    // 2. Try to get from Environment Variables - Priority #2
-    if (!key) {
-      const envKey = process.env.GEMINI_API_KEY;
-      if (envKey && typeof envKey === 'string') {
-        key = envKey;
-        source = 'Environment';
-      }
-    }
-
-    if (key) {
-      // Clean the key: remove whitespace and surrounding quotes if present
-      key = key.trim();
-      if ((key.startsWith('"') && key.endsWith('"')) || (key.startsWith("'") && key.endsWith("'"))) {
-        key = key.slice(1, -1);
-      }
-      
-      if (key.length > 0) {
-        console.log(`Using Gemini API Key from ${source} (Length: ${key.length}, Starts with: ${key.substring(0, 4)}...)`);
-        return key;
-      }
-    }
-
-    return null;
-  };
-
   const handleAnalyzeSentiment = async () => {
     if (!comment?.COMMENT) {
       alert("Analiz edilecek yorum bulunamadı.");
@@ -155,17 +112,8 @@ export function DetailPanel({ comment }: DetailPanelProps) {
       if (!confirmReanalyze) return;
     }
 
-    const apiKey = getApiKey();
-
-    if (!apiKey) {
-      alert("Gemini API anahtarı bulunamadı. Lütfen ayarlardan yapılandırın.");
-      return;
-    }
-
     setIsAnalyzing(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: String(apiKey) });
-      
       const prompt = `Aşağıdaki otel misafir yorumunu analiz et ve misafirin genel memnuniyetini 0 ile 1 arasında bir sayı olarak ver. 
         0: Tamamen memnuniyetsiz, 1: Tamamen memnun.
         Yanıtını kesinlikle aşağıdaki JSON formatında ver:
@@ -174,15 +122,7 @@ export function DetailPanel({ comment }: DetailPanelProps) {
         Yorum:
         ${comment.COMMENT}`;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: prompt,
-      });
-
-      let text = response.text;
-      if (!text) {
-        throw new Error("AI yanıtı boş döndü.");
-      }
+      let text = await generateAIContent(prompt, 'Duygu Analizi');
 
       // Clean markdown code blocks if present
       text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
@@ -207,9 +147,9 @@ export function DetailPanel({ comment }: DetailPanelProps) {
       }, { merge: true });
 
       alert(`Analiz tamamlandı. Memnuniyet Oranı: %${(score * 100).toFixed(0)}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Sentiment analysis error:", error);
-      alert("Duygu analizi sırasında bir hata oluştu.");
+      alert("Duygu analizi sırasında bir hata oluştu: " + (error.message || 'Bilinmeyen hata'));
     } finally {
       setIsAnalyzing(false);
     }
@@ -220,20 +160,9 @@ export function DetailPanel({ comment }: DetailPanelProps) {
     setGeneratedLetter('');
     setTranslatedLetter('');
     setShowTranslation(false);
-    
-    const apiKey = getApiKey();
-
-    if (!apiKey) {
-      const msg = 'Gemini API Anahtarı bulunamadı. Lütfen sağ üstteki "Ayarlar" butonuna tıklayıp geçerli bir Gemini API Anahtarı giriniz.';
-      alert(msg);
-      setGeneratedLetter(msg);
-      setIsGenerating(false);
-      return;
-    }
 
     try {
-      console.log('Initializing Gemini AI...');
-      const ai = new GoogleGenAI({ apiKey });
+      console.log('Sending request to Gemini...');
       
       const prompt = `You are a professional 5-star hotel Guest Relations Manager / Concierge. Write a polite and professional letter to a guest.
 Guest Name: ${comment.RESNAMEID_LOOKUP || 'Misafir'}
@@ -248,13 +177,8 @@ Target Language: ${targetLanguage}
 
 The letter should be empathetic, professional, and address the guest's feedback and the actions taken. Do not include placeholders, write the final letter. Format with appropriate paragraphs.`;
 
-      console.log('Sending request to Gemini...');
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: prompt,
-      });
-
-      setGeneratedLetter(response.text || 'Mektup oluşturulamadı (Boş yanıt).');
+      const text = await generateAIContent(prompt, 'Mektup Üretimi');
+      setGeneratedLetter(text || 'Mektup oluşturulamadı (Boş yanıt).');
     } catch (error: any) {
       console.error('Error generating letter:', error);
       let errorMessage = 'Mektup oluşturulurken bir hata oluştu.';
@@ -281,25 +205,12 @@ The letter should be empathetic, professional, and address the guest's feedback 
 
     setIsTranslating(true);
 
-    const apiKey = getApiKey();
-
-    if (!apiKey) {
-      alert('Gemini API Anahtarı bulunamadı. Lütfen Ayarlar panelinden giriniz.');
-      setIsTranslating(false);
-      return;
-    }
-
     try {
-      const ai = new GoogleGenAI({ apiKey });
-      
       const prompt = `Translate the following hotel guest letter to Turkish. Maintain the professional, 5-star hotel concierge tone.\n\n${generatedLetter}`;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: prompt,
-      });
+      const text = await generateAIContent(prompt, 'Mektup Çevirisi');
 
-      setTranslatedLetter(response.text || 'Çeviri yapılamadı.');
+      setTranslatedLetter(text || 'Çeviri yapılamadı.');
       setShowTranslation(true);
     } catch (error: any) {
       console.error('Error translating letter:', error);
