@@ -1,10 +1,14 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText, Brain, CheckCircle2, AlertCircle, RefreshCw, Phone, PhoneOff, PhoneForwarded } from 'lucide-react';
-import { GuestData, CommentData, ApiSettings, GuestListTab } from '../types';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText, Brain, CheckCircle2, AlertCircle, RefreshCw, Phone, PhoneOff, PhoneForwarded, Plus, X, Sparkles, Edit3, Database, Trash2 } from 'lucide-react';
+import { GuestData, CommentData, ApiSettings, GuestListTab, UnifiedTimelineAction } from '../types';
 import { executeElektraQuery } from '../services/api';
-import { buildDynamicPayload, formatTRDate, groupCommentDetails } from '../utils';
-import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch, onSnapshot } from 'firebase/firestore';
+import { generateAIContent } from '../services/aiService';
+import { buildDynamicPayload, formatTRDate, groupCommentDetails, buildUnifiedTimeline } from '../utils';
+import { TimelineView } from '../components/TimelineView';
+import { BulkAnalysisModal } from '../components/BulkAnalysisModal';
+import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { deleteCommentData } from '../services/firebaseService';
 import { motion, AnimatePresence } from 'motion/react';
 
 export function GuestListModule() {
@@ -34,10 +38,12 @@ export function GuestListModule() {
     surveys: any[];
     interactions: Record<string, any>;
     agenda: Record<string, any>;
+    commentActions: any[];
   }>({
     surveys: [],
     interactions: {},
-    agenda: {}
+    agenda: {},
+    commentActions: []
   });
 
   // Welcome Call Modal State
@@ -60,6 +66,190 @@ export function GuestListModule() {
   const [selectedBulkTemplateId, setSelectedBulkTemplateId] = useState<string>('');
   const [bulkGeneratedLetters, setBulkGeneratedLetters] = useState<{guest: GuestData, content: string}[]>([]);
   const [isGeneratingBulk, setIsGeneratingBulk] = useState(false);
+
+  const [isBulkAnalysisModalOpen, setIsBulkAnalysisModalOpen] = useState(false);
+  const [bulkAnalysisType, setBulkAnalysisType] = useState<'deep' | 'sentiment'>('deep');
+  const [commentsForBulkAnalysis, setCommentsForBulkAnalysis] = useState<CommentData[]>([]);
+  const [isBulkResetting, setIsBulkResetting] = useState(false);
+
+  // Timeline Preview State
+  const [selectedPreviewAction, setSelectedPreviewAction] = useState<UnifiedTimelineAction | null>(null);
+
+  // Action Modals State
+  const [isActionDropdownOpen, setIsActionDropdownOpen] = useState(false);
+  const [isAILetterModalOpen, setIsAILetterModalOpen] = useState(false);
+  const [isTemplateModalOpen, setIsTemplateModalOpen] = useState(false);
+  const [isManualNoteModalOpen, setIsManualNoteModalOpen] = useState(false);
+  const [selectedGuestForAction, setSelectedGuestForAction] = useState<GuestData | null>(null);
+
+  const [extraNotes, setExtraNotes] = useState('');
+  const [targetLanguage, setTargetLanguage] = useState('English');
+  const [isGeneratingAILetter, setIsGeneratingAILetter] = useState(false);
+  const [generatedAILetter, setGeneratedAILetter] = useState('');
+  const [translatedAILetter, setTranslatedAILetter] = useState('');
+  const [showAITranslation, setShowAITranslation] = useState(false);
+  const [isTranslatingAILetter, setIsTranslatingAILetter] = useState(false);
+
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [selectedTemplateId, setSelectedTemplateId] = useState('');
+  const [templatePreview, setTemplatePreview] = useState('');
+
+  const [manualNote, setManualNote] = useState('');
+  const [isSavingAction, setIsSavingAction] = useState(false);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('.action-dropdown-container')) {
+        setIsActionDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  const openActionDropdown = (guest: GuestData) => {
+    if (selectedGuestForAction?.RESID === guest.RESID) {
+      setIsActionDropdownOpen(!isActionDropdownOpen);
+    } else {
+      setSelectedGuestForAction(guest);
+      setIsActionDropdownOpen(true);
+    }
+  };
+
+  // Fetch templates when template modal opens
+  useEffect(() => {
+    if (isTemplateModalOpen && templates.length === 0) {
+      const fetchTemplates = async () => {
+        try {
+          const snapshot = await getDocs(collection(db, 'message_templates'));
+          const fetchedTemplates: any[] = [];
+          snapshot.forEach(doc => {
+            fetchedTemplates.push({ id: doc.id, ...doc.data() });
+          });
+          setTemplates(fetchedTemplates);
+        } catch (error) {
+          console.error("Error fetching templates:", error);
+        }
+      };
+      fetchTemplates();
+    }
+  }, [isTemplateModalOpen, templates.length]);
+
+  // Update template preview
+  useEffect(() => {
+    if (selectedTemplateId && selectedGuestForAction) {
+      const template = templates.find(t => t.id === selectedTemplateId);
+      if (template) {
+        const content = template.contents[targetLanguage] || Object.values(template.contents)[0] || '';
+        
+        let merged = content;
+        merged = merged.replace(/{{GUESTNAMES}}/g, `${selectedGuestForAction.GUESTNAME} ${selectedGuestForAction.GUESTSURNAME}`);
+        merged = merged.replace(/{{ROOMNO}}/g, selectedGuestForAction.ROOMNO || '');
+        merged = merged.replace(/{{CHECKIN}}/g, formatTRDate(selectedGuestForAction.CHECKIN || ''));
+        merged = merged.replace(/{{CHECKOUT}}/g, formatTRDate(selectedGuestForAction.CHECKOUT || ''));
+        merged = merged.replace(/{{HOTELNAME}}/g, 'Otelimiz');
+        
+        setTemplatePreview(merged);
+      }
+    } else {
+      setTemplatePreview('');
+    }
+  }, [selectedTemplateId, targetLanguage, selectedGuestForAction, templates]);
+
+  const handleGenerateAILetter = async () => {
+    if (!selectedGuestForAction) return;
+    setIsGeneratingAILetter(true);
+    setGeneratedAILetter('');
+    setTranslatedAILetter('');
+    setShowAITranslation(false);
+
+    try {
+      const prompt = `You are a professional 5-star hotel Guest Relations Manager / Concierge. Write a polite and professional letter to a guest.
+Guest Name: ${selectedGuestForAction.GUESTNAME} ${selectedGuestForAction.GUESTSURNAME}
+Nationality: ${selectedGuestForAction.NATIONALITY}
+Room Number: ${selectedGuestForAction.ROOMNO}
+Check-In: ${formatTRDate(selectedGuestForAction.CHECKIN || '')}
+Check-Out: ${formatTRDate(selectedGuestForAction.CHECKOUT || '')}
+Extra Notes from Staff: ${extraNotes}
+Target Language: ${targetLanguage}
+
+The letter should be empathetic, professional, and address the guest. Do not include placeholders, write the final letter. Format with appropriate paragraphs.`;
+
+      const text = await generateAIContent(prompt, 'Mektup Üretimi', 'letterGeneration');
+      const formattedText = text ? text.replace(/\n/g, '<br>') : 'Mektup oluşturulamadı (Boş yanıt).';
+      setGeneratedAILetter(formattedText);
+    } catch (error: any) {
+      console.error('Error generating letter:', error);
+      let errorMessage = 'Mektup oluşturulurken bir hata oluştu.';
+      if (error.message) errorMessage += `<br><br>Hata Detayı: ${error.message}`;
+      setGeneratedAILetter(errorMessage);
+    } finally {
+      setIsGeneratingAILetter(false);
+    }
+  };
+
+  const handleTranslateAILetter = async () => {
+    if (translatedAILetter) {
+      setShowAITranslation(!showAITranslation);
+      return;
+    }
+
+    setIsTranslatingAILetter(true);
+    try {
+      const plainText = generatedAILetter.replace(/<[^>]*>?/gm, '\n');
+      const prompt = `Translate the following hotel guest letter to Turkish. Maintain the professional, 5-star hotel concierge tone.\n\n${plainText}`;
+      const text = await generateAIContent(prompt, 'Mektup Çevirisi', 'translation');
+      const formattedText = text ? text.replace(/\n/g, '<br>') : 'Çeviri yapılamadı.';
+      setTranslatedAILetter(formattedText);
+      setShowAITranslation(true);
+    } catch (error: any) {
+      console.error('Error translating letter:', error);
+      alert('Çeviri sırasında bir hata oluştu: ' + (error.message || 'Bilinmeyen hata'));
+    } finally {
+      setIsTranslatingAILetter(false);
+    }
+  };
+
+  const addActionToTimeline = async (description: string, type: 'ai_letter' | 'template' | 'manual', content?: string) => {
+    if (!selectedGuestForAction) return;
+    setIsSavingAction(true);
+    try {
+      const actionsRef = collection(db, "comment_actions");
+      const commentId = selectedGuestForAction.comments?.[0]?.COMMENTID || '';
+      await addDoc(actionsRef, {
+        commentId: String(commentId),
+        resId: selectedGuestForAction.RESNAMEID || '',
+        type,
+        description,
+        date: new Date().toISOString(),
+        createdAt: serverTimestamp(),
+        ...(content ? { content } : {})
+      });
+      
+      // Close all modals
+      setIsAILetterModalOpen(false);
+      setIsTemplateModalOpen(false);
+      setIsManualNoteModalOpen(false);
+      
+      // Reset states
+      setExtraNotes('');
+      setGeneratedAILetter('');
+      setTranslatedAILetter('');
+      setTemplatePreview('');
+      setSelectedTemplateId('');
+      setManualNote('');
+      
+    } catch (error) {
+      console.error("Error adding action:", error);
+      alert("Aksiyon kaydedilirken bir hata oluştu.");
+    } finally {
+      setIsSavingAction(false);
+    }
+  };
 
   // Clear results when tab changes, but DO NOT auto-fetch
   useEffect(() => {
@@ -92,10 +282,19 @@ export function GuestListModule() {
       setFirebaseCache(prev => ({ ...prev, agenda }));
     });
 
+    const unsubCommentActions = onSnapshot(collection(db, 'comment_actions'), (snapshot) => {
+      const commentActions: any[] = [];
+      snapshot.forEach(doc => {
+        commentActions.push({ id: doc.id, ...doc.data() });
+      });
+      setFirebaseCache(prev => ({ ...prev, commentActions }));
+    });
+
     return () => {
       unsubSurveys();
       unsubInteractions();
       unsubAgenda();
+      unsubCommentActions();
     };
   }, []);
 
@@ -231,6 +430,29 @@ export function GuestListModule() {
           }
         }
         
+        const elektraAnswers = matchedComments.map(c => c.ANSWER).filter(Boolean).join('\n');
+        const guestCommentIds = matchedComments.map(c => String(c.COMMENTID));
+        
+        const filteredActions = firebaseCache.commentActions.filter(a => 
+          (a.resId && String(a.resId) === String(guest.RESID)) || 
+          (a.commentId && guestCommentIds.includes(String(a.commentId)))
+        );
+        
+        const filteredInteractions = (Object.values(firebaseCache.interactions) as any[]).filter(i => 
+          String(i.resId) === String(guest.RESID)
+        );
+        
+        const filteredSurveys = firebaseCache.surveys.filter(s => 
+          String(s.resId) === String(guest.RESID)
+        );
+
+        const timelineActions = buildUnifiedTimeline(
+          elektraAnswers,
+          filteredActions,
+          filteredInteractions,
+          filteredSurveys
+        );
+
         return {
           ...guest,
           hasComment: matchedComments.length > 0,
@@ -242,7 +464,8 @@ export function GuestListModule() {
           letterSentDate: interaction.letterSentDate,
           welcomeCallStatus: interaction.welcomeCallStatus || 'not_called',
           welcomeCallNotes: interaction.welcomeCallNotes || '',
-          welcomeCallDate: interaction.welcomeCallDate || ''
+          welcomeCallDate: interaction.welcomeCallDate || '',
+          timelineActions: timelineActions
         };
       });
 
@@ -281,6 +504,16 @@ export function GuestListModule() {
       direction = 'desc';
     }
     setSortConfig({ key, direction });
+  };
+
+  const handleDeleteAction = async (actionId: string) => {
+    if (!window.confirm('Bu aksiyonu silmek istediğinize emin misiniz?')) return;
+    try {
+      await deleteDoc(doc(db, "comment_actions", actionId));
+    } catch (error) {
+      console.error("Error deleting action:", error);
+      alert("Aksiyon silinirken bir hata oluştu.");
+    }
   };
 
   // Sort Data
@@ -563,6 +796,67 @@ export function GuestListModule() {
     }
   };
 
+  const openBulkAnalysisModal = (type: 'deep' | 'sentiment') => {
+    const commentsToAnalyze: CommentData[] = [];
+    selectedGuestIds.forEach(guestId => {
+      const guest = guests.find(g => g.RESID === guestId);
+      if (guest && guest.comments) {
+        guest.comments.forEach(c => {
+          commentsToAnalyze.push({
+            ID: String(c.COMMENTID),
+            COMMENT: c.COMMENT,
+            COMMENTDATE: c.COMMENTDATE,
+            RESNAMEID_LOOKUP: String(c.RESID),
+            RESID: String(c.RESID)
+          } as unknown as CommentData);
+        });
+      }
+    });
+
+    if (commentsToAnalyze.length === 0) {
+      alert("Seçili misafirlerin analize uygun yorumu bulunmuyor.");
+      return;
+    }
+
+    setCommentsForBulkAnalysis(commentsToAnalyze);
+    setBulkAnalysisType(type);
+    setIsBulkAnalysisModalOpen(true);
+  };
+
+  const handleBulkResetAnalysis = async () => {
+    const commentsToReset: string[] = [];
+    selectedGuestIds.forEach(guestId => {
+      const guest = guests.find(g => g.RESID === guestId);
+      if (guest && guest.comments) {
+        guest.comments.forEach(c => {
+          commentsToReset.push(String(c.COMMENTID));
+        });
+      }
+    });
+
+    if (commentsToReset.length === 0) {
+      alert("Seçili misafirlerin sıfırlanacak yorumu bulunmuyor.");
+      return;
+    }
+
+    if (!window.confirm(`Seçili misafirlerin toplam ${commentsToReset.length} yorumuna ait tüm analiz verilerini (Duygu Analizi, Derin Analiz, Aksiyonlar) veritabanından silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`)) {
+      return;
+    }
+
+    setIsBulkResetting(true);
+    try {
+      for (const commentId of commentsToReset) {
+        await deleteCommentData(commentId);
+      }
+      alert("Seçili yorumların analiz verileri başarıyla sıfırlandı.");
+    } catch (error: any) {
+      console.error("Error bulk resetting analysis:", error);
+      alert("Toplu sıfırlama sırasında bir hata oluştu: " + (error.message || 'Bilinmeyen hata'));
+    } finally {
+      setIsBulkResetting(false);
+    }
+  };
+
   const handleGenerateBulkLetters = async () => {
     if (!selectedBulkTemplateId) {
       alert("Lütfen bir şablon seçin.");
@@ -813,13 +1107,44 @@ export function GuestListModule() {
             )}
           </div>
           {selectedGuestIds.length > 0 && (
-            <button
-              onClick={openBulkMailMergeModal}
-              className="px-4 py-1.5 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4"
-            >
-              <FileText size={14} />
-              Toplu Şablon Üret ({selectedGuestIds.length} Misafir)
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => openBulkAnalysisModal('sentiment')}
+                disabled={isBulkResetting}
+                className="px-4 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4 disabled:opacity-50"
+              >
+                <Brain size={14} />
+                Toplu Duygu Analizi
+              </button>
+              <button
+                onClick={() => openBulkAnalysisModal('deep')}
+                disabled={isBulkResetting}
+                className="px-4 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4 disabled:opacity-50"
+              >
+                <Sparkles size={14} />
+                Toplu Derin Analiz
+              </button>
+              <button
+                onClick={handleBulkResetAnalysis}
+                disabled={isBulkResetting}
+                className="px-4 py-1.5 bg-red-50 text-red-700 hover:bg-red-100 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4 disabled:opacity-50"
+              >
+                {isBulkResetting ? (
+                  <div className="animate-spin rounded-full h-3 w-3 border-2 border-red-600 border-t-transparent" />
+                ) : (
+                  <Trash2 size={14} />
+                )}
+                Toplu Analiz Sıfırla
+              </button>
+              <button
+                onClick={openBulkMailMergeModal}
+                disabled={isBulkResetting}
+                className="px-4 py-1.5 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4 disabled:opacity-50"
+              >
+                <FileText size={14} />
+                Toplu Şablon Üret ({selectedGuestIds.length} Misafir)
+              </button>
+            </div>
           )}
         </div>
       )}
@@ -1079,35 +1404,12 @@ export function GuestListModule() {
                               className="overflow-hidden"
                             >
                               <div className="p-6 border-t border-b border-slate-200 shadow-inner bg-slate-50">
-                                <div className="max-w-4xl mx-auto">
+                                <div className="w-[95%] max-w-[1600px] mx-auto">
                               <div className="flex items-center justify-between mb-4">
                                 <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                                   <Search size={16} className="text-emerald-600" />
                                   Rezervasyon Detayları
                                 </h4>
-                                <button
-                                  onClick={() => openWelcomeCallModal(guest)}
-                                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2"
-                                >
-                                  <Phone size={16} />
-                                  Hoş Geldiniz Araması
-                                </button>
-                                <button
-                                  onClick={() => openMailMergeModal(guest)}
-                                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2"
-                                >
-                                  {guest.surveySent ? (
-                                    <>
-                                      <span className="w-2 h-2 rounded-full bg-white animate-pulse"></span>
-                                      Anket Gönderildi
-                                    </>
-                                  ) : (
-                                    <>
-                                      <FileText size={16} />
-                                      Anket/Mektup Hazırla
-                                    </>
-                                  )}
-                                </button>
                               </div>
                               <div className="grid grid-cols-4 gap-6 mb-6 text-sm">
                                 <div>
@@ -1128,100 +1430,186 @@ export function GuestListModule() {
                                 </div>
                               </div>
 
-                              {guest.hasComment && guest.comments && guest.comments.length > 0 ? (
-                                <div className="mt-8 pt-6 border-t border-slate-200">
-                                  <h5 className="text-base font-bold text-slate-800 flex items-center gap-2 mb-4">
-                                    <div className="bg-emerald-100 p-2 rounded-lg">
-                                      <MessageSquare size={20} className="text-emerald-600" />
-                                    </div>
-                                    Misafir Yorumları / Geri Bildirimleri
-                                    <span className="bg-emerald-100 text-emerald-700 text-xs px-2 py-0.5 rounded-full ml-auto">
-                                      {guest.comments.length} Yorum
-                                    </span>
-                                  </h5>
-                                  
-                                  <div className="space-y-6 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
-                                    {guest.comments.map((comment, idx) => (
-                                      <div key={comment.COMMENTID || idx} className="relative pl-10">
-                                        {/* Timeline Dot */}
-                                        <div className="absolute left-2 top-4 w-4 h-4 rounded-full bg-white border-2 border-emerald-500 z-10"></div>
-                                        
-                                        <div className="bg-white rounded-2xl rounded-tl-none border border-slate-200 shadow-sm hover:shadow-md transition-all overflow-hidden group">
-                                          {/* Header */}
-                                          <div className="bg-slate-50/80 px-4 py-3 border-b border-slate-100 flex justify-between items-center">
-                                            <div className="flex items-center gap-3">
-                                              <span className="text-xs font-bold text-slate-600 bg-white border border-slate-200 px-2 py-1 rounded-md shadow-sm">
-                                                {comment.SOURCENAME || 'Yorum'}
-                                              </span>
-                                            </div>
-                                            <span className="text-xs text-slate-400 font-medium font-mono">
-                                              {formatTRDate(comment.COMMENTDATE)}
-                                            </span>
-                                          </div>
-                                          
-                                          {/* Body */}
-                                          <div className="p-5">
-                                            <div className="flex gap-3">
-                                              <div className="shrink-0 mt-1">
-                                                <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
-                                                  <Users size={14} />
-                                                </div>
-                                              </div>
-                                              <div className="flex-1">
-                                                <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">
-                                                  {comment.COMMENT}
-                                                </p>
-                                              </div>
-                                            </div>
-
-                                            {/* Grouped Details Badges */}
-                                            {comment.details && comment.details.length > 0 && (
-                                              <div className="mt-4 pl-11 flex flex-wrap gap-2">
-                                                {comment.details.map((detail, dIdx) => (
-                                                  <span 
-                                                    key={dIdx} 
-                                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
-                                                      detail.type === 'Positive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                                                      detail.type === 'Negative' ? 'bg-red-50 text-red-700 border-red-200' :
-                                                      'bg-slate-50 text-slate-700 border-slate-200'
-                                                    }`}
-                                                  >
-                                                    {detail.depName} {detail.groupName ? `- ${detail.groupName}` : ''}
+                              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mt-8 pt-6 border-t border-slate-200">
+                                {/* Left Column: Comments */}
+                                <div className="lg:col-span-8">
+                                  {guest.hasComment && guest.comments && guest.comments.length > 0 ? (
+                                    <>
+                                      <h5 className="text-base font-bold text-slate-800 flex items-center gap-2 mb-4">
+                                        <div className="bg-emerald-100 p-2 rounded-lg">
+                                          <MessageSquare size={20} className="text-emerald-600" />
+                                        </div>
+                                        Misafir Yorumları / Geri Bildirimleri
+                                        <span className="bg-emerald-100 text-emerald-700 text-xs px-2 py-0.5 rounded-full ml-auto">
+                                          {guest.comments.length} Yorum
+                                        </span>
+                                      </h5>
+                                      
+                                      <div className="space-y-6 relative before:absolute before:left-4 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
+                                        {guest.comments.map((comment, idx) => (
+                                          <div key={comment.COMMENTID || idx} className="relative pl-10">
+                                            {/* Timeline Dot */}
+                                            <div className="absolute left-2 top-4 w-4 h-4 rounded-full bg-white border-2 border-emerald-500 z-10"></div>
+                                            
+                                            <div className="bg-white rounded-2xl rounded-tl-none border border-slate-200 shadow-sm hover:shadow-md transition-all overflow-hidden group">
+                                              {/* Header */}
+                                              <div className="bg-slate-50/80 px-4 py-3 border-b border-slate-100 flex justify-between items-center">
+                                                <div className="flex items-center gap-3">
+                                                  <span className="text-xs font-bold text-slate-600 bg-white border border-slate-200 px-2 py-1 rounded-md shadow-sm">
+                                                    {comment.SOURCENAME || 'Yorum'}
                                                   </span>
-                                                ))}
+                                                </div>
+                                                <span className="text-xs text-slate-400 font-medium font-mono">
+                                                  {formatTRDate(comment.COMMENTDATE)}
+                                                </span>
                                               </div>
-                                            )}
-
-                                            {comment.ANSWER && (
-                                              <div className="mt-4 pl-11">
-                                                <div className="bg-emerald-50/50 rounded-xl rounded-tr-none p-4 border border-emerald-100/50 relative">
-                                                  <div className="flex gap-3">
-                                                    <div className="shrink-0 mt-1">
-                                                       <div className="w-6 h-6 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
-                                                         <MessageSquare size={12} />
-                                                       </div>
-                                                    </div>
-                                                    <div>
-                                                      <span className="block text-xs font-bold text-emerald-700 mb-1">Otel Yanıtı</span>
-                                                      <p className="text-sm text-slate-600 leading-relaxed">
-                                                        {comment.ANSWER}
-                                                      </p>
+                                              
+                                              {/* Body */}
+                                              <div className="p-5">
+                                                <div className="flex gap-3">
+                                                  <div className="shrink-0 mt-1">
+                                                    <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-500">
+                                                      <Users size={14} />
                                                     </div>
                                                   </div>
+                                                  <div className="flex-1">
+                                                    <p className="text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">
+                                                      {comment.COMMENT}
+                                                    </p>
+                                                  </div>
                                                 </div>
+
+                                                {/* Grouped Details Badges */}
+                                                {comment.details && comment.details.length > 0 && (
+                                                  <div className="mt-4 pl-11 flex flex-wrap gap-2">
+                                                    {comment.details.map((detail, dIdx) => (
+                                                      <span 
+                                                        key={dIdx} 
+                                                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                                                          detail.type === 'Positive' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
+                                                          detail.type === 'Negative' ? 'bg-red-50 text-red-700 border-red-200' :
+                                                          'bg-slate-50 text-slate-700 border-slate-200'
+                                                        }`}
+                                                      >
+                                                        {detail.depName} {detail.groupName ? `- ${detail.groupName}` : ''}
+                                                      </span>
+                                                    ))}
+                                                  </div>
+                                                )}
                                               </div>
-                                            )}
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div className="text-center py-8 text-slate-400 text-sm italic border border-slate-200 bg-slate-50/50 rounded-lg">
+                                      Bu misafir için herhangi bir yorum kaydı bulunmamaktadır.
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Right Column: Timeline */}
+                                <div className="lg:col-span-4">
+                                  <div className="flex justify-between items-center mb-4 relative">
+                                    <h5 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                                      <div className="bg-blue-100 p-2 rounded-lg">
+                                        <Database size={20} className="text-blue-600" />
+                                      </div>
+                                      Vaka Takibi ve Aksiyon Geçmişi
+                                    </h5>
+                                    
+                                    {/* Action Dropdown Container */}
+                                    <div className="relative action-dropdown-container">
+                                      <button
+                                        onClick={() => openActionDropdown(guest)}
+                                        className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors text-sm font-medium shadow-md"
+                                      >
+                                        <Plus size={16} />
+                                        Aksiyon Ekle
+                                      </button>
+
+                                      {/* Dropdown Menu */}
+                                      {isActionDropdownOpen && selectedGuestForAction?.RESID === guest.RESID && (
+                                        <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-slate-100 z-50 animate-in fade-in zoom-in duration-200 origin-top-right">
+                                          <div className="p-2 space-y-1">
+                                            <button 
+                                              onClick={() => {
+                                                setIsActionDropdownOpen(false);
+                                                openWelcomeCallModal(guest);
+                                              }}
+                                              className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-blue-50 flex items-center gap-3 transition-colors group"
+                                            >
+                                              <div className="bg-blue-100 p-1.5 rounded-md group-hover:bg-blue-200 transition-colors">
+                                                <Phone size={16} className="text-blue-600" />
+                                              </div>
+                                              <div>
+                                                <div className="font-medium text-slate-800 text-sm">Hoş Geldiniz Araması</div>
+                                                <div className="text-[10px] text-slate-500">Arama sonucunu kaydedin</div>
+                                              </div>
+                                            </button>
+
+                                            <button 
+                                              onClick={() => {
+                                                setIsActionDropdownOpen(false);
+                                                setIsTemplateModalOpen(true);
+                                              }}
+                                              className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-emerald-50 flex items-center gap-3 transition-colors group"
+                                            >
+                                              <div className="bg-emerald-100 p-1.5 rounded-md group-hover:bg-emerald-200 transition-colors">
+                                                <FileText size={16} className="text-emerald-600" />
+                                              </div>
+                                              <div>
+                                                <div className="font-medium text-slate-800 text-sm">Şablon Hazırla</div>
+                                                <div className="text-[10px] text-slate-500">Hazır şablonlardan yanıt seçin</div>
+                                              </div>
+                                            </button>
+
+                                            <button 
+                                              onClick={() => {
+                                                setIsActionDropdownOpen(false);
+                                                setIsAILetterModalOpen(true);
+                                              }}
+                                              className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-purple-50 flex items-center gap-3 transition-colors group"
+                                            >
+                                              <div className="bg-purple-100 p-1.5 rounded-md group-hover:bg-purple-200 transition-colors">
+                                                <Sparkles size={16} className="text-purple-600" />
+                                              </div>
+                                              <div>
+                                                <div className="font-medium text-slate-800 text-sm">AI Mektup Üret</div>
+                                                <div className="text-[10px] text-slate-500">Yapay zeka ile kişiselleştirin</div>
+                                              </div>
+                                            </button>
+
+                                            <button 
+                                              onClick={() => {
+                                                setIsActionDropdownOpen(false);
+                                                setIsManualNoteModalOpen(true);
+                                              }}
+                                              className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-orange-50 flex items-center gap-3 transition-colors group"
+                                            >
+                                              <div className="bg-orange-100 p-1.5 rounded-md group-hover:bg-orange-200 transition-colors">
+                                                <Edit3 size={16} className="text-orange-600" />
+                                              </div>
+                                              <div>
+                                                <div className="font-medium text-slate-800 text-sm">Manuel Not Ekle</div>
+                                                <div className="text-[10px] text-slate-500">Özel bir durumu kaydedin</div>
+                                              </div>
+                                            </button>
                                           </div>
                                         </div>
-                                      </div>
-                                    ))}
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 max-h-[500px] overflow-y-auto">
+                                    <TimelineView 
+                                      actions={guest.timelineActions || []} 
+                                      onDeleteAction={handleDeleteAction} 
+                                      onPreviewAction={setSelectedPreviewAction} 
+                                    />
                                   </div>
                                 </div>
-                              ) : (
-                                <div className="text-center py-8 text-slate-400 text-sm italic border-t border-slate-200 mt-6 bg-slate-50/50 rounded-lg">
-                                  Bu misafir için herhangi bir yorum kaydı bulunmamaktadır.
-                                </div>
-                              )}
+                              </div>
                             </div>
                           </div>
                             </motion.div>
@@ -1326,6 +1714,20 @@ export function GuestListModule() {
         </motion.div>
       )}
       </AnimatePresence>
+
+      {/* Bulk Analysis Modal */}
+      {isBulkAnalysisModalOpen && (
+        <BulkAnalysisModal
+          isOpen={isBulkAnalysisModalOpen}
+          onClose={() => setIsBulkAnalysisModalOpen(false)}
+          comments={commentsForBulkAnalysis}
+          type={bulkAnalysisType}
+          onComplete={() => {
+            // Optional: refresh data
+            // fetchGuests(currentPage);
+          }}
+        />
+      )}
 
       {/* Bulk Mail Merge Modal */}
       <AnimatePresence>
@@ -1564,6 +1966,285 @@ export function GuestListModule() {
         </motion.div>
       )}
       </AnimatePresence>
+
+      {/* AI Letter Modal */}
+      {isAILetterModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <Sparkles size={18} className="text-purple-500" />
+                AI Mektup Oluştur
+              </h3>
+              <button onClick={() => setIsAILetterModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Ekstra Notlar (AI'a Talimatlar)</label>
+                  <textarea
+                    value={extraNotes}
+                    onChange={(e) => setExtraNotes(e.target.value)}
+                    placeholder="Örn: Odaya meyve sepeti ve şarap gönderildiğini de belirt..."
+                    className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 resize-none h-20 text-sm"
+                  />
+                </div>
+                
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <label className="block text-sm font-medium text-slate-700 mb-2">Hedef Dil</label>
+                    <select
+                      value={targetLanguage}
+                      onChange={(e) => setTargetLanguage(e.target.value)}
+                      className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 text-sm"
+                    >
+                      <option value="English">İngilizce (English)</option>
+                      <option value="Turkish">Türkçe (Turkish)</option>
+                      <option value="German">Almanca (Deutsch)</option>
+                      <option value="Russian">Rusça (Русский)</option>
+                      <option value="French">Fransızca (Français)</option>
+                    </select>
+                  </div>
+                  <div className="flex-1 flex items-end">
+                    <button
+                      onClick={handleGenerateAILetter}
+                      disabled={isGeneratingAILetter}
+                      className="w-full bg-slate-900 text-white px-6 py-2 rounded-xl font-medium hover:bg-slate-800 transition-colors disabled:opacity-50 flex items-center justify-center gap-2 h-[42px]"
+                    >
+                      {isGeneratingAILetter ? (
+                        <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <>
+                          <Brain size={18} />
+                          Yapay Zeka ile Üret
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {generatedAILetter && (
+                <div className="space-y-4 pt-4 border-t border-slate-100">
+                  <div className="flex justify-between items-center">
+                    <h4 className="font-medium text-slate-800">Üretilen Mektup</h4>
+                    <button
+                      onClick={handleTranslateAILetter}
+                      disabled={isTranslatingAILetter}
+                      className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+                    >
+                      {isTranslatingAILetter ? (
+                        <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <RefreshCw size={14} />
+                      )}
+                      {showAITranslation ? 'Orijinali Göster' : 'Türkçe Çeviriyi Gör'}
+                    </button>
+                  </div>
+                  
+                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed min-h-[200px] whitespace-pre-wrap">
+                    <div dangerouslySetInnerHTML={{ __html: showAITranslation ? translatedAILetter : generatedAILetter }} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button
+                onClick={() => setIsAILetterModalOpen(false)}
+                className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                İptal
+              </button>
+              <button
+                onClick={() => addActionToTimeline('AI ile mektup oluşturuldu.', 'ai_letter', generatedAILetter)}
+                disabled={!generatedAILetter || isSavingAction}
+                className="px-6 py-2 bg-emerald-600 text-white font-medium rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSavingAction ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle2 size={18} />
+                    Aksiyon Olarak Kaydet
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Template Modal */}
+      {isTemplateModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <FileText size={18} className="text-green-500" />
+                Şablon Kullan
+              </h3>
+              <button onClick={() => setIsTemplateModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 flex gap-6">
+              <div className="w-1/3 space-y-4 border-r border-slate-100 pr-6">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Şablon Seçin</label>
+                  <div className="space-y-2">
+                    {templates.map(template => (
+                      <button
+                        key={template.id}
+                        onClick={() => setSelectedTemplateId(template.id)}
+                        className={`w-full text-left px-4 py-3 rounded-xl border text-sm transition-colors ${
+                          selectedTemplateId === template.id 
+                            ? 'border-green-500 bg-green-50 text-green-700 font-medium' 
+                            : 'border-slate-200 hover:border-green-300 hover:bg-slate-50 text-slate-600'
+                        }`}
+                      >
+                        {template.name}
+                      </button>
+                    ))}
+                    {templates.length === 0 && (
+                      <div className="text-sm text-slate-500 italic text-center py-4">
+                        Kayıtlı şablon bulunamadı.
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">Dil</label>
+                  <select
+                    value={targetLanguage}
+                    onChange={(e) => setTargetLanguage(e.target.value)}
+                    className="w-full px-4 py-2 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 text-sm"
+                  >
+                    <option value="English">İngilizce (English)</option>
+                    <option value="Turkish">Türkçe (Turkish)</option>
+                    <option value="German">Almanca (Deutsch)</option>
+                    <option value="Russian">Rusça (Русский)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="w-2/3">
+                <label className="block text-sm font-medium text-slate-700 mb-2">Şablon Önizleme</label>
+                <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed min-h-[300px] whitespace-pre-wrap">
+                  {templatePreview ? (
+                    <div dangerouslySetInnerHTML={{ __html: templatePreview }} />
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-slate-400 italic">
+                      Lütfen sol taraftan bir şablon seçin.
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button
+                onClick={() => setIsTemplateModalOpen(false)}
+                className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                İptal
+              </button>
+              <button
+                onClick={() => addActionToTimeline('Şablon mesaj gönderildi.', 'template', templatePreview)}
+                disabled={!templatePreview || isSavingAction}
+                className="px-6 py-2 bg-emerald-600 text-white font-medium rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSavingAction ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle2 size={18} />
+                    Aksiyon Olarak Kaydet
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Manual Action Modal */}
+      {isManualNoteModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <Edit3 size={18} className="text-orange-500" />
+                Manuel Not / Aksiyon Ekle
+              </h3>
+              <button onClick={() => setIsManualNoteModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6">
+              <label className="block text-sm font-medium text-slate-700 mb-2">Aksiyon Detayı / Not</label>
+              <textarea
+                value={manualNote}
+                onChange={(e) => setManualNote(e.target.value)}
+                placeholder="Misafir ile telefonla görüşüldü, şikayeti dinlendi ve odasına meyve sepeti gönderildi..."
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 resize-none h-32 text-sm"
+              />
+            </div>
+
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button
+                onClick={() => setIsManualNoteModalOpen(false)}
+                className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-xl transition-colors"
+              >
+                İptal
+              </button>
+              <button
+                onClick={() => addActionToTimeline(manualNote, 'manual')}
+                disabled={!manualNote.trim() || isSavingAction}
+                className="px-6 py-2 bg-emerald-600 text-white font-medium rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {isSavingAction ? (
+                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <>
+                    <CheckCircle2 size={18} />
+                    Aksiyon Olarak Kaydet
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preview Modal */}
+      {selectedPreviewAction && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <FileText size={18} className="text-blue-500" />
+                İçerik Önizleme
+              </h3>
+              <button onClick={() => setSelectedPreviewAction(null)} className="text-slate-400 hover:text-slate-600 p-1">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">
+                <div dangerouslySetInnerHTML={{ __html: selectedPreviewAction.content || '' }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

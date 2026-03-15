@@ -360,7 +360,7 @@ export function TemplateModule() {
                         onChange={handleContentChange}
                         modules={quillModules}
                         placeholder={`Sayın {{GUESTNAMES}}, otelimize hoş geldiniz...\n\n(${activeLang} dilinde içerik girin)`}
-                        className="h-[300px] font-sans"
+                        className="h-[300px] pb-12 font-sans"
                       />
                     </div>
                     <p className="text-xs text-slate-500">

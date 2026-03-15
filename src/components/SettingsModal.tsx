@@ -17,7 +17,7 @@ const DEFAULT_COMMENT_TEMPLATE = JSON.stringify({
   "LoginToken": "{{LOGIN_TOKEN}}",
   "Select": [
     "COMMENTTYPEID", "STATEID", "ID", "HOTELID", "COMMENT", "COMMENTSOURCEID", 
-    "RESNAMEID", "COMMENTDATE", "COMMENTSOURCEID_NAME", "RESNAMEID_LOOKUP", 
+    "RESNAMEID", "COMMENTDATE", "COMMENTSOURCEID_NAME", 
     "ANSWER", "LAST_STATEID", "CREATORID", "CREATORID_USERCODE", "INFO", 
     "SCORE", "GRADE", "PHONE", "EMAIL", "NATIONALITY", "GDPRCONFIRMED", 
     "EMAILCONFIRMED", "PHONECONFIRMED", "SMSCONFIRMED", "WHATSAPPCONFIRMED", 
@@ -27,8 +27,6 @@ const DEFAULT_COMMENT_TEMPLATE = JSON.stringify({
   ],
   "Where": [
     { "Column": "STATEID", "Operator": "=", "Value": 3 },
-    { "Column": "COMMENTDATE", "Operator": ">=", "Value": "{{START_DATE}}" },
-    { "Column": "COMMENTDATE", "Operator": "<=", "Value": "{{END_DATE}}" },
     { "Column": "HOTELID", "Operator": "=", "Value": "{{HOTELID}}" }
   ],
   "OrderBy": [{ "Column": "COMMENTDATE", "Direction": "DESC" }],
@@ -112,7 +110,8 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     reservationPayloadTemplate: DEFAULT_RESERVATION_TEMPLATE,
     checkoutPayloadTemplate: DEFAULT_CHECKOUT_TEMPLATE,
     geminiApiKey: '',
-    geminiModel: 'gemini-2.5-flash'
+    geminiModel: 'gemini-2.5-flash',
+    featureModels: {}
   });
   
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -148,7 +147,8 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           reservationPayloadTemplate: parsed.reservationPayloadTemplate || DEFAULT_RESERVATION_TEMPLATE,
           checkoutPayloadTemplate: parsed.checkoutPayloadTemplate || DEFAULT_CHECKOUT_TEMPLATE,
           geminiApiKey: parsed.geminiApiKey || '',
-          geminiModel: parsed.geminiModel || 'gemini-2.5-flash'
+          geminiModel: parsed.geminiModel || 'gemini-2.5-flash',
+          featureModels: parsed.featureModels || {}
         });
       } catch (e) {}
     }
@@ -202,6 +202,16 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     if (e.target.name.includes('Template')) {
         setJsonError(null);
     }
+  };
+
+  const handleFeatureModelChange = (feature: string, model: string) => {
+    setSettings(prev => ({
+      ...prev,
+      featureModels: {
+        ...prev.featureModels,
+        [feature]: model
+      }
+    }));
   };
 
   const resetToDefault = (name: keyof ApiSettings) => {
@@ -453,7 +463,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Aktif Yapay Zeka Modeli</label>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">Varsayılan Yapay Zeka Modeli</label>
                     <select
                       name="geminiModel"
                       value={settings.geminiModel || 'gemini-2.5-flash'}
@@ -465,6 +475,70 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
                       <option value="gemini-2.5-pro">Gelişmiş Mantık ve Strateji (Gemini 2.5 Pro)</option>
                       <option value="gemini-3.1-pro-preview">Yeni Nesil Amiral Gemisi (Gemini 3.1 Pro Preview)</option>
                     </select>
+                    <p className="text-[10px] text-slate-500 mt-1">Modül bazlı seçim yapılmadığında kullanılacak varsayılan model.</p>
+                  </div>
+                </div>
+
+                {/* Module-Specific AI Models */}
+                <div className="mt-6 border-t border-slate-100 pt-6">
+                  <h4 className="text-sm font-semibold text-slate-800 mb-4">Modül Bazlı Model Tercihleri</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Duygu Analizi (Sentiment)</label>
+                      <select
+                        value={settings.featureModels?.sentimentAnalysis || ''}
+                        onChange={(e) => handleFeatureModelChange('sentimentAnalysis', e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-white"
+                      >
+                        <option value="">Varsayılan Modeli Kullan</option>
+                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Mektup Üretimi</label>
+                      <select
+                        value={settings.featureModels?.letterGeneration || ''}
+                        onChange={(e) => handleFeatureModelChange('letterGeneration', e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-white"
+                      >
+                        <option value="">Varsayılan Modeli Kullan</option>
+                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Mektup Çevirisi</label>
+                      <select
+                        value={settings.featureModels?.translation || ''}
+                        onChange={(e) => handleFeatureModelChange('translation', e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-white"
+                      >
+                        <option value="">Varsayılan Modeli Kullan</option>
+                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Derin Yorum Analizi (İş Zekası)</label>
+                      <select
+                        value={settings.featureModels?.deepAnalysis || ''}
+                        onChange={(e) => handleFeatureModelChange('deepAnalysis', e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-white"
+                      >
+                        <option value="">Varsayılan Modeli Kullan</option>
+                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               </div>

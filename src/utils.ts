@@ -1,4 +1,56 @@
-import { ApiSettings, GuestData, CommentData, CommentDetailData, GroupedCommentDetail } from './types';
+import { ApiSettings, GuestData, CommentData, CommentDetailData, GroupedCommentDetail, UnifiedTimelineAction } from './types';
+
+export const parseElektraActions = (answerString: string | undefined): UnifiedTimelineAction[] => {
+  if (!answerString) return [];
+
+  const actions: UnifiedTimelineAction[] = [];
+  
+  // If the string doesn't contain ">", treat the whole string as a single action without a date
+  if (!answerString.includes('>')) {
+    actions.push({
+      id: `elektra-0-fallback`,
+      date: '',
+      description: answerString.trim(),
+      type: 'elektra',
+      source: 'Elektraweb'
+    });
+    return actions;
+  }
+
+  // Split by ">" and filter out empty strings
+  const parts = answerString.split('>').map(p => p.trim()).filter(p => p.length > 0);
+
+  parts.forEach((part, index) => {
+    // Regex to match DD.MM.YYYY HH:MM at the beginning
+    const dateRegex = /^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})\s*-\s*(.*)/s;
+    const match = part.match(dateRegex);
+
+    if (match) {
+      const [_, day, month, year, hour, minute, description] = match;
+      // Convert to ISO string for sorting
+      const dateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+      
+      actions.push({
+        id: `elektra-${index}-${dateObj.getTime()}`,
+        date: dateObj.toISOString(),
+        description: description.trim(),
+        type: 'elektra',
+        source: 'Elektraweb'
+      });
+    } else {
+      // If it doesn't match the format, just add it as a general note with an empty date
+      actions.push({
+        id: `elektra-${index}-fallback`,
+        date: '',
+        description: part,
+        type: 'elektra',
+        source: 'Elektraweb'
+      });
+    }
+  });
+
+  return actions;
+};
 
 export const buildDynamicPayload = (
   templateString: string,
@@ -117,4 +169,71 @@ export const groupCommentDetails = (rawDetails: CommentDetailData[]): GroupedCom
   }, {} as Record<number, GroupedCommentDetail>);
 
   return Object.values(groupedMap);
+};
+
+export const buildUnifiedTimeline = (
+  elektraAnswer?: string,
+  firebaseActions: any[] = [],
+  guestInteractions: any[] = [],
+  surveyLogs: any[] = []
+): UnifiedTimelineAction[] => {
+  const timeline: UnifiedTimelineAction[] = [];
+
+  // 1. Parse Elektra Actions
+  if (elektraAnswer) {
+    timeline.push(...parseElektraActions(elektraAnswer));
+  }
+
+  // 2. Add Firebase Actions (comment_actions)
+  firebaseActions.forEach(action => {
+    timeline.push({
+      id: action.id,
+      date: action.date,
+      type: action.type,
+      description: action.description,
+      content: action.content,
+      commentId: action.commentId,
+      resId: action.resId,
+      source: action.source || 'Kullanıcı'
+    });
+  });
+
+  // 3. Add Guest Interactions (Welcome Call, etc.)
+  guestInteractions.forEach(interaction => {
+    if (interaction.welcomeCallDate && interaction.welcomeCallStatus) {
+      let desc = 'Hoş Geldiniz Araması Yapıldı';
+      if (interaction.welcomeCallStatus === 'answered_all_good') desc = 'Hoş Geldiniz Araması Yapıldı: Ulaşıldı - Her şey yolunda';
+      else if (interaction.welcomeCallStatus === 'answered_has_request') desc = 'Hoş Geldiniz Araması Yapıldı: Ulaşıldı - Talebi Var';
+      else if (interaction.welcomeCallStatus === 'no_answer') desc = 'Hoş Geldiniz Araması Yapıldı: Ulaşılamadı';
+
+      timeline.push({
+        id: `welcome_call_${interaction.id || interaction.resId}`,
+        date: interaction.welcomeCallDate,
+        type: 'welcome_call',
+        description: desc,
+        content: interaction.welcomeCallNotes || undefined,
+        resId: interaction.resId,
+        source: 'Sistem'
+      });
+    }
+  });
+
+  // 4. Add Survey Logs
+  surveyLogs.forEach(log => {
+    timeline.push({
+      id: log.id,
+      date: log.sentAt,
+      type: 'survey_sent',
+      description: `Anket Gönderildi: ${log.surveyName || 'Genel Anket'}`,
+      resId: log.resId,
+      source: 'Sistem'
+    });
+  });
+
+  // Sort Chronologically (Oldest to Newest)
+  return timeline.sort((a, b) => {
+    const dateA = a.date ? new Date(a.date).getTime() : 0;
+    const dateB = b.date ? new Date(b.date).getTime() : 0;
+    return dateA - dateB;
+  });
 };
