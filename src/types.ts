@@ -119,6 +119,7 @@ export interface LetterTemplate {
   id: string;
   name: string;
   contents: Record<string, string>;
+  languageOrder?: string[];
   createdAt: string;
 }
 

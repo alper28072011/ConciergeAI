@@ -144,7 +144,8 @@ export function GuestListModule() {
     if (selectedTemplateId && selectedGuestForAction) {
       const template = templates.find(t => t.id === selectedTemplateId);
       if (template) {
-        const content = template.contents[targetLanguage] || Object.values(template.contents)[0] || '';
+        const nationality = selectedGuestForAction.NATIONALITY;
+        const content = template.contents[nationality] || template.contents['ENG'] || Object.values(template.contents)[0] || '';
         
         let merged = content;
         merged = merged.replace(/{{GUESTNAMES}}/g, `${selectedGuestForAction.GUESTNAME} ${selectedGuestForAction.GUESTSURNAME}`);
@@ -158,7 +159,7 @@ export function GuestListModule() {
     } else {
       setTemplatePreview('');
     }
-  }, [selectedTemplateId, targetLanguage, selectedGuestForAction, templates]);
+  }, [selectedTemplateId, selectedGuestForAction, templates]);
 
   const handleGenerateAILetter = async () => {
     if (!selectedGuestForAction) return;

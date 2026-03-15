@@ -1,1 +1,85 @@
 @import "tailwindcss";
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-400;
+}
+
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.hide-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ReactQuill overrides */
+.ql-container {
+  font-family: inherit !important;
+  font-size: 1rem !important;
+}
+
+.ql-editor {
+  min-height: 200px;
+  padding-left: 40px;
+  padding-right: 40px;
+}
+
+/* A4 Editor Styles */
+.a4-editor-container {
+  min-height: 297mm;
+}
+.a4-editor .ql-toolbar {
+  border-top: none !important;
+  border-left: none !important;
+  border-right: none !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  background: #f8fafc;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  padding: 12px 20px !important;
+}
+.a4-editor .ql-container {
+  border: none !important;
+  font-family: inherit !important;
+  font-size: 11pt !important;
+}
+.a4-editor .ql-editor {
+  padding: 20mm !important;
+  min-height: calc(297mm - 60px);
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  .print\:visible, .print\:visible * {
+    visibility: visible;
+  }
+  .prose, .prose * {
+    visibility: visible;
+  }
+  .prose {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 0;
+    margin: 0;
+  }
+}

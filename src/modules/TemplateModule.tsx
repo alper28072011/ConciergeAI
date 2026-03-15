@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LetterTemplate } from '../types';
 import { db } from '../firebase';
 import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp } from 'firebase/firestore';
-import { Save, Trash2, Plus, FileText, Copy, CheckCircle2, LayoutTemplate, Globe, X } from 'lucide-react';
+import { Save, Trash2, Plus, FileText, Copy, CheckCircle2, LayoutTemplate, Globe, X, ArrowLeft, ArrowRight, Eye, Edit2, AlertTriangle, Printer } from 'lucide-react';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { generateAIContent } from '../services/aiService';
@@ -12,41 +12,17 @@ export function TemplateModule() {
   const [selectedTemplate, setSelectedTemplate] = useState<LetterTemplate | null>(null);
   const [isEditing, setIsEditing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
-  const [copiedTag, setCopiedTag] = useState<string | null>(null);
 
   // Form states
   const [name, setName] = useState('');
   const [contents, setContents] = useState<Record<string, string>>({ 'TUR': '' });
   const [activeLang, setActiveLang] = useState<string>('TUR');
+  const [languageOrder, setLanguageOrder] = useState<string[]>(['TUR']);
   const [isTranslating, setIsTranslating] = useState(false);
-
-  const handleTranslate = async () => {
-    if (!contents['TUR']) {
-      alert("Lütfen önce Türkçe içeriği doldurun.");
-      return;
-    }
-    
-    setIsTranslating(true);
-    try {
-      const prompt = `Aşağıdaki otel şablon metnini ${activeLang} diline çevir. 
-      {{GUESTNAMES}}, {{ROOMNO}}, {{CHECKIN}}, {{CHECKOUT}}, {{AGENCY}} gibi etiketleri kesinlikle değiştirme, oldukları gibi bırak.
-      
-      Metin:
-      ${contents['TUR']}`;
-
-      const translatedText = await generateAIContent(prompt, 'Şablon Çevirisi', 'templateTranslation');
-      if (translatedText) {
-        setContents(prev => ({ ...prev, [activeLang]: translatedText }));
-      }
-    } catch (error) {
-      console.error("Translation error:", error);
-      alert("Çeviri sırasında bir hata oluştu.");
-    } finally {
-      setIsTranslating(false);
-    }
-  };
   const [newLangCode, setNewLangCode] = useState('');
   const [isAddingLang, setIsAddingLang] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [showPreview, setShowPreview] = useState(false);
 
   const fetchTemplates = async () => {
     setIsLoading(true);
@@ -69,22 +45,50 @@ export function TemplateModule() {
     fetchTemplates();
   }, []);
 
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (hasUnsavedChanges) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  const checkUnsaved = () => {
+    if (hasUnsavedChanges) {
+      return window.confirm("Kaydedilmemiş değişiklikleriniz var. Devam ederseniz bu değişiklikler kaybolacak. Onaylıyor musunuz?");
+    }
+    return true;
+  };
+
   const handleSelectTemplate = (template: LetterTemplate) => {
+    if (!checkUnsaved()) return;
     setSelectedTemplate(template);
     setName(template.name);
-    // Ensure contents is an object, fallback to empty TUR if missing
     const templateContents = template.contents || { 'TUR': '' };
     setContents(templateContents);
-    setActiveLang(Object.keys(templateContents)[0] || 'TUR');
+    
+    const order = template.languageOrder || ['TUR', ...Object.keys(templateContents).filter(k => k !== 'TUR')];
+    setLanguageOrder(order);
+    setActiveLang(order[0] || 'TUR');
+    
     setIsEditing(true);
+    setHasUnsavedChanges(false);
+    setShowPreview(false);
   };
 
   const handleCreateNew = () => {
+    if (!checkUnsaved()) return;
     setSelectedTemplate(null);
     setName('');
-    setContents({ 'TUR': '' });
+    setContents({ 'TUR': '', 'ENG': '' });
+    setLanguageOrder(['TUR', 'ENG']);
     setActiveLang('TUR');
     setIsEditing(true);
+    setHasUnsavedChanges(false);
+    setShowPreview(false);
   };
 
   const handleSave = async () => {
@@ -100,25 +104,27 @@ export function TemplateModule() {
 
     try {
       if (selectedTemplate) {
-        // Update
         const templateRef = doc(db, 'letter_templates', selectedTemplate.id);
         await updateDoc(templateRef, {
           name,
           contents,
+          languageOrder,
           updatedAt: serverTimestamp()
         });
+        setSelectedTemplate({ ...selectedTemplate, name, contents, languageOrder });
         alert("Şablon başarıyla güncellendi.");
       } else {
-        // Create
-        await addDoc(collection(db, 'letter_templates'), {
+        const docRef = await addDoc(collection(db, 'letter_templates'), {
           name,
           contents,
+          languageOrder,
           createdAt: serverTimestamp()
         });
+        setSelectedTemplate({ id: docRef.id, name, contents, languageOrder, createdAt: new Date().toISOString() } as LetterTemplate);
         alert("Yeni şablon başarıyla oluşturuldu.");
       }
+      setHasUnsavedChanges(false);
       fetchTemplates();
-      setIsEditing(false);
     } catch (error) {
       console.error("Error saving template:", error);
       alert("Şablon kaydedilirken bir hata oluştu.");
@@ -134,6 +140,7 @@ export function TemplateModule() {
       if (selectedTemplate?.id === id) {
         setIsEditing(false);
         setSelectedTemplate(null);
+        setHasUnsavedChanges(false);
       }
       fetchTemplates();
     } catch (error) {
@@ -147,6 +154,8 @@ export function TemplateModule() {
     const code = newLangCode.trim().toUpperCase();
     if (!contents[code]) {
       setContents(prev => ({ ...prev, [code]: '' }));
+      setLanguageOrder(prev => [...prev, code]);
+      setHasUnsavedChanges(true);
     }
     setActiveLang(code);
     setNewLangCode('');
@@ -155,6 +164,10 @@ export function TemplateModule() {
 
   const handleRemoveLanguage = (code: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (code === 'TUR') {
+      alert("Ana dil (TUR) silinemez.");
+      return;
+    }
     if (Object.keys(contents).length <= 1) {
       alert("En az bir dil varyasyonu bulunmalıdır.");
       return;
@@ -164,37 +177,94 @@ export function TemplateModule() {
     const newContents = { ...contents };
     delete newContents[code];
     setContents(newContents);
+    
+    const newOrder = languageOrder.filter(l => l !== code);
+    setLanguageOrder(newOrder);
+    
     if (activeLang === code) {
-      setActiveLang(Object.keys(newContents)[0]);
+      setActiveLang(newOrder[0] || 'TUR');
+    }
+    setHasUnsavedChanges(true);
+  };
+
+  const moveLanguage = (direction: 'left' | 'right', e: React.MouseEvent) => {
+    e.stopPropagation();
+    const currentIndex = languageOrder.indexOf(activeLang);
+    if (currentIndex === -1 || activeLang === 'TUR') return;
+
+    const newOrder = [...languageOrder];
+    if (direction === 'left' && currentIndex > 1) {
+      [newOrder[currentIndex - 1], newOrder[currentIndex]] = [newOrder[currentIndex], newOrder[currentIndex - 1]];
+      setLanguageOrder(newOrder);
+      setHasUnsavedChanges(true);
+    } else if (direction === 'right' && currentIndex < newOrder.length - 1) {
+      [newOrder[currentIndex + 1], newOrder[currentIndex]] = [newOrder[currentIndex], newOrder[currentIndex + 1]];
+      setLanguageOrder(newOrder);
+      setHasUnsavedChanges(true);
     }
   };
 
-  const handleContentChange = (value: string) => {
-    setContents(prev => ({ ...prev, [activeLang]: value }));
+  const handleContentChange = (content: string, delta: any, source: string) => {
+    if (source === 'user') {
+      setContents(prev => ({ ...prev, [activeLang]: content }));
+      setHasUnsavedChanges(true);
+    }
+  };
+
+  const handleInsertTag = (tag: string) => {
+    setContents(prev => {
+      const currentContent = prev[activeLang] || '';
+      // If content ends with </p>, insert before it, otherwise just append
+      let newContent = currentContent;
+      if (newContent.endsWith('</p>')) {
+        newContent = newContent.slice(0, -4) + tag + '</p>';
+      } else {
+        newContent += tag;
+      }
+      return { ...prev, [activeLang]: newContent };
+    });
+    setHasUnsavedChanges(true);
+  };
+
+  const handleTranslate = async () => {
+    if (!contents['TUR'] || contents['TUR'].trim() === '' || contents['TUR'] === '<p><br></p>') {
+      alert("Lütfen önce Türkçe (TUR) içeriği doldurun. Boş içerik çevrilemez.");
+      return;
+    }
+    
+    setIsTranslating(true);
+    try {
+      const prompt = `Aşağıdaki otel şablon metnini ${activeLang} diline çevir. 
+      {{GUESTNAMES}}, {{ROOMNO}}, {{CHECKIN}}, {{CHECKOUT}}, {{AGENCY}} gibi etiketleri kesinlikle değiştirme, oldukları gibi bırak. HTML etiketlerini koru.
+      
+      Metin:
+      ${contents['TUR']}`;
+
+      const translatedText = await generateAIContent(prompt, 'Şablon Çevirisi', 'templateTranslation');
+      if (translatedText) {
+        setContents(prev => ({ ...prev, [activeLang]: translatedText }));
+        setHasUnsavedChanges(true);
+      }
+    } catch (error) {
+      console.error("Translation error:", error);
+      alert("Çeviri sırasında bir hata oluştu.");
+    } finally {
+      setIsTranslating(false);
+    }
   };
 
   const quillModules = {
-    toolbar: [
-      ['bold', 'italic', 'underline'],
-      [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-      [{ 'align': [] }],
-      ['link', 'image'],
-      ['clean']
-    ],
+    toolbar: {
+      container: '#custom-toolbar',
+    }
   };
 
   const smartTags = ['{{GUESTNAMES}}', '{{ROOMNO}}', '{{CHECKIN}}', '{{CHECKOUT}}', '{{AGENCY}}'];
 
-  const handleCopyTag = (tag: string) => {
-    navigator.clipboard.writeText(tag);
-    setCopiedTag(tag);
-    setTimeout(() => setCopiedTag(null), 2000);
-  };
-
   return (
     <div className="flex-1 flex overflow-hidden h-full w-full">
       {/* Sidebar: Template List */}
-      <div className="w-1/3 min-w-[320px] max-w-[400px] bg-white border-r border-slate-200 flex flex-col h-full">
+      <div className="w-1/3 min-w-[320px] max-w-[400px] bg-white border-r border-slate-200 flex flex-col h-full print:hidden">
         <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center">
           <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
             <FileText size={20} className="text-slate-500" />
@@ -220,7 +290,7 @@ export function TemplateModule() {
             </div>
           ) : (
             templates.map((template) => {
-              const langs = Object.keys(template.contents || {});
+              const langs = template.languageOrder || Object.keys(template.contents || {});
               return (
                 <div
                   key={template.id}
@@ -247,7 +317,7 @@ export function TemplateModule() {
                     </div>
                   </div>
                   <p className="text-xs text-slate-500 line-clamp-2">
-                    {langs.length > 0 ? template.contents[langs[0]] : 'İçerik yok'}
+                    {langs.length > 0 ? template.contents[langs[0]]?.replace(/<[^>]*>?/gm, '') : 'İçerik yok'}
                   </p>
                   <div className="mt-3 pt-3 border-t border-slate-100 flex justify-end">
                     <button 
@@ -268,151 +338,231 @@ export function TemplateModule() {
       {/* Main Content: Edit Form */}
       <div className="flex-1 bg-slate-50 flex flex-col overflow-hidden">
         {isEditing ? (
-          <div className="flex-1 overflow-y-auto p-8">
-            <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center">
-                <h2 className="text-lg font-semibold text-slate-800">
-                  {selectedTemplate ? 'Şablonu Düzenle' : 'Yeni Şablon Oluştur'}
-                </h2>
-                <div className="flex gap-2">
-                  <button 
-                    onClick={() => setIsEditing(false)}
-                    className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-                  >
-                    İptal
-                  </button>
-                  <button 
-                    onClick={handleSave}
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2"
-                  >
-                    <Save size={16} />
-                    Kaydet
-                  </button>
-                </div>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            <div className="px-6 py-4 border-b border-slate-200 bg-white flex justify-between items-center shrink-0 print:hidden">
+              <div className="flex-1 max-w-xl">
+                <input 
+                  type="text" 
+                  value={name}
+                  onChange={(e) => { setName(e.target.value); setHasUnsavedChanges(true); }}
+                  placeholder="Şablon Adı (Örn: Çıkış Anketi)"
+                  className="w-full px-3 py-2 border-b-2 border-transparent hover:border-slate-200 focus:border-emerald-500 bg-transparent focus:outline-none transition-all font-semibold text-xl text-slate-800 placeholder:text-slate-400"
+                />
               </div>
-              
-              <div className="p-6 space-y-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">Şablon Adı</label>
-                  <input 
-                    type="text" 
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Örn: Çıkış Anketi"
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all font-medium text-lg"
-                  />
+              <div className="flex items-center gap-3">
+                <div className="flex bg-white p-1 rounded-lg border border-slate-200 shadow-sm mr-2">
+                  <button
+                    onClick={() => setShowPreview(false)}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${!showPreview ? 'bg-slate-100 text-emerald-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    <Edit2 size={14} />
+                    Düzenle
+                  </button>
+                  <button
+                    onClick={() => setShowPreview(true)}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${showPreview ? 'bg-slate-100 text-emerald-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    <Eye size={14} />
+                    A4 Önizleme
+                  </button>
                 </div>
+                {hasUnsavedChanges && (
+                  <span className="flex items-center gap-1.5 text-amber-600 text-sm font-medium bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-200">
+                    <AlertTriangle size={16} />
+                    Kaydedilmemiş Değişiklikler
+                  </span>
+                )}
+                <button 
+                  onClick={() => {
+                    if (checkUnsaved()) {
+                      setIsEditing(false);
+                      setHasUnsavedChanges(false);
+                    }
+                  }}
+                  className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+                >
+                  Kapat
+                </button>
+                <button 
+                  onClick={handleSave}
+                  disabled={!hasUnsavedChanges && !!selectedTemplate}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2"
+                >
+                  <Save size={16} />
+                  Kaydet
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Language Tabs */}
+              <div className="bg-white border-b border-slate-200 shrink-0 print:hidden">
+                <div className="flex items-center justify-between px-6">
+                  <div className="flex overflow-x-auto hide-scrollbar">
+                    {languageOrder.map((lang, index) => (
+                      <div 
+                        key={lang}
+                        className={`group flex items-center gap-2 px-4 py-3 border-b-2 text-sm font-medium cursor-pointer transition-colors ${
+                          activeLang === lang 
+                            ? 'border-emerald-500 text-emerald-700 bg-emerald-50/30' 
+                            : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                        }`}
+                        onClick={() => setActiveLang(lang)}
+                      >
+                        <Globe size={16} className={activeLang === lang ? 'text-emerald-500' : 'text-slate-400'} />
+                        {lang}
+                        {lang === 'TUR' && activeLang === 'TUR' && <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded ml-1 font-bold">ANA DİL</span>}
+                        
+                        {/* Reorder buttons */}
+                        {activeLang === lang && lang !== 'TUR' && (
+                          <div className="flex items-center ml-2 bg-white rounded shadow-sm border border-slate-200">
+                            <button 
+                              onClick={(e) => moveLanguage('left', e)}
+                              disabled={index === 1}
+                              className="p-0.5 hover:bg-slate-100 disabled:opacity-30 text-slate-600"
+                            >
+                              <ArrowLeft size={14} />
+                            </button>
+                            <button 
+                              onClick={(e) => moveLanguage('right', e)}
+                              disabled={index === languageOrder.length - 1}
+                              className="p-0.5 hover:bg-slate-100 disabled:opacity-30 text-slate-600 border-l border-slate-200"
+                            >
+                              <ArrowRight size={14} />
+                            </button>
+                          </div>
+                        )}
 
-                {/* Language Tabs */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-200">
-                    <div className="flex overflow-x-auto hide-scrollbar">
-                      {Object.keys(contents).map(lang => (
-                        <div 
-                          key={lang}
-                          className={`group flex items-center gap-2 px-4 py-3 border-b-2 text-sm font-medium cursor-pointer transition-colors ${
-                            activeLang === lang 
-                              ? 'border-emerald-500 text-emerald-600' 
-                              : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
-                          }`}
-                          onClick={() => setActiveLang(lang)}
-                        >
-                          <Globe size={16} className={activeLang === lang ? 'text-emerald-500' : 'text-slate-400'} />
-                          {lang}
+                        {lang !== 'TUR' && (
                           <button 
                             onClick={(e) => handleRemoveLanguage(lang, e)}
-                            className={`p-0.5 rounded-full hover:bg-slate-200 ${activeLang === lang ? 'text-emerald-600 hover:text-emerald-800' : 'text-slate-400 hover:text-slate-600'} opacity-0 group-hover:opacity-100 transition-opacity`}
+                            className={`ml-2 p-0.5 rounded-full hover:bg-red-100 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity`}
                             title="Dili Sil"
                           >
                             <X size={14} />
                           </button>
-                        </div>
-                      ))}
-                    </div>
-                    
-                    <div className="pl-4 py-2">
-                      {isAddingLang ? (
-                        <div className="flex items-center gap-2">
-                          <input 
-                            type="text"
-                            value={newLangCode}
-                            onChange={(e) => setNewLangCode(e.target.value.toUpperCase())}
-                            placeholder="Örn: RUS"
-                            maxLength={3}
-                            className="w-20 px-2 py-1 text-sm border border-slate-300 rounded focus:outline-none focus:border-emerald-500 uppercase"
-                            autoFocus
-                            onKeyDown={(e) => e.key === 'Enter' && handleAddLanguage()}
-                          />
-                          <button onClick={handleAddLanguage} className="text-emerald-600 hover:text-emerald-700 p-1">
-                            <CheckCircle2 size={18} />
-                          </button>
-                          <button onClick={() => setIsAddingLang(false)} className="text-slate-400 hover:text-slate-600 p-1">
-                            <X size={18} />
-                          </button>
-                        </div>
-                      ) : (
-                        <button 
-                          onClick={() => setIsAddingLang(true)}
-                          className="flex items-center gap-1.5 text-sm font-medium text-emerald-600 hover:text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition-colors"
-                        >
-                          <Plus size={16} />
-                          Dil Ekle
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  
+                  <div className="pl-4 py-2 flex items-center">
+                    {isAddingLang ? (
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="text"
+                          value={newLangCode}
+                          onChange={(e) => setNewLangCode(e.target.value.toUpperCase())}
+                          placeholder="Örn: RUS"
+                          maxLength={3}
+                          className="w-20 px-2 py-1 text-sm border border-slate-300 rounded focus:outline-none focus:border-emerald-500 uppercase"
+                          autoFocus
+                          onKeyDown={(e) => e.key === 'Enter' && handleAddLanguage()}
+                        />
+                        <button onClick={handleAddLanguage} className="text-emerald-600 hover:text-emerald-700 p-1">
+                          <CheckCircle2 size={18} />
                         </button>
-                      )}
+                        <button onClick={() => setIsAddingLang(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                          <X size={18} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button 
+                        onClick={() => setIsAddingLang(true)}
+                        className="flex items-center gap-1.5 text-sm font-medium text-emerald-600 hover:text-emerald-700 px-3 py-1.5 rounded-lg hover:bg-emerald-50 transition-colors"
+                      >
+                        <Plus size={16} />
+                        Dil Ekle
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 flex flex-col overflow-hidden bg-slate-100">
+                <div className="px-6 py-3 flex justify-between items-center shrink-0 print:hidden bg-white border-b border-slate-200 z-10">
+                  <div className="flex items-center gap-4">
+                    <div id="custom-toolbar" className={`ql-toolbar ql-snow flex items-center gap-1 border-slate-200 ${showPreview ? 'hidden' : ''}`} style={{ border: 'none', padding: 0 }}>
+                      <span className="ql-formats">
+                        <button className="ql-bold" />
+                        <button className="ql-italic" />
+                        <button className="ql-underline" />
+                      </span>
+                      <span className="ql-formats">
+                        <button className="ql-list" value="ordered" />
+                        <button className="ql-list" value="bullet" />
+                      </span>
+                      <span className="ql-formats">
+                        <select className="ql-align" />
+                      </span>
+                      <span className="ql-formats">
+                        <button className="ql-link" />
+                        <button className="ql-image" />
+                      </span>
+                      <span className="ql-formats">
+                        <button className="ql-clean" />
+                      </span>
                     </div>
                   </div>
-
-                  <div className="space-y-3">
-                    <div className="flex justify-between items-end">
-                      <label className="text-sm font-medium text-slate-700">
-                        {activeLang} Şablon İçeriği
-                      </label>
-                      <div className="flex flex-wrap gap-2 justify-end">
-                        {smartTags.map(tag => (
-                          <button
-                            key={tag}
-                            onClick={() => handleCopyTag(tag)}
-                            className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-md text-xs font-mono transition-colors border border-slate-200"
-                            title="Kopyala"
-                          >
-                            {copiedTag === tag ? <CheckCircle2 size={12} className="text-emerald-500" /> : <Copy size={12} />}
-                            {tag}
-                          </button>
-                        ))}
-                      </div>
+                  
+                  <div className="flex items-center gap-4">
+                    <button
+                        onClick={handleTranslate}
+                        disabled={isTranslating}
+                        className={`flex items-center gap-2 text-sm font-medium text-emerald-700 px-4 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 transition-all disabled:opacity-50 ${!showPreview && activeLang !== 'TUR' ? '' : 'invisible'}`}
+                      >
+                        <Globe size={16} />
+                        {isTranslating ? 'Çevriliyor...' : 'Türkçe\'den Çevir'}
+                      </button>
+                    <div className="flex flex-wrap gap-2 justify-end">
+                      {smartTags.map(tag => (
+                        <button
+                          key={tag}
+                          onClick={() => handleInsertTag(tag)}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white hover:bg-slate-50 text-slate-600 rounded-md text-xs font-mono transition-colors border border-slate-200 shadow-sm"
+                          title="İçeriğe Ekle"
+                        >
+                          <Plus size={12} className="text-emerald-500" />
+                          {tag}
+                        </button>
+                      ))}
                     </div>
-                    <div className="relative bg-white rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500 transition-all">
+                  </div>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 sm:p-8 flex justify-center print:p-0 print:bg-white">
+                  {!showPreview ? (
+                    <div className="w-full max-w-[210mm] bg-white shadow-xl border border-slate-200 flex flex-col relative a4-editor-container">
                       <ReactQuill 
                         theme="snow"
                         value={contents[activeLang] || ''}
                         onChange={handleContentChange}
                         modules={quillModules}
                         placeholder={`Sayın {{GUESTNAMES}}, otelimize hoş geldiniz...\n\n(${activeLang} dilinde içerik girin)`}
-                        className="h-[300px] pb-12 font-sans"
+                        className="font-sans flex-1 flex flex-col a4-editor"
                       />
-                      {activeLang !== 'TUR' && (
-                        <div className="absolute bottom-2 right-2 z-10">
-                          <button
-                            onClick={handleTranslate}
-                            disabled={isTranslating}
-                            className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 hover:text-emerald-700 px-2 py-1 rounded bg-white border border-emerald-200 hover:bg-emerald-50 transition-colors disabled:opacity-50"
-                          >
-                            <Globe size={14} />
-                            {isTranslating ? 'Çevriliyor...' : 'Çevir'}
-                          </button>
-                        </div>
-                      )}
                     </div>
-                    <p className="text-xs text-slate-500">
-                      İpucu: Yukarıdaki akıllı etiketleri kopyalayıp metin içine yapıştırarak misafire özel alanlar oluşturabilirsiniz.
-                    </p>
-                  </div>
+                  ) : (
+                    <div className="w-full max-w-[210mm] min-h-[297mm] bg-white shadow-xl border border-slate-200 p-[20mm] relative group print:shadow-none print:border-none print:p-0">
+                      <button 
+                        onClick={() => window.print()}
+                        className="absolute top-4 right-4 bg-slate-800 text-white p-3 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity shadow-lg print:hidden hover:bg-slate-700"
+                        title="Yazdır / PDF Olarak Kaydet"
+                      >
+                        <Printer size={20} />
+                      </button>
+                      <div 
+                        dangerouslySetInnerHTML={{ __html: contents[activeLang] || '<p class="text-slate-400 italic">İçerik boş...</p>' }} 
+                        className="prose max-w-none prose-slate"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8 text-center">
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 p-8 text-center print:hidden">
             <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-4">
               <LayoutTemplate size={32} className="text-slate-300" />
             </div>
