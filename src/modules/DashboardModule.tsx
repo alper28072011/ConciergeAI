@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CommentAnalytics } from '../types';
 import { BarChart3, TrendingUp, AlertCircle, MessageSquare, Calendar as CalendarIcon, Award, AlertTriangle } from 'lucide-react';
@@ -10,23 +10,20 @@ export function DashboardModule() {
   const [dateFilter, setDateFilter] = useState<'7days' | '30days' | 'thisMonth'>('30days');
 
   useEffect(() => {
-    const fetchAnalytics = async () => {
-      setIsLoading(true);
-      try {
-        const querySnapshot = await getDocs(collection(db, 'comment_analytics'));
-        const data: CommentAnalytics[] = [];
-        querySnapshot.forEach((doc) => {
-          data.push(doc.data() as CommentAnalytics);
-        });
-        setAnalytics(data);
-      } catch (error) {
-        console.error("Error fetching analytics:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+    setIsLoading(true);
+    const unsubscribe = onSnapshot(collection(db, 'comment_analytics'), (querySnapshot) => {
+      const data: CommentAnalytics[] = [];
+      querySnapshot.forEach((doc) => {
+        data.push(doc.data() as CommentAnalytics);
+      });
+      setAnalytics(data);
+      setIsLoading(false);
+    }, (error) => {
+      console.error("Error fetching analytics:", error);
+      setIsLoading(false);
+    });
 
-    fetchAnalytics();
+    return () => unsubscribe();
   }, []);
 
   const filteredAnalytics = useMemo(() => {
