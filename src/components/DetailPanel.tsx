@@ -610,7 +610,7 @@ The letter should be empathetic, professional, and address the guest's feedback 
         {/* Comment Details */}
         <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100 relative print:hidden">
           <div className="flex flex-wrap gap-4 mb-4 text-sm text-slate-600">
-            <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><User size={16} className="text-slate-400"/> <span className="font-medium text-slate-900">Misafir</span></div>
+            <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><User size={16} className="text-slate-400"/> <span className="font-medium text-slate-900">{comment.RESNAMEID_LOOKUP ? comment.RESNAMEID_LOOKUP.split('-')[1] : 'Misafir'}</span></div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Globe size={16} className="text-slate-400"/> {comment.NATIONALITY}</div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Calendar size={16} className="text-slate-400"/> {formatTRDate(comment.COMMENTDATE)}</div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Building size={16} className="text-slate-400"/> {comment.COMMENTSOURCEID_NAME}</div>

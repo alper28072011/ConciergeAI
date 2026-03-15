@@ -127,7 +127,9 @@ export function Sidebar({
                   onClick={() => onSelect(comment.ID)}
                 >
                   <div className="flex justify-between items-start mb-2 gap-2">
-                    <h3 className="font-medium text-slate-900 truncate pr-2">Misafir Yorumu</h3>
+                    <h3 className="font-medium text-slate-900 truncate pr-2">
+                      {comment.RESNAMEID_LOOKUP ? comment.RESNAMEID_LOOKUP.split('-')[1] : 'Misafir Yorumu'}
+                    </h3>
                     {comment.ROOMNO && (
                       <div className="flex items-center gap-1 text-slate-700 bg-slate-100 px-2 py-1 rounded-md">
                         <DoorOpen size={14} />
