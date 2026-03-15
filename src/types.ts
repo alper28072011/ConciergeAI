@@ -130,7 +130,7 @@ export interface PhonebookContact {
   createdAt: string;
 }
 
-export type AIFeature = 'sentimentAnalysis' | 'letterGeneration' | 'translation' | 'deepAnalysis';
+export type AIFeature = 'sentimentAnalysis' | 'letterGeneration' | 'translation' | 'deepAnalysis' | 'templateTranslation';
 
 export interface ApiSettings {
   baseUrl: string;

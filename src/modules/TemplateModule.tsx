@@ -5,6 +5,7 @@ import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc, serverTimestamp
 import { Save, Trash2, Plus, FileText, Copy, CheckCircle2, LayoutTemplate, Globe, X } from 'lucide-react';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
+import { generateAIContent } from '../services/aiService';
 
 export function TemplateModule() {
   const [templates, setTemplates] = useState<LetterTemplate[]>([]);
@@ -15,8 +16,35 @@ export function TemplateModule() {
 
   // Form states
   const [name, setName] = useState('');
-  const [contents, setContents] = useState<Record<string, string>>({ 'ENG': '' });
-  const [activeLang, setActiveLang] = useState<string>('ENG');
+  const [contents, setContents] = useState<Record<string, string>>({ 'TUR': '' });
+  const [activeLang, setActiveLang] = useState<string>('TUR');
+  const [isTranslating, setIsTranslating] = useState(false);
+
+  const handleTranslate = async () => {
+    if (!contents['TUR']) {
+      alert("Lütfen önce Türkçe içeriği doldurun.");
+      return;
+    }
+    
+    setIsTranslating(true);
+    try {
+      const prompt = `Aşağıdaki otel şablon metnini ${activeLang} diline çevir. 
+      {{GUESTNAMES}}, {{ROOMNO}}, {{CHECKIN}}, {{CHECKOUT}}, {{AGENCY}} gibi etiketleri kesinlikle değiştirme, oldukları gibi bırak.
+      
+      Metin:
+      ${contents['TUR']}`;
+
+      const translatedText = await generateAIContent(prompt, 'Şablon Çevirisi', 'templateTranslation');
+      if (translatedText) {
+        setContents(prev => ({ ...prev, [activeLang]: translatedText }));
+      }
+    } catch (error) {
+      console.error("Translation error:", error);
+      alert("Çeviri sırasında bir hata oluştu.");
+    } finally {
+      setIsTranslating(false);
+    }
+  };
   const [newLangCode, setNewLangCode] = useState('');
   const [isAddingLang, setIsAddingLang] = useState(false);
 
@@ -44,18 +72,18 @@ export function TemplateModule() {
   const handleSelectTemplate = (template: LetterTemplate) => {
     setSelectedTemplate(template);
     setName(template.name);
-    // Ensure contents is an object, fallback to empty ENG if missing
-    const templateContents = template.contents || { 'ENG': '' };
+    // Ensure contents is an object, fallback to empty TUR if missing
+    const templateContents = template.contents || { 'TUR': '' };
     setContents(templateContents);
-    setActiveLang(Object.keys(templateContents)[0] || 'ENG');
+    setActiveLang(Object.keys(templateContents)[0] || 'TUR');
     setIsEditing(true);
   };
 
   const handleCreateNew = () => {
     setSelectedTemplate(null);
     setName('');
-    setContents({ 'ENG': '' });
-    setActiveLang('ENG');
+    setContents({ 'TUR': '' });
+    setActiveLang('TUR');
     setIsEditing(true);
   };
 
@@ -353,7 +381,7 @@ export function TemplateModule() {
                         ))}
                       </div>
                     </div>
-                    <div className="bg-white rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500 transition-all">
+                    <div className="relative bg-white rounded-lg border border-slate-300 overflow-hidden focus-within:ring-2 focus-within:ring-emerald-500/20 focus-within:border-emerald-500 transition-all">
                       <ReactQuill 
                         theme="snow"
                         value={contents[activeLang] || ''}
@@ -362,6 +390,18 @@ export function TemplateModule() {
                         placeholder={`Sayın {{GUESTNAMES}}, otelimize hoş geldiniz...\n\n(${activeLang} dilinde içerik girin)`}
                         className="h-[300px] pb-12 font-sans"
                       />
+                      {activeLang !== 'TUR' && (
+                        <div className="absolute bottom-2 right-2 z-10">
+                          <button
+                            onClick={handleTranslate}
+                            disabled={isTranslating}
+                            className="flex items-center gap-1.5 text-xs font-medium text-emerald-600 hover:text-emerald-700 px-2 py-1 rounded bg-white border border-emerald-200 hover:bg-emerald-50 transition-colors disabled:opacity-50"
+                          >
+                            <Globe size={14} />
+                            {isTranslating ? 'Çevriliyor...' : 'Çevir'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                     <p className="text-xs text-slate-500">
                       İpucu: Yukarıdaki akıllı etiketleri kopyalayıp metin içine yapıştırarak misafire özel alanlar oluşturabilirsiniz.
