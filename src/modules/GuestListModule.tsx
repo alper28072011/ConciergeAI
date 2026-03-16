@@ -1681,8 +1681,12 @@ The letter should be empathetic, professional, and address the guest. Do not inc
               ) : (
                 <div 
                   id="mail-merge-content"
-                  className="bg-[#ffffff] p-12 shadow-sm border border-[#e2e8f0] min-h-[297mm] font-serif text-[#1e293b] leading-relaxed prose prose-slate max-w-none"
-                  dangerouslySetInnerHTML={{ __html: generatedLetterContent }}
+                  className="bg-[#ffffff] p-12 shadow-sm border border-[#e2e8f0] min-h-[297mm] font-serif text-[#1e293b] leading-relaxed prose prose-slate max-w-none whitespace-pre-wrap"
+                  dangerouslySetInnerHTML={{ 
+                    __html: /<\/?[a-z][\s\S]*>/i.test(generatedLetterContent) 
+                      ? generatedLetterContent 
+                      : generatedLetterContent.replace(/\n/g, '<br>') 
+                  }}
                 />
               )}
             </div>
@@ -1793,12 +1797,16 @@ The letter should be empathetic, professional, and address the guest. Do not inc
                   {bulkGeneratedLetters.map((item, index) => (
                     <React.Fragment key={index}>
                       <div 
-                        className="letter-container bg-[#ffffff] p-12 shadow-sm border border-[#e2e8f0] min-h-[297mm] font-serif text-[#1e293b] leading-relaxed relative prose prose-slate max-w-none"
+                        className="letter-container bg-[#ffffff] p-12 shadow-sm border border-[#e2e8f0] min-h-[297mm] font-serif text-[#1e293b] leading-relaxed relative prose prose-slate max-w-none whitespace-pre-wrap"
                       >
                         <div className="absolute top-4 right-4 text-xs font-sans font-bold text-slate-400 border border-slate-200 px-2 py-1 rounded bg-slate-50">
                           {item.guest.GUESTNAMES} ({item.guest.NATIONALITY || 'Bilinmiyor'})
                         </div>
-                        <div dangerouslySetInnerHTML={{ __html: item.content }} />
+                        <div dangerouslySetInnerHTML={{ 
+                          __html: /<\/?[a-z][\s\S]*>/i.test(item.content) 
+                            ? item.content 
+                            : item.content.replace(/\n/g, '<br>') 
+                        }} />
                       </div>
                       {index < bulkGeneratedLetters.length - 1 && (
                         <div className="html2pdf__page-break"></div>
@@ -2046,8 +2054,12 @@ The letter should be empathetic, professional, and address the guest. Do not inc
                     </button>
                   </div>
                   
-                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed min-h-[200px] whitespace-pre-wrap">
-                    <div dangerouslySetInnerHTML={{ __html: showAITranslation ? translatedAILetter : generatedAILetter }} />
+                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed min-h-[200px] whitespace-pre-wrap prose prose-slate max-w-none">
+                    <div dangerouslySetInnerHTML={{ 
+                      __html: /<\/?[a-z][\s\S]*>/i.test(showAITranslation ? translatedAILetter : generatedAILetter) 
+                        ? (showAITranslation ? translatedAILetter : generatedAILetter) 
+                        : (showAITranslation ? translatedAILetter : generatedAILetter).replace(/\n/g, '<br>') 
+                    }} />
                   </div>
                 </div>
               )}
@@ -2136,9 +2148,13 @@ The letter should be empathetic, professional, and address the guest. Do not inc
 
               <div className="w-2/3">
                 <label className="block text-sm font-medium text-slate-700 mb-2">Şablon Önizleme</label>
-                <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed min-h-[300px] whitespace-pre-wrap">
+                <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed min-h-[300px] whitespace-pre-wrap prose prose-slate max-w-none">
                   {templatePreview ? (
-                    <div dangerouslySetInnerHTML={{ __html: templatePreview }} />
+                    <div dangerouslySetInnerHTML={{ 
+                      __html: /<\/?[a-z][\s\S]*>/i.test(templatePreview) 
+                        ? templatePreview 
+                        : templatePreview.replace(/\n/g, '<br>') 
+                    }} />
                   ) : (
                     <div className="h-full flex items-center justify-center text-slate-400 italic">
                       Lütfen sol taraftan bir şablon seçin.
@@ -2238,8 +2254,12 @@ The letter should be empathetic, professional, and address the guest. Do not inc
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-6">
-              <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed whitespace-pre-wrap">
-                <div dangerouslySetInnerHTML={{ __html: selectedPreviewAction.content || '' }} />
+              <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed whitespace-pre-wrap prose prose-slate max-w-none">
+                <div dangerouslySetInnerHTML={{ 
+                  __html: /<\/?[a-z][\s\S]*>/i.test(selectedPreviewAction.content || '') 
+                    ? selectedPreviewAction.content || '' 
+                    : (selectedPreviewAction.content || '').replace(/\n/g, '<br>') 
+                }} />
               </div>
             </div>
           </div>
