@@ -1,12 +1,14 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
-import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText, Brain, CheckCircle2, AlertCircle, RefreshCw, Phone, PhoneOff, PhoneForwarded, Plus, X, Sparkles, Edit3, Database, Trash2 } from 'lucide-react';
+import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText, Brain, CheckCircle2, AlertCircle, RefreshCw, Phone, PhoneOff, PhoneForwarded, Plus, X, Sparkles, Edit3, Database, Trash2, BarChart3, Download, Save, Clock } from 'lucide-react';
 import { GuestData, CommentData, ApiSettings, GuestListTab, UnifiedTimelineAction } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { generateAIContent } from '../services/aiService';
 import { buildDynamicPayload, formatTRDate, groupCommentDetails, buildUnifiedTimeline, formatHtmlContent } from '../utils';
 import { TimelineView } from '../components/TimelineView';
 import { BulkAnalysisModal } from '../components/BulkAnalysisModal';
+import { ActionEntryModal } from '../components/ActionEntryModal';
 import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { deleteCommentData } from '../services/firebaseService';
@@ -825,6 +827,71 @@ The letter should be empathetic, professional, and address the guest. Do not inc
     setIsBulkAnalysisModalOpen(true);
   };
 
+  const [isGeneratingBulkReport, setIsGeneratingBulkReport] = useState(false);
+  const [bulkGeneratedReport, setBulkGeneratedReport] = useState('');
+  const [isBulkReportModalOpen, setIsBulkReportModalOpen] = useState(false);
+  const [isSavingBulkReport, setIsSavingBulkReport] = useState(false);
+
+  const handleGenerateBulkReport = async () => {
+    if (selectedGuestIds.length === 0) return;
+    setIsGeneratingBulkReport(true);
+    setIsBulkReportModalOpen(true);
+    
+    try {
+      const selectedGuests = guests.filter(g => selectedGuestIds.includes(g.RESID));
+      
+      const prompt = `Sen 5 yıldızlı bir otelin Misafir İlişkileri Müdürüsün. Aşağıdaki zaman damgalı aksiyon geçmişini incele ve üst yönetime sunulacak profesyonel, özet bir 'Toplu Vaka Çözüm ve Aksiyon Raporu' yaz. Hangi tarihte ne yapıldığını ve misafir memnuniyeti için nasıl bir efor sarf edildiğini kurumsal bir dille anlat. İstatistiksel bir özetle başla (kaç misafire dokunuldu, kaç ikram yapıldı vb.).
+
+ÖNEMLİ KURALLAR:
+1. Metin içinde KESİNLİKLE ** (çift yıldız) veya markdown formatı KULLANMA.
+2. Başlıkları HTML <h3> veya <h4> etiketleri ile belirt.
+3. Listeleri HTML <ul> ve <li> etiketleri ile oluştur.
+4. Paragrafları HTML <p> etiketleri ile ayır.
+
+Seçili Misafirler ve Aksiyon Geçmişleri:
+${JSON.stringify(selectedGuests.map(g => ({
+  misafirAdi: g.GUESTNAMES,
+  oda: g.ROOMNO,
+  aksiyonlar: g.timelineActions?.map(a => ({
+    tarih: a.date,
+    tip: a.type,
+    kategori: a.actionCategory || 'Belirtilmemiş',
+    aciklama: a.description
+  })) || []
+})), null, 2)}`;
+
+      const report = await generateAIContent(prompt, 'Toplu Vaka Raporu Üretimi', 'bulkReport');
+      setBulkGeneratedReport(report.replace(/\*\*/g, ''));
+      
+    } catch (error) {
+      console.error("Toplu rapor üretilirken hata:", error);
+      alert("Rapor üretilirken bir hata oluştu.");
+      setIsBulkReportModalOpen(false);
+    } finally {
+      setIsGeneratingBulkReport(false);
+    }
+  };
+
+  const handleSaveBulkReport = async () => {
+    if (!bulkGeneratedReport.trim()) return;
+    setIsSavingBulkReport(true);
+    try {
+      await addDoc(collection(db, 'executive_reports'), {
+        type: 'bulk_case',
+        guestIds: selectedGuestIds,
+        reportContent: bulkGeneratedReport,
+        createdAt: new Date().toISOString()
+      });
+      alert("Rapor başarıyla kaydedildi. Dashboard üzerinden geçmiş raporlara ulaşabilirsiniz.");
+      setIsBulkReportModalOpen(false);
+    } catch (error) {
+      console.error("Rapor kaydedilirken hata:", error);
+      alert("Rapor kaydedilirken bir hata oluştu.");
+    } finally {
+      setIsSavingBulkReport(false);
+    }
+  };
+
   const handleBulkResetAnalysis = async () => {
     const commentsToReset: string[] = [];
     selectedGuestIds.forEach(guestId => {
@@ -1145,6 +1212,14 @@ The letter should be empathetic, professional, and address the guest. Do not inc
               >
                 <FileText size={14} />
                 Toplu Şablon Üret ({selectedGuestIds.length} Misafir)
+              </button>
+              <button
+                onClick={handleGenerateBulkReport}
+                disabled={isBulkResetting}
+                className="px-4 py-1.5 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4 disabled:opacity-50"
+              >
+                <BarChart3 size={14} />
+                Toplu Aksiyon Raporu (AI)
               </button>
             </div>
           )}
@@ -1806,7 +1881,7 @@ The letter should be empathetic, professional, and address the guest. Do not inc
                         />
                       </div>
                       {index < bulkGeneratedLetters.length - 1 && (
-                        <div className="html2pdf__page-break"></div>
+                        <div className="page-break"></div>
                       )}
                     </React.Fragment>
                   ))}
@@ -2188,54 +2263,16 @@ The letter should be empathetic, professional, and address the guest. Do not inc
       )}
 
       {/* Manual Action Modal */}
-      {isManualNoteModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Edit3 size={18} className="text-orange-500" />
-                Manuel Not / Aksiyon Ekle
-              </h3>
-              <button onClick={() => setIsManualNoteModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
-                <X size={20} />
-              </button>
-            </div>
-            
-            <div className="p-6">
-              <label className="block text-sm font-medium text-slate-700 mb-2">Aksiyon Detayı / Not</label>
-              <textarea
-                value={manualNote}
-                onChange={(e) => setManualNote(e.target.value)}
-                placeholder="Misafir ile telefonla görüşüldü, şikayeti dinlendi ve odasına meyve sepeti gönderildi..."
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 resize-none h-32 text-sm"
-              />
-            </div>
-
-            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-              <button
-                onClick={() => setIsManualNoteModalOpen(false)}
-                className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-xl transition-colors"
-              >
-                İptal
-              </button>
-              <button
-                onClick={() => addActionToTimeline(manualNote, 'manual')}
-                disabled={!manualNote.trim() || isSavingAction}
-                className="px-6 py-2 bg-emerald-600 text-white font-medium rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 flex items-center gap-2"
-              >
-                {isSavingAction ? (
-                  <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <>
-                    <CheckCircle2 size={18} />
-                    Aksiyon Olarak Kaydet
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ActionEntryModal
+        isOpen={isManualNoteModalOpen}
+        onClose={() => setIsManualNoteModalOpen(false)}
+        guestId={selectedGuestForAction?.RESID || ''}
+        commentId={selectedGuestForAction?.comments?.[0]?.COMMENTID}
+        onActionAdded={() => {
+          // The onSnapshot listener will automatically update the timeline
+          setManualNote('');
+        }}
+      />
 
       {/* Preview Modal */}
       {selectedPreviewAction && (
@@ -2258,6 +2295,114 @@ The letter should be empathetic, professional, and address the guest. Do not inc
                   dangerouslySetInnerHTML={{ __html: formatHtmlContent(selectedPreviewAction.content) }} 
                 />
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Report Modal */}
+      {isBulkReportModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <BarChart3 size={20} className="text-indigo-600" />
+                Toplu Vaka Çözüm ve Aksiyon Raporu
+              </h3>
+              <button 
+                onClick={() => setIsBulkReportModalOpen(false)} 
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-200 transition-colors"
+                disabled={isGeneratingBulkReport}
+              >
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-8 bg-slate-50/50">
+              {isGeneratingBulkReport ? (
+                <div className="flex flex-col items-center justify-center h-64 space-y-4">
+                  <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
+                  <p className="text-slate-600 font-medium animate-pulse">Yapay Zeka Raporu Hazırlıyor...</p>
+                  <p className="text-slate-400 text-sm">Seçili misafirlerin tüm aksiyon geçmişi analiz ediliyor.</p>
+                </div>
+              ) : (
+                <div className="bg-white p-8 rounded-xl shadow-sm border border-slate-200 max-w-3xl mx-auto">
+                  {/* Antetli Kağıt Görünümü */}
+                  <div className="border-b-2 border-slate-800 pb-6 mb-8 text-center">
+                    <h1 className="text-2xl font-bold text-slate-900 tracking-tight uppercase">Yönetim Raporu</h1>
+                    <p className="text-slate-500 mt-2 font-medium">Toplu Vaka Çözüm ve Aksiyon Özeti</p>
+                    <p className="text-slate-400 text-sm mt-1">{new Date().toLocaleDateString('tr-TR', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                  </div>
+                  
+                  <div className="mt-6">
+                    <ReactQuill 
+                      theme="snow" 
+                      value={bulkGeneratedReport} 
+                      onChange={setBulkGeneratedReport}
+                      className="bg-white"
+                      modules={{
+                        toolbar: [
+                          [{ 'header': [1, 2, 3, 4, false] }],
+                          ['bold', 'italic', 'underline', 'strike'],
+                          [{ 'list': 'ordered'}, { 'list': 'bullet' }],
+                          ['clean']
+                        ]
+                      }}
+                    />
+                  </div>
+                  
+                  <div className="mt-12 pt-6 border-t border-slate-200 flex justify-between items-center text-sm text-slate-500">
+                    <div>
+                      <span className="font-medium text-slate-700">Raporlayan:</span> Yapay Zeka Asistanı
+                    </div>
+                    <div>
+                      <span className="font-medium text-slate-700">Kapsam:</span> {selectedGuestIds.length} Misafir
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button
+                onClick={() => setIsBulkReportModalOpen(false)}
+                className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-xl transition-colors"
+                disabled={isGeneratingBulkReport}
+              >
+                Kapat
+              </button>
+              {!isGeneratingBulkReport && bulkGeneratedReport && (
+                <>
+                  <button
+                    onClick={handleSaveBulkReport}
+                    disabled={isSavingBulkReport}
+                    className="px-6 py-2 bg-emerald-600 text-white font-medium rounded-xl hover:bg-emerald-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+                  >
+                    <Save size={18} />
+                    {isSavingBulkReport ? 'Kaydediliyor...' : 'Kaydet'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(bulkGeneratedReport.replace(/<[^>]*>?/gm, ''));
+                      alert("Rapor metni panoya kopyalandı.");
+                    }}
+                    className="px-6 py-2 bg-white border border-slate-200 text-slate-700 font-medium rounded-xl hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm"
+                  >
+                    <FileText size={18} />
+                    Kopyala
+                  </button>
+                  <button
+                    onClick={() => {
+                      // PDF indirme mantığı buraya eklenebilir
+                      alert("PDF indirme özelliği yakında eklenecektir.");
+                    }}
+                    className="px-6 py-2 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-sm"
+                  >
+                    <Download size={18} />
+                    PDF İndir
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

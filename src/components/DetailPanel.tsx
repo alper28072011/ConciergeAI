@@ -6,11 +6,10 @@ import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, orderBy, onSna
 import { db } from '../firebase';
 import { deleteCommentData } from '../services/firebaseService';
 import { generateAIContent, analyzeCommentDeeply } from '../services/aiService';
-// @ts-ignore
-import html2pdf from 'html2pdf.js';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { TimelineView } from './TimelineView';
+import { ActionEntryModal } from './ActionEntryModal';
 
 interface DetailPanelProps {
   comment: CommentData | null;
@@ -268,7 +267,7 @@ ${comment.COMMENT}`;
     setSelectionPosition(null);
   };
 
-  const addActionToTimeline = async (description: string, type: 'ai_letter' | 'template' | 'manual' | 'whatsapp_sent', content?: string) => {
+  const addActionToTimeline = async (description: string, type: 'ai_letter' | 'template' | 'manual' | 'whatsapp_sent' | 'report', content?: string) => {
     if (!comment?.ID) return;
     try {
       const actionsRef = collection(db, "comment_actions");
@@ -476,6 +475,59 @@ The letter should be empathetic, professional, and address the guest's feedback 
     setIsTemplateModalOpen(false);
   };
 
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+  const [generatedReport, setGeneratedReport] = useState('');
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+
+  const handleGenerateReport = async () => {
+    if (!comment) return;
+    setIsGeneratingReport(true);
+    setIsReportModalOpen(true);
+    
+    try {
+      const prompt = `Sen 5 yıldızlı bir otelin Misafir İlişkileri Müdürüsün. Aşağıdaki misafir bilgilerini, misafir yorumunu ve zaman damgalı aksiyon geçmişini incele ve üst yönetime sunulacak profesyonel, kısa ve özet bir 'Vaka Çözüm ve Aksiyon Raporu' yaz.
+      
+Kurallar:
+1. Raporu tamamen HTML formatında oluştur (sadece <div>, <p>, <br>, <ul>, <li>, <b> etiketlerini kullan).
+2. Kesinlikle markdown veya yıldız (*) karakteri kullanma.
+3. Tarihleri <b> etiketi ile kalın yaz (örn: <b>12.03.2024 14:30</b>).
+4. Rapor 1 A4 sayfasını geçmeyecek kadar kısa ve öz olsun.
+5. Önce Misafir Bilgilerini (Ad, Oda, Giriş-Çıkış) göster.
+6. Ardından Misafirin Yorumunu (şikayet/talep) ekle ki okuyan kişi konuyu anlasın.
+7. Son olarak "Vaka Takibi" başlığı altında atılan adımları kısa ve tek tek maddeler halinde <ul> ve <li> kullanarak yaz.
+
+Misafir Bilgileri:
+Adı: ${comment.RESNAMEID_LOOKUP ? comment.RESNAMEID_LOOKUP.split('-')[1] : 'Bilinmiyor'}
+Oda: ${comment.ROOMNO || 'Bilinmiyor'}
+Giriş: ${comment.CHECKIN ? formatTRDate(comment.CHECKIN) : 'Bilinmiyor'}
+Çıkış: ${comment.CHECKOUT ? formatTRDate(comment.CHECKOUT) : 'Bilinmiyor'}
+
+Misafir Yorumu:
+${comment.COMMENT || 'Belirtilmemiş'}
+
+Aksiyon Geçmişi:
+${JSON.stringify(timelineActions.map(a => ({
+  tarih: a.date,
+  tip: a.type,
+  kategori: a.actionCategory || 'Belirtilmemiş',
+  aciklama: a.description
+})), null, 2)}`;
+
+      const report = await generateAIContent(prompt, 'Vaka Raporu Üretimi');
+      
+      // Remove any markdown code block wrappers if the AI includes them
+      const cleanReport = report.replace(/```html\n?/g, '').replace(/```\n?/g, '').trim();
+      setGeneratedReport(cleanReport);
+      
+    } catch (error) {
+      console.error("Rapor üretilirken hata:", error);
+      alert("Rapor üretilirken bir hata oluştu.");
+      setIsReportModalOpen(false);
+    } finally {
+      setIsGeneratingReport(false);
+    }
+  };
+
   const handleAddManualAction = async () => {
     if (!manualActionText.trim()) return;
     await addActionToTimeline(manualActionText, 'manual');
@@ -487,27 +539,51 @@ The letter should be empathetic, professional, and address the guest's feedback 
     window.print();
   };
 
-  const handleDownloadPDF = (content: string) => {
-    const element = document.createElement('div');
-    element.className = 'ql-editor';
-    const isHtml = /<\/?[a-z][\s\S]*>/i.test(content);
-    element.innerHTML = isHtml ? content : content.replace(/\n/g, '<br>');
-    element.style.padding = '40px';
-    element.style.fontFamily = 'serif';
-    element.style.fontSize = '16px';
-    element.style.lineHeight = '1.6';
-    element.style.color = '#000';
-    element.style.background = '#fff';
-    
-    const opt: any = {
-      margin: 10,
-      filename: `Misafir_Mektubu_${comment?.ROOMNO || 'Misafir'}.pdf`,
-      image: { type: 'jpeg', quality: 0.98 },
-      html2canvas: { scale: 2 },
-      jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
+  const handleDownloadPDF = async (content: string) => {
+    try {
+      const htmlToImage = await import('html-to-image');
+      const { jsPDF } = await import('jspdf');
+      
+      const element = document.createElement('div');
+      element.className = 'ql-editor';
+      const isHtml = /<\/?[a-z][\s\S]*>/i.test(content);
+      element.innerHTML = isHtml ? content : content.replace(/\n/g, '<br>');
+      element.style.padding = '40px';
+      element.style.fontFamily = 'serif';
+      element.style.fontSize = '16px';
+      element.style.lineHeight = '1.6';
+      element.style.color = '#000';
+      element.style.background = '#fff';
+      element.style.width = '794px'; // A4 width at 96 DPI
+      
+      // We must append it to the body temporarily for html-to-image to work properly
+      element.style.position = 'absolute';
+      element.style.left = '-9999px';
+      document.body.appendChild(element);
 
-    html2pdf().set(opt).from(element).save();
+      const imgData = await htmlToImage.toJpeg(element, {
+        quality: 1.0,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff'
+      });
+      
+      document.body.removeChild(element);
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (element.offsetHeight * pdfWidth) / element.offsetWidth;
+      
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`Misafir_Mektubu_${comment?.ROOMNO || 'Misafir'}.pdf`);
+    } catch (error) {
+      console.error("PDF oluşturulurken hata:", error);
+      alert("PDF oluşturulurken bir hata oluştu.");
+    }
   };
 
   const handlePrintPreview = (content: string) => {
@@ -827,9 +903,111 @@ The letter should be empathetic, professional, and address the guest's feedback 
             actions={timelineActions} 
             onDeleteAction={handleDeleteAction} 
             onPreviewAction={setSelectedPreviewAction} 
+            onGenerateReport={handleGenerateReport}
           />
         </div>
       </div>
+
+      {/* Report Modal */}
+      {isReportModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <Sparkles size={18} className="text-indigo-500" />
+                Yönetim Raporu (AI)
+              </h3>
+              <button onClick={() => setIsReportModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <X size={20} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-8 bg-slate-100/50">
+              {isGeneratingReport ? (
+                <div className="flex flex-col items-center justify-center h-64 gap-4 text-slate-500">
+                  <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                  <p className="text-sm font-medium">Rapor hazırlanıyor...</p>
+                </div>
+              ) : (
+                <div id="report-content" className="bg-white p-12 shadow-sm border border-slate-200 min-h-[297mm] ql-snow relative">
+                  <div 
+                    className="ql-editor font-serif text-slate-800 text-base" 
+                    style={{ minHeight: '100%', padding: 0 }}
+                    dangerouslySetInnerHTML={{ __html: formatHtmlContent(generatedReport) }}
+                  />
+                </div>
+              )}
+            </div>
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button
+                onClick={() => setIsReportModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900"
+              >
+                Kapat
+              </button>
+              {!isGeneratingReport && generatedReport && (
+                <>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedReport);
+                      alert('Rapor panoya kopyalandı.');
+                    }}
+                    className="px-4 py-2 text-sm font-medium bg-white border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 flex items-center gap-2"
+                  >
+                    <FileText size={16} />
+                    Kopyala
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const htmlToImage = await import('html-to-image');
+                        const { jsPDF } = await import('jspdf');
+                        
+                        const element = document.getElementById('report-content');
+                        if (element) {
+                          const imgData = await htmlToImage.toJpeg(element, {
+                            quality: 1.0,
+                            pixelRatio: 2,
+                            backgroundColor: '#ffffff'
+                          });
+                          
+                          const pdf = new jsPDF({
+                            orientation: 'portrait',
+                            unit: 'mm',
+                            format: 'a4'
+                          });
+
+                          const pdfWidth = pdf.internal.pageSize.getWidth();
+                          const pdfHeight = (element.offsetHeight * pdfWidth) / element.offsetWidth;
+                          
+                          pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+                          pdf.save(`Vaka_Raporu_${comment?.ROOMNO || 'Bilinmiyor'}.pdf`);
+                        }
+                      } catch (error) {
+                        console.error("PDF oluşturulurken hata:", error);
+                        alert("PDF oluşturulurken bir hata oluştu.");
+                      }
+                    }}
+                    className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
+                  >
+                    <Download size={16} />
+                    PDF İndir
+                  </button>
+                  <button 
+                    onClick={async () => {
+                      await addActionToTimeline('Yönetim Raporu Oluşturuldu', 'report', generatedReport);
+                      setIsReportModalOpen(false);
+                    }}
+                    className="px-4 py-2 text-sm font-medium bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-2"
+                  >
+                    <Save size={16} />
+                    Sisteme Kaydet
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODALS */}
 
@@ -1111,44 +1289,15 @@ The letter should be empathetic, professional, and address the guest's feedback 
       )}
 
       {/* Manual Action Modal */}
-      {isManualNoteModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Edit3 size={18} className="text-orange-500" />
-                Manuel Not / Aksiyon Ekle
-              </h3>
-              <button onClick={() => setIsManualNoteModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="p-5">
-              <textarea
-                value={manualActionText}
-                onChange={(e) => setManualActionText(e.target.value)}
-                placeholder="Örn: Odaya meyve gönderildi, misafirle görüşüldü..."
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-slate-900 resize-none h-32 text-sm"
-              />
-            </div>
-            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
-              <button
-                onClick={() => setIsManualNoteModalOpen(false)}
-                className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900"
-              >
-                İptal
-              </button>
-              <button
-                onClick={handleAddManualAction}
-                disabled={!manualActionText.trim()}
-                className="px-6 py-2 text-sm font-medium bg-slate-900 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50"
-              >
-                Ekle
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ActionEntryModal
+        isOpen={isManualNoteModalOpen}
+        onClose={() => setIsManualNoteModalOpen(false)}
+        guestId={comment?.RESNAMEID_LOOKUP || ''}
+        commentId={comment?.ID}
+        onActionAdded={() => {
+          // The onSnapshot listener will automatically update the timeline
+        }}
+      />
 
       {/* Preview Modal */}
       {selectedPreviewAction && (

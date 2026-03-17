@@ -18,13 +18,26 @@ export interface CommentAnalytics {
 export interface UnifiedTimelineAction {
   id: string;
   date: string;
-  type: 'elektra' | 'ai_letter' | 'template' | 'manual' | 'welcome_call' | 'survey_sent' | 'whatsapp_sent';
+  type: 'elektra' | 'ai_letter' | 'template' | 'manual' | 'welcome_call' | 'survey_sent' | 'whatsapp_sent' | 'report';
   description: string;
   content?: string;
   commentId?: string | number;
   resId?: string | number;
   source?: string;
+  actionCategory?: 'ikram' | 'ayricalik' | 'iletisim' | 'operasyon' | 'diger';
 }
+
+export const PREDEFINED_ACTIONS = [
+  { label: 'Meyve Sepeti 🍎', category: 'ikram', description: 'Odaya meyve sepeti ikramı yapıldı.' },
+  { label: 'Şarap İkramı 🍷', category: 'ikram', description: 'Odaya şarap ikramı yapıldı.' },
+  { label: 'Geç Çıkış ⏰', category: 'ayricalik', description: 'Misafire geç çıkış (Late Check-out) ayrıcalığı tanındı.' },
+  { label: 'Erken Giriş 🌅', category: 'ayricalik', description: 'Misafire erken giriş (Early Check-in) ayrıcalığı tanındı.' },
+  { label: 'A la Carte 🍽️', category: 'ayricalik', description: 'A la Carte restoran rezervasyonu yapıldı.' },
+  { label: 'Özür Mektubu 🙇', category: 'iletisim', description: 'Misafire yaşanan aksaklık nedeniyle özür mektubu gönderildi.' },
+  { label: 'Hoş Geldiniz Araması 📞', category: 'iletisim', description: 'Misafire odaya giriş sonrası hoş geldiniz araması yapıldı.' },
+  { label: 'Oda Değişimi 🛏️', category: 'operasyon', description: 'Misafirin odası değiştirildi (Room Move).' },
+  { label: 'Teknik Servis 🔧', category: 'operasyon', description: 'Odadaki teknik bir arıza için teknik servis yönlendirildi.' },
+] as const;
 
 export interface CommentData {
   ID: string;
@@ -131,7 +144,7 @@ export interface PhonebookContact {
   createdAt: string;
 }
 
-export type AIFeature = 'sentimentAnalysis' | 'letterGeneration' | 'translation' | 'deepAnalysis' | 'templateTranslation';
+export type AIFeature = 'sentimentAnalysis' | 'letterGeneration' | 'translation' | 'deepAnalysis' | 'templateTranslation' | 'dashboardReport' | 'bulkReport';
 
 export interface ApiSettings {
   baseUrl: string;

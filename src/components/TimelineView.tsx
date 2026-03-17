@@ -1,14 +1,15 @@
 import React from 'react';
 import { UnifiedTimelineAction } from '../types';
-import { Database, Sparkles, FileText, Edit3, PhoneCall, Send, Trash2, MessageCircle } from 'lucide-react';
+import { Database, Sparkles, FileText, Edit3, PhoneCall, Send, Trash2, MessageCircle, BarChart3 } from 'lucide-react';
 
 interface TimelineViewProps {
   actions: UnifiedTimelineAction[];
   onDeleteAction?: (id: string) => void;
   onPreviewAction?: (action: UnifiedTimelineAction) => void;
+  onGenerateReport?: () => void;
 }
 
-export const TimelineView: React.FC<TimelineViewProps> = ({ actions, onDeleteAction, onPreviewAction }) => {
+export const TimelineView: React.FC<TimelineViewProps> = ({ actions, onDeleteAction, onPreviewAction, onGenerateReport }) => {
   if (actions.length === 0) {
     return (
       <div className="text-center text-slate-400 mt-10">
@@ -19,7 +20,19 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ actions, onDeleteAct
   }
 
   return (
-    <div className="relative border-l-2 border-slate-200 ml-3 space-y-8">
+    <div className="space-y-6">
+      {onGenerateReport && (
+        <div className="flex justify-end mb-4">
+          <button
+            onClick={onGenerateReport}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-xl font-medium text-sm transition-colors border border-indigo-200 shadow-sm"
+          >
+            <BarChart3 size={16} />
+            Yönetim Raporu Oluştur (AI)
+          </button>
+        </div>
+      )}
+      <div className="relative border-l-2 border-slate-200 ml-3 space-y-8">
       {actions.map((action) => {
         let icon = <Database size={14} className="text-blue-500" />;
         let iconBg = "bg-blue-100";
@@ -49,6 +62,10 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ actions, onDeleteAct
           icon = <MessageCircle size={14} className="text-emerald-500" />;
           iconBg = "bg-emerald-100";
           borderColor = "border-emerald-200";
+        } else if (action.type === 'report') {
+          icon = <BarChart3 size={14} className="text-rose-500" />;
+          iconBg = "bg-rose-100";
+          borderColor = "border-rose-200";
         }
 
         return (
@@ -93,6 +110,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ actions, onDeleteAct
           </div>
         );
       })}
+    </div>
     </div>
   );
 };
