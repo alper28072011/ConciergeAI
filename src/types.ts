@@ -1,6 +1,7 @@
-export interface TopicAnalysis {
-  topic: string;
+export interface UnifiedTopicAnalysis {
   department: string;
+  mainTopic: string;
+  subTopic: string;
   score: number;
   sentiment: 'positive' | 'negative' | 'neutral';
 }
@@ -9,10 +10,21 @@ export interface CommentAnalytics {
   commentId: string;
   resId: string;
   date: string;
-  rawText: string;
+  source: string;
+  nationality: string;
   overallScore: number;
-  topics: TopicAnalysis[];
+  topics: UnifiedTopicAnalysis[];
   createdAt: string;
+}
+
+export interface HotelTaxonomy {
+  departments: {
+    [depName: string]: {
+      mainTopics: {
+        [topicName: string]: string[]; /* subTopics */
+      }
+    }
+  }
 }
 
 export interface UnifiedTimelineAction {

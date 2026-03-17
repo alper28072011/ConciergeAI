@@ -5,7 +5,7 @@ import { formatTRDate, parseElektraActions, buildUnifiedTimeline, formatHtmlCont
 import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, where } from "firebase/firestore";
 import { db } from '../firebase';
 import { deleteCommentData } from '../services/firebaseService';
-import { generateAIContent, analyzeCommentDeeply } from '../services/aiService';
+import { generateAIContent, analyzeCommentComprehensive } from '../services/aiService';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { TimelineView } from './TimelineView';
@@ -296,7 +296,7 @@ ${comment.COMMENT}`;
     }
   };
 
-  const handleDeepAnalyze = async () => {
+  const handleComprehensiveAnalyze = async () => {
     if (!comment?.COMMENT) {
       alert("Analiz edilecek yorum bulunamadı.");
       return;
@@ -304,19 +304,8 @@ ${comment.COMMENT}`;
 
     setIsDeepAnalyzing(true);
     try {
-      const result = await analyzeCommentDeeply(comment.COMMENT);
+      const analyticsData = await analyzeCommentComprehensive(comment);
       
-      const analyticsData: CommentAnalytics = {
-        commentId: String(comment.ID),
-        resId: String(comment.RESNAMEID_LOOKUP || ''),
-        date: comment.COMMENTDATE || '',
-        rawText: comment.COMMENT,
-        overallScore: result.overallScore || 0,
-        topics: result.topics || [],
-        createdAt: new Date().toISOString()
-      };
-
-      await setDoc(doc(db, "comment_analytics", String(comment.ID)), analyticsData);
       setDeepAnalytics(analyticsData);
       
       // Also update the legacy sentiment score for compatibility
@@ -328,8 +317,8 @@ ${comment.COMMENT}`;
       }, { merge: true });
 
     } catch (error: any) {
-      console.error("Deep analysis error:", error);
-      alert("Derin analiz sırasında bir hata oluştu: " + (error.message || 'Bilinmeyen hata'));
+      console.error("Comprehensive analysis error:", error);
+      alert("Kapsamlı analiz sırasında bir hata oluştu: " + (error.message || 'Bilinmeyen hata'));
     } finally {
       setIsDeepAnalyzing(false);
     }
@@ -356,60 +345,6 @@ ${comment.COMMENT}`;
       alert("Sıfırlama sırasında bir hata oluştu: " + (error.message || 'Bilinmeyen hata'));
     } finally {
       setIsResetting(false);
-    }
-  };
-
-  const handleAnalyzeSentiment = async () => {
-    if (!comment?.COMMENT) {
-      alert("Analiz edilecek yorum bulunamadı.");
-      return;
-    }
-
-    if (sentimentScore !== null) {
-      const confirmReanalyze = window.confirm("Bu yorum için daha önce duygu analizi yapılmış. Tekrar analiz etmek istiyor musunuz? (Token tüketimi artacaktır)");
-      if (!confirmReanalyze) return;
-    }
-
-    setIsAnalyzing(true);
-    try {
-      const prompt = `Aşağıdaki otel misafir yorumunu analiz et ve misafirin genel memnuniyetini 0 ile 1 arasında bir sayı olarak ver. 
-        0: Tamamen memnuniyetsiz, 1: Tamamen memnun.
-        Yanıtını kesinlikle aşağıdaki JSON formatında ver:
-        { "score": 0.8 }
-        
-        Yorum:
-        ${comment.COMMENT}`;
-
-      let text = await generateAIContent(prompt, 'Duygu Analizi', 'sentimentAnalysis');
-
-      // Clean markdown code blocks if present
-      text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-
-      const result = JSON.parse(text);
-      let score: number;
-      
-      if (typeof result === 'number') {
-        score = result;
-      } else if (result && typeof result.score === 'number') {
-        score = result.score;
-      } else {
-        throw new Error("Geçersiz format döndü.");
-      }
-
-      setSentimentScore(score);
-
-      // Save to Firebase immediately
-      await setDoc(doc(db, "agenda_notes", String(comment.ID)), {
-        sentimentScore: score,
-        sentimentAnalysisDate: new Date().toISOString()
-      }, { merge: true });
-
-      alert(`Analiz tamamlandı. Memnuniyet Oranı: %${(score * 100).toFixed(0)}`);
-    } catch (error: any) {
-      console.error("Sentiment analysis error:", error);
-      alert("Duygu analizi sırasında bir hata oluştu: " + (error.message || 'Bilinmeyen hata'));
-    } finally {
-      setIsAnalyzing(false);
     }
   };
 
@@ -716,16 +651,16 @@ ${JSON.stringify(timelineActions.map(a => ({
                   </div>
                 )}
                 <button
-                  onClick={handleDeepAnalyze}
+                  onClick={handleComprehensiveAnalyze}
                   disabled={isDeepAnalyzing || isResetting}
                   className="text-xs font-medium text-purple-600 hover:text-purple-700 bg-purple-50 hover:bg-purple-100 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
                 >
                   {isDeepAnalyzing ? (
                     <div className="animate-spin rounded-full h-3 w-3 border-2 border-purple-600 border-t-transparent" />
                   ) : (
-                    <Sparkles size={14} />
+                    <Brain size={14} />
                   )}
-                  {deepAnalytics !== null ? 'Yeniden Derin Analiz Et' : '✨ Derin Yapay Zeka Analizi Yap'}
+                  {deepAnalytics !== null ? 'Yeniden Analiz Et' : '🧠 Kapsamlı Zeka Analizi Çalıştır'}
                 </button>
                 {(deepAnalytics !== null || sentimentScore !== null) && (
                   <button
@@ -769,20 +704,23 @@ ${JSON.stringify(timelineActions.map(a => ({
             {/* Deep Analytics Tag Cloud */}
             {deepAnalytics && deepAnalytics.topics && deepAnalytics.topics.length > 0 && (
               <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                <div className="text-xs font-semibold text-slate-500 mb-3 uppercase tracking-wider">Derin Analiz Etiketleri</div>
-                <div className="flex flex-wrap gap-2">
+                <div className="text-xs font-semibold text-slate-500 mb-3 uppercase tracking-wider">Kapsamlı Zeka Analizi Sonuçları</div>
+                <div className="flex flex-col gap-2">
                   {deepAnalytics.topics.map((topic, idx) => (
-                    <span 
+                    <div 
                       key={idx} 
-                      className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium border shadow-sm ${
-                        topic.score > 70 ? 'bg-emerald-50 text-emerald-700 border-emerald-200' :
-                        topic.score >= 40 ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                        'bg-red-50 text-red-700 border-red-200'
+                      className={`inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium border shadow-sm w-fit ${
+                        topic.score > 70 ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
+                        topic.score >= 40 ? 'bg-amber-50 text-amber-800 border-amber-200' :
+                        'bg-red-50 text-red-800 border-red-200'
                       }`}
-                      title={`${topic.department} - ${topic.sentiment}`}
                     >
-                      #{topic.topic} %{topic.score} {topic.score > 70 ? '🟩' : topic.score >= 40 ? '🟨' : '🟥'}
-                    </span>
+                      <span className="font-bold opacity-70 mr-2">[{topic.department}]</span>
+                      <span>{topic.mainTopic} - {topic.subTopic}</span>
+                      <span className="ml-3 font-bold opacity-90">
+                        (%{topic.score} {topic.score > 70 ? '🟩' : topic.score >= 40 ? '🟨' : '🟥'})
+                      </span>
+                    </div>
                   ))}
                 </div>
               </div>

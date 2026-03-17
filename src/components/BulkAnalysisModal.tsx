@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Sparkles, Brain, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 import { CommentData, CommentAnalytics } from '../types';
-import { analyzeCommentDeeply, generateAIContent } from '../services/aiService';
+import { analyzeCommentComprehensive } from '../services/aiService';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import { motion, AnimatePresence } from 'motion/react';
@@ -10,7 +10,7 @@ interface BulkAnalysisModalProps {
   isOpen: boolean;
   onClose: () => void;
   comments: CommentData[];
-  type: 'deep' | 'sentiment';
+  type?: 'deep' | 'sentiment'; // Kept for compatibility but ignored
   onComplete: () => void;
 }
 
@@ -40,47 +40,15 @@ export function BulkAnalysisModal({ isOpen, onClose, comments, type, onComplete 
           throw new Error("Yorum metni boş.");
         }
 
-        if (type === 'deep') {
-          const result = await analyzeCommentDeeply(comment.COMMENT);
-          
-          const analyticsData: CommentAnalytics = {
-            commentId: String(comment.ID),
-            resId: String(comment.RESNAMEID_LOOKUP || ''),
-            date: comment.COMMENTDATE || '',
-            rawText: comment.COMMENT,
-            overallScore: result.overallScore || 0,
-            topics: result.topics || [],
-            createdAt: new Date().toISOString()
-          };
+        const analyticsData = await analyzeCommentComprehensive(comment);
 
-          await setDoc(doc(db, "comment_analytics", String(comment.ID)), analyticsData);
-
-          // Update legacy sentiment score for compatibility
-          const sentimentScore = (result.overallScore || 0) / 100;
-          await setDoc(doc(db, "agenda_notes", String(comment.ID)), {
-            sentimentScore,
-            sentimentAnalysisDate: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-
-        } else if (type === 'sentiment') {
-          const prompt = `Sen 5 yıldızlı bir otelin misafir ilişkileri uzmanısın. Aşağıdaki misafir yorumunu analiz et ve 0 ile 1 arasında bir duygu skoru ver. 0 en olumsuz, 1 en olumlu. Sadece rakamı döndür.
-          
-          Yorum:
-          ${comment.COMMENT}`;
-
-          let text = await generateAIContent(prompt, 'Duygu Analizi', 'sentimentAnalysis');
-          text = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-          
-          const score = parseFloat(text);
-          if (isNaN(score)) throw new Error("Geçersiz skor formatı.");
-
-          await setDoc(doc(db, "agenda_notes", String(comment.ID)), {
-            sentimentScore: score,
-            sentimentAnalysisDate: serverTimestamp(),
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-        }
+        // Update legacy sentiment score for compatibility
+        const sentimentScore = (analyticsData.overallScore || 0) / 100;
+        await setDoc(doc(db, "agenda_notes", String(comment.ID)), {
+          sentimentScore,
+          sentimentAnalysisDate: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        }, { merge: true });
 
         setResults(prev => [...prev, { id: String(comment.ID), status: 'success' }]);
       } catch (error: any) {

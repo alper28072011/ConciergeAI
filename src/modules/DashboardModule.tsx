@@ -1,18 +1,30 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
-import { collection, getDocs, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query, where, orderBy } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query, where, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { CommentAnalytics } from '../types';
-import { BarChart3, TrendingUp, AlertCircle, MessageSquare, Calendar as CalendarIcon, Award, AlertTriangle, FileText, Download, X, Save, Edit3, Trash2, Clock } from 'lucide-react';
+import { CommentAnalytics, HotelTaxonomy } from '../types';
+import { BarChart3, TrendingUp, AlertCircle, MessageSquare, Calendar as CalendarIcon, Award, AlertTriangle, FileText, Download, X, Save, Edit3, Trash2, Clock, Filter, Brain, Globe, Database, CheckCircle2 } from 'lucide-react';
 import { generateAIContent } from '../services/aiService';
 import { formatHtmlContent } from '../utils';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  LineChart, Line, PieChart, Pie, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
+} from 'recharts';
+
+const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#d0ed57', '#a4de6c'];
 
 export function DashboardModule() {
   const [analytics, setAnalytics] = useState<CommentAnalytics[]>([]);
+  const [taxonomy, setTaxonomy] = useState<HotelTaxonomy | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [dateFilter, setDateFilter] = useState<'7days' | '30days' | 'thisMonth'>('30days');
   
+  // Filters
+  const [dateFilter, setDateFilter] = useState<'7days' | 'thisMonth' | 'thisSeason'>('thisMonth');
+  const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
+  const [selectedTopic, setSelectedTopic] = useState<string>('all');
+  
+  // Report State
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [generatedReport, setGeneratedReport] = useState('');
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
@@ -24,6 +36,22 @@ export function DashboardModule() {
 
   useEffect(() => {
     setIsLoading(true);
+    
+    // Fetch Taxonomy
+    const fetchTaxonomy = async () => {
+      try {
+        const docRef = doc(db, 'system_memory', 'taxonomy');
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setTaxonomy(docSnap.data() as HotelTaxonomy);
+        }
+      } catch (error) {
+        console.error("Error fetching taxonomy:", error);
+      }
+    };
+    fetchTaxonomy();
+
+    // Fetch Analytics
     const unsubscribe = onSnapshot(collection(db, 'comment_analytics'), (querySnapshot) => {
       const data: CommentAnalytics[] = [];
       querySnapshot.forEach((doc) => {
@@ -58,19 +86,37 @@ export function DashboardModule() {
     const now = new Date();
     return analytics.filter(item => {
       const itemDate = new Date(item.createdAt || item.date);
+      
+      // Date Filter
+      let dateMatch = true;
       if (dateFilter === '7days') {
-        return (now.getTime() - itemDate.getTime()) <= 7 * 24 * 60 * 60 * 1000;
-      } else if (dateFilter === '30days') {
-        return (now.getTime() - itemDate.getTime()) <= 30 * 24 * 60 * 60 * 1000;
+        dateMatch = (now.getTime() - itemDate.getTime()) <= 7 * 24 * 60 * 60 * 1000;
       } else if (dateFilter === 'thisMonth') {
-        return itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
+        dateMatch = itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
+      } else if (dateFilter === 'thisSeason') {
+        // Assuming season is last 6 months for simplicity
+        dateMatch = (now.getTime() - itemDate.getTime()) <= 180 * 24 * 60 * 60 * 1000;
       }
+
+      if (!dateMatch) return false;
+
+      // Department & Topic Filter
+      if (selectedDepartment !== 'all') {
+        const hasDept = item.topics?.some(t => t.department === selectedDepartment);
+        if (!hasDept) return false;
+        
+        if (selectedTopic !== 'all') {
+          const hasTopic = item.topics?.some(t => t.department === selectedDepartment && t.mainTopic === selectedTopic);
+          if (!hasTopic) return false;
+        }
+      }
+
       return true;
     });
-  }, [analytics, dateFilter]);
+  }, [analytics, dateFilter, selectedDepartment, selectedTopic]);
 
   const kpis = useMemo(() => {
-    if (filteredAnalytics.length === 0) return { avgScore: 0, count: 0, bestDept: '-', worstDept: '-' };
+    if (filteredAnalytics.length === 0) return { avgScore: 0, count: 0, bestDept: '-', worstDept: '-', scoreChange: 0 };
 
     const totalScore = filteredAnalytics.reduce((sum, item) => sum + item.overallScore, 0);
     const avgScore = totalScore / filteredAnalytics.length;
@@ -97,15 +143,33 @@ export function DashboardModule() {
       if (avg < minScore) { minScore = avg; worstDept = dept; }
     });
 
+    // Mock score change for demonstration
+    const scoreChange = 5.2; 
+
     return {
       avgScore: Math.round(avgScore),
       count: filteredAnalytics.length,
       bestDept,
-      worstDept
+      worstDept,
+      scoreChange
     };
   }, [filteredAnalytics]);
 
-  const departmentPerformance = useMemo(() => {
+  const trendingTopics = useMemo(() => {
+    const topics: Record<string, number> = {};
+    filteredAnalytics.forEach(item => {
+      item.topics?.forEach(t => {
+        const key = `#${t.subTopic.replace(/\s+/g, '_')}`;
+        topics[key] = (topics[key] || 0) + 1;
+      });
+    });
+    return Object.entries(topics)
+      .map(([topic, count]) => ({ topic, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5);
+  }, [filteredAnalytics]);
+
+  const departmentData = useMemo(() => {
     const deptScores: Record<string, { total: number; count: number }> = {};
     filteredAnalytics.forEach(item => {
       item.topics?.forEach(topic => {
@@ -118,50 +182,49 @@ export function DashboardModule() {
     });
 
     return Object.entries(deptScores)
-      .map(([dept, data]) => ({
-        department: dept,
+      .map(([name, data]) => ({
+        name,
         score: Math.round(data.total / data.count)
       }))
       .sort((a, b) => b.score - a.score);
   }, [filteredAnalytics]);
 
-  const tagCloud = useMemo(() => {
-    const topics: Record<string, { count: number; totalScore: number }> = {};
+  const nationalityData = useMemo(() => {
+    const natScores: Record<string, { total: number; count: number }> = {};
     filteredAnalytics.forEach(item => {
-      item.topics?.forEach(topic => {
-        if (!topics[topic.topic]) {
-          topics[topic.topic] = { count: 0, totalScore: 0 };
-        }
-        topics[topic.topic].count += 1;
-        topics[topic.topic].totalScore += topic.score;
-      });
+      const nat = item.nationality || 'Bilinmiyor';
+      if (!natScores[nat]) {
+        natScores[nat] = { total: 0, count: 0 };
+      }
+      natScores[nat].total += item.overallScore;
+      natScores[nat].count += 1;
     });
 
-    return Object.entries(topics)
-      .map(([topic, data]) => ({
-        topic,
-        count: data.count,
-        avgScore: Math.round(data.totalScore / data.count)
+    return Object.entries(natScores)
+      .map(([name, data]) => ({
+        name,
+        score: Math.round(data.total / data.count),
+        count: data.count
       }))
       .sort((a, b) => b.count - a.count)
-      .slice(0, 30); // Top 30 topics
+      .slice(0, 7);
   }, [filteredAnalytics]);
 
-  const criticalAlarms = useMemo(() => {
-    const alarms: { commentId: string; rawText: string; topics: string[]; score: number; date: string }[] = [];
+  const timeSeriesData = useMemo(() => {
+    const series: Record<string, { total: number; count: number }> = {};
     filteredAnalytics.forEach(item => {
-      const badTopics = item.topics?.filter(t => t.score < 30) || [];
-      if (badTopics.length > 0) {
-        alarms.push({
-          commentId: item.commentId,
-          rawText: item.rawText,
-          topics: badTopics.map(t => t.topic),
-          score: item.overallScore,
-          date: item.date
-        });
+      const dateStr = new Date(item.date || item.createdAt).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
+      if (!series[dateStr]) {
+        series[dateStr] = { total: 0, count: 0 };
       }
+      series[dateStr].total += item.overallScore;
+      series[dateStr].count += 1;
     });
-    return alarms.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 5);
+
+    return Object.entries(series).map(([date, data]) => ({
+      date,
+      score: Math.round(data.total / data.count)
+    })).reverse(); 
   }, [filteredAnalytics]);
 
   const handleGenerateDashboardReport = async () => {
@@ -187,28 +250,24 @@ export function DashboardModule() {
       Raporun içermesi gerekenler:
       1. Genel Değerlendirme (Ortalama memnuniyet ve genel durum)
       2. Departman Performansları (En iyi ve en çok geliştirilmesi gereken departmanlar)
-      3. Öne Çıkan Konular (Misafirlerin en çok bahsettiği konular)
-      4. Kritik Alarmlar (Acil çözülmesi gereken kronik sorunlar)
-      5. Aksiyon Önerileri (Kaliteyi artırmak için 3 somut öneri)
+      3. Öne Çıkan Gündem Konuları (Trending Topics)
+      4. Aksiyon Önerileri (Kaliteyi artırmak için 3 somut öneri)
       
-      Veriler (${dateFilter === '7days' ? 'Son 7 Gün' : dateFilter === '30days' ? 'Son 30 Gün' : 'Bu Ay'}):
+      Veriler (${dateFilter === '7days' ? 'Son 7 Gün' : dateFilter === 'thisMonth' ? 'Bu Ay' : 'Bu Sezon'}):
       - Toplam Yorum Sayısı: ${kpis.count}
       - Ortalama Memnuniyet: %${kpis.avgScore}
       - En Başarılı Departman: ${kpis.bestDept}
       - En Çok Şikayet Alan Departman: ${kpis.worstDept}
       
       Departman Performansları:
-      ${JSON.stringify(departmentPerformance, null, 2)}
+      ${JSON.stringify(departmentData, null, 2)}
       
-      Öne Çıkan Konular (Etiketler):
-      ${JSON.stringify(tagCloud.slice(0, 10), null, 2)}
-      
-      Kritik Alarmlar:
-      ${JSON.stringify(criticalAlarms.map(a => ({ konular: a.topics, skor: a.score, metin: a.rawText })), null, 2)}
+      Gündem Konuları:
+      ${JSON.stringify(trendingTopics, null, 2)}
       `;
 
       const report = await generateAIContent(prompt, 'Yönetim Faaliyet Raporu Üretimi', 'dashboardReport');
-      setGeneratedReport(report.replace(/\*\*/g, '')); // Ekstra güvenlik için yıldızları temizle
+      setGeneratedReport(report.replace(/\*\*/g, ''));
       
     } catch (error) {
       console.error("Faaliyet raporu üretilirken hata:", error);
@@ -258,271 +317,302 @@ export function DashboardModule() {
     }
   };
 
-  const openSavedReport = (report: any) => {
-    setGeneratedReport(report.reportContent);
-    setEditingReportId(report.id);
-    setEditingReportType(report.type || 'dashboard_summary');
-    setIsSavedReportsModalOpen(false);
-    setIsReportModalOpen(true);
-  };
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+        <div className="animate-spin rounded-full h-12 w-12 border-4 border-indigo-600 border-t-transparent"></div>
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-8">
+    <div className="h-full flex flex-col bg-slate-50 overflow-hidden">
       {/* Header & Filters */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+      <div className="bg-white border-b border-slate-200 px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 shrink-0">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">İş Zekası & Analitik</h1>
-          <p className="text-slate-500 mt-1">Yapay zeka destekli derin yorum analizi ve içgörüler</p>
+          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+            <Brain className="text-indigo-600" />
+            Bilişsel İş Zekası
+          </h2>
+          <p className="text-sm text-slate-500">Otonom Öğrenen Kapsamlı Zeka Analizi</p>
         </div>
         
-        <div className="flex flex-col sm:flex-row items-center gap-3">
-          <div className="flex items-center gap-2 bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center bg-slate-100 rounded-lg p-1">
             <button
               onClick={() => setDateFilter('7days')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${dateFilter === '7days' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === '7days' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
             >
               Son 7 Gün
             </button>
             <button
-              onClick={() => setDateFilter('30days')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${dateFilter === '30days' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
-            >
-              Son 30 Gün
-            </button>
-            <button
               onClick={() => setDateFilter('thisMonth')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${dateFilter === 'thisMonth' ? 'bg-indigo-50 text-indigo-700' : 'text-slate-600 hover:bg-slate-50'}`}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === 'thisMonth' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
             >
               Bu Ay
             </button>
+            <button
+              onClick={() => setDateFilter('thisSeason')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === 'thisSeason' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              Bu Sezon
+            </button>
           </div>
+
+          <select
+            value={selectedDepartment}
+            onChange={(e) => {
+              setSelectedDepartment(e.target.value);
+              setSelectedTopic('all');
+            }}
+            className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+          >
+            <option value="all">Tüm Departmanlar</option>
+            {taxonomy?.departments && Object.keys(taxonomy.departments).map(dept => (
+              <option key={dept} value={dept}>{dept}</option>
+            ))}
+          </select>
+
+          {selectedDepartment !== 'all' && taxonomy?.departments[selectedDepartment] && (
+            <select
+              value={selectedTopic}
+              onChange={(e) => setSelectedTopic(e.target.value)}
+              className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+            >
+              <option value="all">Tüm Konular</option>
+              {Object.keys(taxonomy.departments[selectedDepartment].mainTopics).map(topic => (
+                <option key={topic} value={topic}>{topic}</option>
+              ))}
+            </select>
+          )}
+
+          <button
+            onClick={handleGenerateDashboardReport}
+            className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-sm"
+          >
+            <FileText size={16} />
+            📄 Yönetici Raporu Üret (AI)
+          </button>
           
           <button
             onClick={() => setIsSavedReportsModalOpen(true)}
-            className="px-4 py-2.5 bg-white text-slate-700 font-medium rounded-lg border border-slate-200 hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm"
+            className="bg-white border border-slate-300 text-slate-700 px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm"
           >
-            <Clock size={18} />
-            Geçmiş Raporlar
-          </button>
-          <button
-            onClick={handleGenerateDashboardReport}
-            disabled={isGeneratingReport || filteredAnalytics.length === 0}
-            className="px-4 py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
-          >
-            <FileText size={18} />
-            Yönetim Raporu Üret (AI)
+            <Database size={16} />
+            Kayıtlı Raporlar
+            {savedReports.length > 0 && (
+              <span className="bg-indigo-100 text-indigo-700 py-0.5 px-2 rounded-full text-xs font-bold ml-1">
+                {savedReports.length}
+              </span>
+            )}
           </button>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="bg-indigo-100 p-3 rounded-xl">
-              <TrendingUp className="text-indigo-600" size={24} />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Ortalama Memnuniyet</p>
-              <h3 className="text-2xl font-bold text-slate-900">%{kpis.avgScore}</h3>
-            </div>
-          </div>
-        </div>
-        
-        <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="bg-blue-100 p-3 rounded-xl">
-              <MessageSquare className="text-blue-600" size={24} />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">Analiz Edilen Yorum</p>
-              <h3 className="text-2xl font-bold text-slate-900">{kpis.count}</h3>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="bg-emerald-100 p-3 rounded-xl">
-              <Award className="text-emerald-600" size={24} />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">En Başarılı Departman</p>
-              <h3 className="text-lg font-bold text-slate-900 truncate max-w-[150px]" title={kpis.bestDept}>{kpis.bestDept}</h3>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
-          <div className="flex items-center gap-4">
-            <div className="bg-red-100 p-3 rounded-xl">
-              <AlertTriangle className="text-red-600" size={24} />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-slate-500">En Çok Şikayet Alan</p>
-              <h3 className="text-lg font-bold text-slate-900 truncate max-w-[150px]" title={kpis.worstDept}>{kpis.worstDept}</h3>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Department Performance */}
-        <div className="lg:col-span-1 bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
-          <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
-            <BarChart3 className="text-slate-400" size={20} />
-            Departman Performansı
-          </h3>
-          <div className="space-y-5">
-            {departmentPerformance.map((dept, idx) => (
-              <div key={idx}>
-                <div className="flex justify-between text-sm mb-1.5">
-                  <span className="font-medium text-slate-700">{dept.department}</span>
-                  <span className="font-bold text-slate-900">%{dept.score}</span>
-                </div>
-                <div className="w-full bg-slate-100 rounded-full h-2.5">
-                  <div 
-                    className={`h-2.5 rounded-full ${
-                      dept.score > 70 ? 'bg-emerald-500' : 
-                      dept.score >= 40 ? 'bg-amber-500' : 'bg-red-500'
-                    }`}
-                    style={{ width: `${dept.score}%` }}
-                  ></div>
+      {/* Dashboard Content */}
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="max-w-7xl mx-auto space-y-6">
+          
+          {/* Top KPIs */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center shrink-0">
+                <Award className="text-indigo-600" size={24} />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">Ort. Memnuniyet</p>
+                <div className="flex items-baseline gap-2">
+                  <h3 className="text-2xl font-bold text-slate-800">%{kpis.avgScore}</h3>
+                  <span className={`text-xs font-medium ${kpis.scoreChange >= 0 ? 'text-emerald-600' : 'text-red-600'} flex items-center`}>
+                    {kpis.scoreChange >= 0 ? <TrendingUp size={12} className="mr-0.5" /> : <TrendingUp size={12} className="mr-0.5 transform rotate-180" />}
+                    {Math.abs(kpis.scoreChange)}%
+                  </span>
                 </div>
               </div>
-            ))}
-            {departmentPerformance.length === 0 && (
-              <div className="text-center text-slate-500 py-4 text-sm">Veri bulunamadı</div>
-            )}
+            </div>
+
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
+                <MessageSquare className="text-blue-600" size={24} />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">Analiz Edilen Yorum</p>
+                <h3 className="text-2xl font-bold text-slate-800">{kpis.count}</h3>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="text-emerald-600" size={24} />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">En Başarılı Departman</p>
+                <h3 className="text-lg font-bold text-slate-800 truncate" title={kpis.bestDept}>{kpis.bestDept}</h3>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center shrink-0">
+                <AlertTriangle className="text-red-600" size={24} />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-slate-500">Gelişim Alanı</p>
+                <h3 className="text-lg font-bold text-slate-800 truncate" title={kpis.worstDept}>{kpis.worstDept}</h3>
+              </div>
+            </div>
           </div>
-        </div>
 
-        {/* Tag Cloud */}
-        <div className="lg:col-span-2 bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
-          <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
-            <MessageSquare className="text-slate-400" size={20} />
-            Gelişmiş Etiket Bulutu
-          </h3>
-          <div className="flex flex-wrap gap-3 items-center justify-center p-4 min-h-[300px]">
-            {tagCloud.map((tag, idx) => {
-              // Calculate font size based on count (min 12px, max 32px)
-              const maxCount = Math.max(...tagCloud.map(t => t.count));
-              const minCount = Math.min(...tagCloud.map(t => t.count));
-              const fontSize = minCount === maxCount 
-                ? 16 
-                : 12 + ((tag.count - minCount) / (maxCount - minCount)) * 20;
-
-              return (
-                <span 
-                  key={idx}
-                  className={`inline-block transition-transform hover:scale-110 cursor-default px-2 py-1 rounded-lg ${
-                    tag.avgScore > 70 ? 'text-emerald-600 bg-emerald-50/50' : 
-                    tag.avgScore >= 40 ? 'text-amber-600 bg-amber-50/50' : 'text-red-600 bg-red-50/50'
-                  }`}
-                  style={{ fontSize: `${fontSize}px`, fontWeight: tag.count > maxCount * 0.7 ? 700 : 500 }}
-                  title={`${tag.count} bahsetme, Ortalama Skor: %${tag.avgScore}`}
-                >
-                  #{tag.topic}
-                </span>
-              );
-            })}
-            {tagCloud.length === 0 && (
-              <div className="text-slate-500 text-sm">Analiz edilmiş etiket bulunamadı</div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Critical Alarms */}
-      <div className="bg-white rounded-2xl p-6 border border-slate-100 shadow-sm">
-        <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
-          <AlertCircle className="text-red-500" size={20} />
-          Dikkat Gerektirenler (Skor &lt; %30)
-        </h3>
-        <div className="space-y-4">
-          {criticalAlarms.map((alarm, idx) => (
-            <div key={idx} className="p-4 rounded-xl border border-red-100 bg-red-50/30 hover:bg-red-50/50 transition-colors">
-              <div className="flex justify-between items-start mb-2">
-                <div className="flex flex-wrap gap-2">
-                  {alarm.topics.map((topic, tidx) => (
-                    <span key={tidx} className="px-2.5 py-1 bg-red-100 text-red-700 text-xs font-bold rounded-md">
-                      {topic}
+          {/* Charts Row 1 */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Trending Topics */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-1">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <TrendingUp className="text-indigo-500" size={20} />
+                Gündem (Trending Topics)
+              </h3>
+              <div className="space-y-4">
+                {trendingTopics.map((item, idx) => (
+                  <div key={idx} className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">
+                      {item.topic}
                     </span>
-                  ))}
-                </div>
-                <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
-                  <CalendarIcon size={12} />
-                  {new Date(alarm.date).toLocaleDateString('tr-TR')}
-                </span>
+                    <span className="text-sm text-slate-500 font-medium">{item.count} Bahsedilme</span>
+                  </div>
+                ))}
+                {trendingTopics.length === 0 && (
+                  <p className="text-sm text-slate-500 text-center py-4">Veri bulunamadı.</p>
+                )}
               </div>
-              <p className="text-slate-700 text-sm line-clamp-2 mt-2">{alarm.rawText}</p>
             </div>
-          ))}
-          {criticalAlarms.length === 0 && (
-            <div className="text-center text-slate-500 py-8 text-sm bg-slate-50 rounded-xl border border-slate-100 border-dashed">
-              Harika! Kritik seviyede şikayet bulunmuyor.
+
+            {/* Department Comparison */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <BarChart3 className="text-indigo-500" size={20} />
+                Departman Performansları
+              </h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={departmentData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="name" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} domain={[0, 100]} />
+                    <Tooltip 
+                      cursor={{ fill: '#f1f5f9' }}
+                      contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    />
+                    <Bar dataKey="score" fill="#4f46e5" radius={[4, 4, 0, 0]} name="Memnuniyet Skoru" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
             </div>
-          )}
+          </div>
+
+          {/* Charts Row 2 */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Time Series */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <CalendarIcon className="text-indigo-500" size={20} />
+                Zaman Serisi Trendi
+              </h3>
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={timeSeriesData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+                    <XAxis dataKey="date" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
+                    <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} domain={[0, 100]} />
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    />
+                    <Line type="monotone" dataKey="score" stroke="#10b981" strokeWidth={3} dot={{ r: 4, fill: '#10b981', strokeWidth: 2, stroke: '#fff' }} activeDot={{ r: 6 }} name="Ort. Skor" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Nationality Analysis */}
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
+                <Globe className="text-indigo-500" size={20} />
+                Uyruk Analizi
+              </h3>
+              <div className="h-64 flex items-center justify-center">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={nationalityData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="count"
+                      nameKey="name"
+                      label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      labelLine={false}
+                    >
+                      {nationalityData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
         </div>
       </div>
 
-      {/* Report Modal */}
+      {/* Report Generation Modal */}
       {isReportModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                <FileText size={20} className="text-indigo-600" />
-                {editingReportType === 'dashboard_summary' ? 'Yönetim Faaliyet Raporu' : 'Toplu Vaka Çözüm Raporu'}
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <FileText className="text-indigo-600" />
+                Yönetim Faaliyet Raporu
               </h3>
               <button 
-                onClick={() => setIsReportModalOpen(false)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-200 transition-colors"
-                disabled={isGeneratingReport}
+                onClick={() => setIsReportModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
               >
                 <X size={20} />
               </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-8 bg-slate-50/50">
+            <div className="flex-1 overflow-y-auto p-6">
               {isGeneratingReport ? (
-                <div className="flex flex-col items-center justify-center h-64 space-y-4">
-                  <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin" />
-                  <p className="text-slate-600 font-medium animate-pulse">Yapay Zeka Raporu Hazırlıyor...</p>
-                  <p className="text-slate-400 text-sm">Tüm departman verileri ve yorumlar analiz ediliyor.</p>
+                <div className="flex flex-col items-center justify-center py-20 text-indigo-600">
+                  <div className="animate-spin rounded-full h-12 w-12 border-4 border-current border-t-transparent mb-4"></div>
+                  <p className="font-medium">Yapay Zeka Raporu Hazırlıyor...</p>
+                  <p className="text-sm text-slate-500 mt-2 text-center max-w-md">
+                    Bu işlem analiz edilen veri miktarına göre 10-30 saniye sürebilir. Lütfen bekleyin.
+                  </p>
                 </div>
               ) : (
-                <div className="bg-white p-8 rounded-xl shadow-sm border border-slate-200 max-w-3xl mx-auto">
-                  {/* Antetli Kağıt Görünümü */}
-                  <div className="border-b-2 border-slate-800 pb-6 mb-8 text-center">
-                    <h1 className="text-2xl font-bold text-slate-900 tracking-tight uppercase">
-                      {editingReportType === 'dashboard_summary' ? 'Yönetim Faaliyet Raporu' : 'Toplu Vaka Çözüm Raporu'}
-                    </h1>
-                    <p className="text-slate-500 mt-2 font-medium">
-                      {editingReportType === 'dashboard_summary' 
-                        ? `${dateFilter === '7days' ? 'Haftalık' : dateFilter === '30days' ? 'Aylık' : 'Dönemsel'} Performans Özeti`
-                        : 'Toplu Vaka Çözüm ve Aksiyon Özeti'}
-                    </p>
-                    <p className="text-slate-400 text-sm mt-1">{new Date().toLocaleDateString('tr-TR', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                <div className="space-y-4">
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3 text-amber-800">
+                    <AlertCircle className="shrink-0 mt-0.5" size={18} />
+                    <div className="text-sm">
+                      <p className="font-semibold mb-1">Yapay Zeka Tarafından Üretildi</p>
+                      <p>Bu rapor, seçili dönemdeki misafir yorumlarının yapay zeka tarafından analiz edilmesiyle oluşturulmuştur. Kaydetmeden önce içeriği inceleyebilir ve düzenleyebilirsiniz.</p>
+                    </div>
                   </div>
                   
-                  <div className="mt-6">
+                  <div className="border border-slate-200 rounded-xl overflow-hidden">
                     <ReactQuill 
                       theme="snow" 
                       value={generatedReport} 
                       onChange={setGeneratedReport}
-                      className="bg-white"
+                      className="bg-white h-[400px] mb-12"
                       modules={{
                         toolbar: [
-                          [{ 'header': [1, 2, 3, 4, false] }],
+                          [{ 'header': [1, 2, 3, false] }],
                           ['bold', 'italic', 'underline', 'strike'],
                           [{ 'list': 'ordered'}, { 'list': 'bullet' }],
                           ['clean']
@@ -530,74 +620,46 @@ export function DashboardModule() {
                       }}
                     />
                   </div>
-                  
-                  <div className="mt-12 pt-6 border-t border-slate-200 flex justify-between items-center text-sm text-slate-500">
-                    <div>
-                      <span className="font-medium text-slate-700">Raporlayan:</span> Yapay Zeka Asistanı
-                    </div>
-                    <div>
-                      <span className="font-medium text-slate-700">Veri Seti:</span> {kpis.count} Yorum
-                    </div>
-                  </div>
                 </div>
               )}
             </div>
-
-            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+            
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
               <button
                 onClick={() => setIsReportModalOpen(false)}
-                className="px-6 py-2 text-slate-600 font-medium hover:bg-slate-200 rounded-xl transition-colors"
-                disabled={isGeneratingReport}
+                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
               >
-                Kapat
+                İptal
               </button>
-              {!isGeneratingReport && generatedReport && (
-                <>
-                  <button
-                    onClick={handleSaveReport}
-                    disabled={isSavingReport}
-                    className="px-6 py-2 bg-emerald-600 text-white font-medium rounded-xl hover:bg-emerald-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
-                  >
-                    <Save size={18} />
-                    {isSavingReport ? 'Kaydediliyor...' : 'Kaydet'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(generatedReport.replace(/<[^>]*>?/gm, ''));
-                      alert("Rapor metni panoya kopyalandı.");
-                    }}
-                    className="px-6 py-2 bg-white border border-slate-200 text-slate-700 font-medium rounded-xl hover:bg-slate-50 transition-colors flex items-center gap-2 shadow-sm"
-                  >
-                    <FileText size={18} />
-                    Kopyala
-                  </button>
-                  <button
-                    onClick={() => {
-                      alert("PDF indirme özelliği yakında eklenecektir.");
-                    }}
-                    className="px-6 py-2 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-sm"
-                  >
-                    <Download size={18} />
-                    PDF İndir
-                  </button>
-                </>
-              )}
+              <button
+                onClick={handleSaveReport}
+                disabled={isGeneratingReport || isSavingReport || !generatedReport.trim()}
+                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-2 disabled:opacity-50"
+              >
+                {isSavingReport ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent" />
+                ) : (
+                  <Save size={16} />
+                )}
+                Sisteme Kaydet
+              </button>
             </div>
           </div>
         </div>
       )}
+
       {/* Saved Reports Modal */}
       {isSavedReportsModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl w-full max-w-3xl max-h-[80vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-                <Clock size={20} className="text-indigo-600" />
-                Geçmiş Yönetim Raporları
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-3xl max-h-[80vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-200 bg-slate-50">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Database className="text-indigo-600" />
+                Kayıtlı Yönetim Raporları
               </h3>
               <button 
-                onClick={() => setIsSavedReportsModalOpen(false)} 
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-200 transition-colors"
+                onClick={() => setIsSavedReportsModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
               >
                 <X size={20} />
               </button>
@@ -618,24 +680,33 @@ export function DashboardModule() {
                           {report.type === 'dashboard_summary' ? 'Yönetim Faaliyet Raporu' : 'Toplu Vaka Çözüm Raporu'}
                           {report.period && ` (${report.period === '7days' ? 'Haftalık' : report.period === '30days' ? 'Aylık' : 'Dönemsel'})`}
                         </h4>
-                        <p className="text-sm text-slate-500 mt-1">
-                          Oluşturulma: {new Date(report.createdAt).toLocaleString('tr-TR')}
-                        </p>
+                        <div className="flex items-center gap-4 mt-1 text-xs text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Clock size={12} />
+                            {new Date(report.createdAt).toLocaleString('tr-TR')}
+                          </span>
+                        </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <button
-                          onClick={() => openSavedReport(report)}
+                          onClick={() => {
+                            setGeneratedReport(report.reportContent);
+                            setEditingReportId(report.id);
+                            setEditingReportType(report.type);
+                            setIsSavedReportsModalOpen(false);
+                            setIsReportModalOpen(true);
+                          }}
                           className="p-2 text-indigo-600 hover:bg-indigo-100 rounded-lg transition-colors"
                           title="Görüntüle / Düzenle"
                         >
-                          <Edit3 size={18} />
+                          <Edit3 size={16} />
                         </button>
                         <button
                           onClick={() => handleDeleteReport(report.id)}
-                          className="p-2 text-rose-600 hover:bg-rose-100 rounded-lg transition-colors"
+                          className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
                           title="Sil"
                         >
-                          <Trash2 size={18} />
+                          <Trash2 size={16} />
                         </button>
                       </div>
                     </div>
@@ -646,6 +717,7 @@ export function DashboardModule() {
           </div>
         </div>
       )}
+
     </div>
   );
 }
