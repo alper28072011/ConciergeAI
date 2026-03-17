@@ -1,7 +1,6 @@
 export interface UnifiedTopicAnalysis {
-  department: string;
-  mainTopic: string;
-  subTopic: string;
+  mainCategory: string;
+  subCategory: string;
   score: number;
   sentiment: 'positive' | 'negative' | 'neutral';
 }
@@ -18,12 +17,8 @@ export interface CommentAnalytics {
 }
 
 export interface HotelTaxonomy {
-  departments: {
-    [depName: string]: {
-      mainTopics: {
-        [topicName: string]: string[]; /* subTopics */
-      }
-    }
+  categories: {
+    [mainCategory: string]: string[]; /* subCategory list */
   }
 }
 

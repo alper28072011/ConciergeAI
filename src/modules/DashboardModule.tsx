@@ -4,6 +4,7 @@ import 'react-quill-new/dist/quill.snow.css';
 import { collection, getDocs, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query, where, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CommentAnalytics, HotelTaxonomy } from '../types';
+import { HOTEL_MAIN_CATEGORIES } from '../utils/constants';
 import { BarChart3, TrendingUp, AlertCircle, MessageSquare, Calendar as CalendarIcon, Award, AlertTriangle, FileText, Download, X, Save, Edit3, Trash2, Clock, Filter, Brain, Globe, Database, CheckCircle2 } from 'lucide-react';
 import { generateAIContent } from '../services/aiService';
 import { formatHtmlContent } from '../utils';
@@ -23,8 +24,8 @@ export function DashboardModule() {
   const [dateFilter, setDateFilter] = useState<'7days' | '30days' | 'thisYear' | 'custom'>('30days');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
-  const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
-  const [selectedTopic, setSelectedTopic] = useState<string>('all');
+  const [selectedMainCategory, setSelectedMainCategory] = useState<string>('all');
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string>('all');
   
   // Report State
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -86,17 +87,34 @@ export function DashboardModule() {
 
   const filteredAnalytics = useMemo(() => {
     const now = new Date();
+    now.setHours(23, 59, 59, 999);
     const currentYear = now.getFullYear();
     
+    // Helper to parse dates correctly, including DD.MM.YYYY format
+    const parseDate = (dateStr: string) => {
+      if (!dateStr) return new Date();
+      if (typeof dateStr === 'string' && dateStr.includes('.') && dateStr.split('.').length === 3) {
+        const [d, m, y] = dateStr.split('.');
+        return new Date(`${y}-${m}-${d}`);
+      }
+      return new Date(dateStr);
+    };
+
     return analytics.filter(item => {
-      const itemDate = new Date(item.createdAt || item.date);
+      // Prioritize comment date (item.date) over analysis date (item.createdAt)
+      let itemDate = parseDate(item.date);
+      if (isNaN(itemDate.getTime())) {
+        itemDate = parseDate(item.createdAt);
+      }
       
       // Date Filter
       let dateMatch = true;
       if (dateFilter === '7days') {
-        dateMatch = (now.getTime() - itemDate.getTime()) <= 7 * 24 * 60 * 60 * 1000;
+        const diffTime = now.getTime() - itemDate.getTime();
+        dateMatch = diffTime >= 0 && diffTime <= 7 * 24 * 60 * 60 * 1000;
       } else if (dateFilter === '30days') {
-        dateMatch = (now.getTime() - itemDate.getTime()) <= 30 * 24 * 60 * 60 * 1000;
+        const diffTime = now.getTime() - itemDate.getTime();
+        dateMatch = diffTime >= 0 && diffTime <= 30 * 24 * 60 * 60 * 1000;
       } else if (dateFilter === 'thisYear') {
         dateMatch = itemDate.getFullYear() === currentYear;
       } else if (dateFilter === 'custom' && customStartDate && customEndDate) {
@@ -108,47 +126,47 @@ export function DashboardModule() {
 
       if (!dateMatch) return false;
 
-      // Department & Topic Filter
-      if (selectedDepartment !== 'all') {
-        const hasDept = item.topics?.some(t => t.department === selectedDepartment);
-        if (!hasDept) return false;
+      // Category & SubCategory Filter
+      if (selectedMainCategory !== 'all') {
+        const hasCategory = item.topics?.some(t => t.mainCategory === selectedMainCategory);
+        if (!hasCategory) return false;
         
-        if (selectedTopic !== 'all') {
-          const hasTopic = item.topics?.some(t => t.department === selectedDepartment && t.mainTopic === selectedTopic);
-          if (!hasTopic) return false;
+        if (selectedSubCategory !== 'all') {
+          const hasSub = item.topics?.some(t => t.mainCategory === selectedMainCategory && t.subCategory === selectedSubCategory);
+          if (!hasSub) return false;
         }
       }
 
       return true;
     });
-  }, [analytics, dateFilter, selectedDepartment, selectedTopic]);
+  }, [analytics, dateFilter, selectedMainCategory, selectedSubCategory]);
 
   const kpis = useMemo(() => {
-    if (filteredAnalytics.length === 0) return { avgScore: 0, count: 0, bestDept: '-', worstDept: '-', scoreChange: 0 };
+    if (filteredAnalytics.length === 0) return { avgScore: 0, count: 0, bestCategory: '-', worstCategory: '-', scoreChange: 0 };
 
     const totalScore = filteredAnalytics.reduce((sum, item) => sum + item.overallScore, 0);
     const avgScore = totalScore / filteredAnalytics.length;
 
-    const deptScores: Record<string, { total: number; count: number }> = {};
+    const catScores: Record<string, { total: number; count: number }> = {};
     filteredAnalytics.forEach(item => {
       item.topics?.forEach(topic => {
-        if (!deptScores[topic.department]) {
-          deptScores[topic.department] = { total: 0, count: 0 };
+        if (!catScores[topic.mainCategory]) {
+          catScores[topic.mainCategory] = { total: 0, count: 0 };
         }
-        deptScores[topic.department].total += topic.score;
-        deptScores[topic.department].count += 1;
+        catScores[topic.mainCategory].total += topic.score;
+        catScores[topic.mainCategory].count += 1;
       });
     });
 
-    let bestDept = '-';
-    let worstDept = '-';
+    let bestCategory = '-';
+    let worstCategory = '-';
     let maxScore = -1;
     let minScore = 101;
 
-    Object.entries(deptScores).forEach(([dept, data]) => {
+    Object.entries(catScores).forEach(([cat, data]) => {
       const avg = data.total / data.count;
-      if (avg > maxScore) { maxScore = avg; bestDept = dept; }
-      if (avg < minScore) { minScore = avg; worstDept = dept; }
+      if (avg > maxScore) { maxScore = avg; bestCategory = cat; }
+      if (avg < minScore) { minScore = avg; worstCategory = cat; }
     });
 
     // Mock score change for demonstration
@@ -157,8 +175,8 @@ export function DashboardModule() {
     return {
       avgScore: Math.round(avgScore),
       count: filteredAnalytics.length,
-      bestDept,
-      worstDept,
+      bestCategory,
+      worstCategory,
       scoreChange
     };
   }, [filteredAnalytics]);
@@ -167,7 +185,7 @@ export function DashboardModule() {
     const topics: Record<string, number> = {};
     filteredAnalytics.forEach(item => {
       item.topics?.forEach(t => {
-        const key = `#${t.subTopic.replace(/\s+/g, '_')}`;
+        const key = `#${t.subCategory.replace(/\s+/g, '_')}`;
         topics[key] = (topics[key] || 0) + 1;
       });
     });
@@ -177,19 +195,19 @@ export function DashboardModule() {
       .slice(0, 5);
   }, [filteredAnalytics]);
 
-  const departmentData = useMemo(() => {
-    const deptScores: Record<string, { total: number; count: number }> = {};
+  const categoryData = useMemo(() => {
+    const catScores: Record<string, { total: number; count: number }> = {};
     filteredAnalytics.forEach(item => {
       item.topics?.forEach(topic => {
-        if (!deptScores[topic.department]) {
-          deptScores[topic.department] = { total: 0, count: 0 };
+        if (!catScores[topic.mainCategory]) {
+          catScores[topic.mainCategory] = { total: 0, count: 0 };
         }
-        deptScores[topic.department].total += topic.score;
-        deptScores[topic.department].count += 1;
+        catScores[topic.mainCategory].total += topic.score;
+        catScores[topic.mainCategory].count += 1;
       });
     });
 
-    return Object.entries(deptScores)
+    return Object.entries(catScores)
       .map(([name, data]) => ({
         name,
         score: Math.round(data.total / data.count)
@@ -220,8 +238,21 @@ export function DashboardModule() {
 
   const timeSeriesData = useMemo(() => {
     const series: Record<string, { total: number; count: number }> = {};
+    const parseDate = (dateStr: string) => {
+      if (!dateStr) return new Date();
+      if (typeof dateStr === 'string' && dateStr.includes('.') && dateStr.split('.').length === 3) {
+        const [d, m, y] = dateStr.split('.');
+        return new Date(`${y}-${m}-${d}`);
+      }
+      return new Date(dateStr);
+    };
+
     filteredAnalytics.forEach(item => {
-      const dateStr = new Date(item.date || item.createdAt).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
+      let itemDate = parseDate(item.date);
+      if (isNaN(itemDate.getTime())) {
+        itemDate = parseDate(item.createdAt);
+      }
+      const dateStr = itemDate.toLocaleDateString('tr-TR', { day: '2-digit', month: 'short' });
       if (!series[dateStr]) {
         series[dateStr] = { total: 0, count: 0 };
       }
@@ -257,18 +288,18 @@ export function DashboardModule() {
       
       Raporun içermesi gerekenler:
       1. Genel Değerlendirme (Ortalama memnuniyet ve genel durum)
-      2. Departman Performansları (En iyi ve en çok geliştirilmesi gereken departmanlar)
-      3. Öne Çıkan Gündem Konuları (Trending Topics)
+      2. Kategori Performansları (En iyi ve en çok geliştirilmesi gereken ana kategoriler)
+      3. Öne Çıkan Gündem Konuları (Trending Sub-Categories)
       4. Aksiyon Önerileri (Kaliteyi artırmak için 3 somut öneri)
       
       Veriler (${dateFilter === '7days' ? 'Son 7 Gün' : dateFilter === '30days' ? 'Son 30 Gün' : dateFilter === 'thisYear' ? 'Bu Yıl' : 'Özel Tarih Aralığı'}):
       - Toplam Yorum Sayısı: ${kpis.count}
       - Ortalama Memnuniyet: %${kpis.avgScore}
-      - En Başarılı Departman: ${kpis.bestDept}
-      - En Çok Şikayet Alan Departman: ${kpis.worstDept}
+      - En Başarılı Kategori: ${kpis.bestCategory}
+      - En Çok Şikayet Alan Kategori: ${kpis.worstCategory}
       
-      Departman Performansları:
-      ${JSON.stringify(departmentData, null, 2)}
+      Kategori Performansları:
+      ${JSON.stringify(categoryData, null, 2)}
       
       Gündem Konuları:
       ${JSON.stringify(trendingTopics, null, 2)}
@@ -392,28 +423,28 @@ export function DashboardModule() {
           )}
 
           <select
-            value={selectedDepartment}
+            value={selectedMainCategory}
             onChange={(e) => {
-              setSelectedDepartment(e.target.value);
-              setSelectedTopic('all');
+              setSelectedMainCategory(e.target.value);
+              setSelectedSubCategory('all');
             }}
             className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
           >
-            <option value="all">Tüm Departmanlar</option>
-            {taxonomy?.departments && Object.keys(taxonomy.departments).map(dept => (
-              <option key={dept} value={dept}>{dept}</option>
+            <option value="all">Tüm Ana Kategoriler</option>
+            {HOTEL_MAIN_CATEGORIES.map(cat => (
+              <option key={cat} value={cat}>{cat}</option>
             ))}
           </select>
 
-          {selectedDepartment !== 'all' && taxonomy?.departments[selectedDepartment] && (
+          {selectedMainCategory !== 'all' && taxonomy?.categories[selectedMainCategory] && (
             <select
-              value={selectedTopic}
-              onChange={(e) => setSelectedTopic(e.target.value)}
+              value={selectedSubCategory}
+              onChange={(e) => setSelectedSubCategory(e.target.value)}
               className="border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
             >
-              <option value="all">Tüm Konular</option>
-              {Object.keys(taxonomy.departments[selectedDepartment].mainTopics).map(topic => (
-                <option key={topic} value={topic}>{topic}</option>
+              <option value="all">Tüm Alt Kategoriler</option>
+              {taxonomy.categories[selectedMainCategory].map(sub => (
+                <option key={sub} value={sub}>{sub}</option>
               ))}
             </select>
           )}
@@ -478,8 +509,8 @@ export function DashboardModule() {
                 <CheckCircle2 className="text-emerald-600" size={24} />
               </div>
               <div>
-                <p className="text-sm font-medium text-slate-500">En Başarılı Departman</p>
-                <h3 className="text-lg font-bold text-slate-800 truncate" title={kpis.bestDept}>{kpis.bestDept}</h3>
+                <p className="text-sm font-medium text-slate-500">En Başarılı Kategori</p>
+                <h3 className="text-lg font-bold text-slate-800 truncate" title={kpis.bestCategory}>{kpis.bestCategory}</h3>
               </div>
             </div>
 
@@ -488,8 +519,8 @@ export function DashboardModule() {
                 <AlertTriangle className="text-red-600" size={24} />
               </div>
               <div>
-                <p className="text-sm font-medium text-slate-500">Gelişim Alanı</p>
-                <h3 className="text-lg font-bold text-slate-800 truncate" title={kpis.worstDept}>{kpis.worstDept}</h3>
+                <p className="text-sm font-medium text-slate-500">Gelişim Alanı (Kategori)</p>
+                <h3 className="text-lg font-bold text-slate-800 truncate" title={kpis.worstCategory}>{kpis.worstCategory}</h3>
               </div>
             </div>
           </div>
@@ -517,15 +548,15 @@ export function DashboardModule() {
               </div>
             </div>
 
-            {/* Department Comparison */}
+            {/* Category Comparison */}
             <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm lg:col-span-2">
               <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
                 <BarChart3 className="text-indigo-500" size={20} />
-                Departman Performansları
+                Kategori Performansları
               </h3>
               <div className="h-64">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={departmentData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+                  <BarChart data={categoryData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
                     <XAxis dataKey="name" tick={{ fontSize: 12 }} tickLine={false} axisLine={false} />
                     <YAxis tick={{ fontSize: 12 }} tickLine={false} axisLine={false} domain={[0, 100]} />

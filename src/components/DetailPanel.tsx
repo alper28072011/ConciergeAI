@@ -715,8 +715,8 @@ ${JSON.stringify(timelineActions.map(a => ({
                         'bg-red-50 text-red-800 border-red-200'
                       }`}
                     >
-                      <span className="font-bold opacity-70 mr-2">[{topic.department}]</span>
-                      <span>{topic.mainTopic} - {topic.subTopic}</span>
+                      <span className="font-bold opacity-70 mr-2">[{topic.mainCategory}]</span>
+                      <span>{topic.subCategory}</span>
                       <span className="ml-3 font-bold opacity-90">
                         (%{topic.score} {topic.score > 70 ? '🟩' : topic.score >= 40 ? '🟨' : '🟥'})
                       </span>

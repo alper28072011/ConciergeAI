@@ -2,6 +2,7 @@ import { GoogleGenAI, Type } from '@google/genai';
 import { collection, addDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ApiSettings, AIFeature, CommentData, CommentAnalytics, HotelTaxonomy, UnifiedTopicAnalysis } from '../types';
+import { HOTEL_MAIN_CATEGORIES } from '../utils/constants';
 
 const COST_RATES = {
   'gemini-2.5-flash-lite': { input: 0.10, output: 0.40 },
@@ -83,7 +84,7 @@ export async function analyzeCommentComprehensive(comment: CommentData): Promise
   const ai = new GoogleGenAI({ apiKey: String(apiKey).trim().replace(/^["']|["']$/g, '') });
 
   // Step A: Fetch current taxonomy from Firebase
-  let currentTaxonomy: HotelTaxonomy = { departments: {} };
+  let currentTaxonomy: HotelTaxonomy = { categories: {} };
   try {
     const taxonomyDoc = await getDoc(doc(db, 'system_memory', 'taxonomy'));
     if (taxonomyDoc.exists()) {
@@ -94,14 +95,15 @@ export async function analyzeCommentComprehensive(comment: CommentData): Promise
   }
 
   // Step B: System Prompt
-  const prompt = `Sen 5 yıldızlı bir otelin Baş Veri Analistisin. Yorumu analiz edip konuları standartlaştırmalısın. Otelin sisteminde şu ana kadar öğrenilmiş Kategori Hafızası (Taxonomy) şudur: 
+  const prompt = `Sen 5 yıldızlı bir otelin Misafir Deneyimi Analistisin. Amacın misafir yorumunu parçalayarak konuları standartlaştırmaktır.
+Şu ana kadar öğrenilmiş Alt Konu Hafızası (Taxonomy) şudur: 
 ${JSON.stringify(currentTaxonomy, null, 2)}
 
-YENİ YORUM İÇİN KESİN KURALLAR:
-1. Birebir eşleşen veya anlamsal olarak çok benzeyen konularda KESİNLİKLE hafızadaki mevcut Departman, Ana Konu ve Alt Konu isimlerini kullan. Ufak kelime farkları için yeni kategori icat etme.
-2. Eğer yorum otelde TAMAMEN YENİ, hafızada hiç olmayan bir birimden veya konudan bahsediyorsa (Örn: Helikopter pisti, Aqua Park), profesyonel YEPYENİ bir Departman veya Konu başlığı belirle.
-3. Yorumdaki her farklı konuyu 0-100 arası 'score' ve 'sentiment' (positive/negative/neutral) ile değerlendir.
-Sonucu SADECE JSON formatında dön.
+KURALLAR:
+1. Yorumdaki her bir farklı konu için, ŞU SABİT ANA KATEGORİLERDEN (mainCategory) EN UYGUN OLANINI SEÇMEK ZORUNDASIN: [${HOTEL_MAIN_CATEGORIES.join(', ')}]. Başka bir ana kategori ASLA uydurma.
+2. 'subCategory' (Alt Konu) için ise hafızayı kontrol et. Eğer hafızada o Ana Kategori altında uygun bir alt konu varsa KESİNLİKLE onu kullan. Eğer yorum TAMAMEN YENİ bir detaydan bahsediyorsa yeni bir alt konu icat edebilirsin.
+3. Her eşleşme için 0-100 arası 'score' ve 'sentiment' (positive/negative/neutral) ata.
+Sonucu SADECE şu JSON formatında dön: { "overallScore": 85, "topics": [ { "mainCategory": "Yiyecek Deneyimi", "subCategory": "Yemek Sıcaklığı", "score": 30, "sentiment": "negative" } ] }
 
 Yorum:
 ${comment.COMMENT || ''}`;
@@ -121,13 +123,12 @@ ${comment.COMMENT || ''}`;
               items: {
                 type: Type.OBJECT,
                 properties: {
-                  department: { type: Type.STRING },
-                  mainTopic: { type: Type.STRING },
-                  subTopic: { type: Type.STRING },
+                  mainCategory: { type: Type.STRING },
+                  subCategory: { type: Type.STRING },
                   score: { type: Type.NUMBER },
                   sentiment: { type: Type.STRING }
                 },
-                required: ["department", "mainTopic", "subTopic", "score", "sentiment"]
+                required: ["mainCategory", "subCategory", "score", "sentiment"]
               }
             }
           },
@@ -161,26 +162,24 @@ ${comment.COMMENT || ''}`;
     // Step 3: Auto-Updating Taxonomy
     let taxonomyUpdated = false;
     const newTaxonomy = { ...currentTaxonomy };
-    if (!newTaxonomy.departments) newTaxonomy.departments = {};
+    if (!newTaxonomy.categories) newTaxonomy.categories = {};
 
     const topics: UnifiedTopicAnalysis[] = result.topics || [];
     
     topics.forEach(topic => {
-      const { department, mainTopic, subTopic } = topic;
+      const { mainCategory, subCategory } = topic;
       
-      if (!newTaxonomy.departments[department]) {
-        newTaxonomy.departments[department] = { mainTopics: {} };
-        taxonomyUpdated = true;
-      }
-      
-      if (!newTaxonomy.departments[department].mainTopics[mainTopic]) {
-        newTaxonomy.departments[department].mainTopics[mainTopic] = [];
-        taxonomyUpdated = true;
-      }
-      
-      if (!newTaxonomy.departments[department].mainTopics[mainTopic].includes(subTopic)) {
-        newTaxonomy.departments[department].mainTopics[mainTopic].push(subTopic);
-        taxonomyUpdated = true;
+      // Ensure mainCategory is one of the allowed ones (AI should follow rules but we guard)
+      if (HOTEL_MAIN_CATEGORIES.includes(mainCategory as any)) {
+        if (!newTaxonomy.categories[mainCategory]) {
+          newTaxonomy.categories[mainCategory] = [];
+          taxonomyUpdated = true;
+        }
+        
+        if (!newTaxonomy.categories[mainCategory].includes(subCategory)) {
+          newTaxonomy.categories[mainCategory].push(subCategory);
+          taxonomyUpdated = true;
+        }
       }
     });
 
