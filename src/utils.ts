@@ -1,5 +1,19 @@
 import { ApiSettings, GuestData, CommentData, CommentDetailData, GroupedCommentDetail, UnifiedTimelineAction } from './types';
 
+export const formatHtmlContent = (content: string | undefined | null) => {
+  if (!content) return '';
+  
+  // Eğer içerik düz metinse (HTML etiketi içermiyorsa)
+  if (!/<\/?[a-z][\s\S]*>/i.test(content)) {
+    return content.replace(/\n/g, '<br>');
+  }
+
+  // HTML ise Margin Collapsing'i önlemek için boş paragrafları zorunlu bloklara çevir
+  return content
+    .replace(/<p><br><\/p>/g, '<div style="height: 1.5em;"></div>')
+    .replace(/<p>\s*<\/p>/g, '<div style="height: 1.5em;"></div>');
+};
+
 export const parseElektraActions = (answerString: string | undefined): UnifiedTimelineAction[] => {
   if (!answerString) return [];
 

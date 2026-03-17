@@ -4,7 +4,7 @@ import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, F
 import { GuestData, CommentData, ApiSettings, GuestListTab, UnifiedTimelineAction } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { generateAIContent } from '../services/aiService';
-import { buildDynamicPayload, formatTRDate, groupCommentDetails, buildUnifiedTimeline } from '../utils';
+import { buildDynamicPayload, formatTRDate, groupCommentDetails, buildUnifiedTimeline, formatHtmlContent } from '../utils';
 import { TimelineView } from '../components/TimelineView';
 import { BulkAnalysisModal } from '../components/BulkAnalysisModal';
 import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch, onSnapshot, deleteDoc } from 'firebase/firestore';
@@ -1684,11 +1684,7 @@ The letter should be empathetic, professional, and address the guest. Do not inc
                   <div 
                     className="ql-editor font-serif text-slate-800 text-base" 
                     style={{ minHeight: '100%', padding: 0 }}
-                    dangerouslySetInnerHTML={{ 
-                      __html: /<\/?[a-z][\s\S]*>/i.test(generatedLetterContent) 
-                        ? generatedLetterContent 
-                        : generatedLetterContent.replace(/\n/g, '<br>') 
-                    }}
+                    dangerouslySetInnerHTML={{ __html: formatHtmlContent(generatedLetterContent) }}
                   />
                 </div>
               )}
@@ -1806,11 +1802,7 @@ The letter should be empathetic, professional, and address the guest. Do not inc
                         <div 
                           className="ql-editor font-serif text-slate-800 text-base"
                           style={{ minHeight: '100%', padding: 0 }}
-                          dangerouslySetInnerHTML={{ 
-                            __html: /<\/?[a-z][\s\S]*>/i.test(item.content) 
-                              ? item.content 
-                              : item.content.replace(/\n/g, '<br>') 
-                          }} 
+                          dangerouslySetInnerHTML={{ __html: formatHtmlContent(item.content) }} 
                         />
                       </div>
                       {index < bulkGeneratedLetters.length - 1 && (
@@ -2059,12 +2051,12 @@ The letter should be empathetic, professional, and address the guest. Do not inc
                     </button>
                   </div>
                   
-                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed min-h-[200px] whitespace-pre-wrap prose prose-slate max-w-none">
-                    <div dangerouslySetInnerHTML={{ 
-                      __html: /<\/?[a-z][\s\S]*>/i.test(showAITranslation ? translatedAILetter : generatedAILetter) 
-                        ? (showAITranslation ? translatedAILetter : generatedAILetter) 
-                        : (showAITranslation ? translatedAILetter : generatedAILetter).replace(/\n/g, '<br>') 
-                    }} />
+                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 ql-snow min-h-[200px]">
+                    <div 
+                      className="ql-editor text-slate-700 text-sm"
+                      style={{ padding: 0 }}
+                      dangerouslySetInnerHTML={{ __html: formatHtmlContent(showAITranslation ? translatedAILetter : generatedAILetter) }} 
+                    />
                   </div>
                 </div>
               )}
@@ -2153,13 +2145,13 @@ The letter should be empathetic, professional, and address the guest. Do not inc
 
               <div className="w-2/3">
                 <label className="block text-sm font-medium text-slate-700 mb-2">Şablon Önizleme</label>
-                <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 text-slate-700 text-sm leading-relaxed min-h-[300px] whitespace-pre-wrap prose prose-slate max-w-none">
+                <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 min-h-[300px] ql-snow">
                   {templatePreview ? (
-                    <div dangerouslySetInnerHTML={{ 
-                      __html: /<\/?[a-z][\s\S]*>/i.test(templatePreview) 
-                        ? templatePreview 
-                        : templatePreview.replace(/\n/g, '<br>') 
-                    }} />
+                    <div 
+                      className="ql-editor text-slate-700 text-sm"
+                      style={{ padding: 0 }}
+                      dangerouslySetInnerHTML={{ __html: formatHtmlContent(templatePreview) }} 
+                    />
                   ) : (
                     <div className="h-full flex items-center justify-center text-slate-400 italic">
                       Lütfen sol taraftan bir şablon seçin.
@@ -2263,11 +2255,7 @@ The letter should be empathetic, professional, and address the guest. Do not inc
                 <div 
                   className="ql-editor text-slate-700 text-sm"
                   style={{ padding: 0 }}
-                  dangerouslySetInnerHTML={{ 
-                    __html: /<\/?[a-z][\s\S]*>/i.test(selectedPreviewAction.content || '') 
-                      ? selectedPreviewAction.content || '' 
-                      : (selectedPreviewAction.content || '').replace(/\n/g, '<br>') 
-                  }} 
+                  dangerouslySetInnerHTML={{ __html: formatHtmlContent(selectedPreviewAction.content) }} 
                 />
               </div>
             </div>

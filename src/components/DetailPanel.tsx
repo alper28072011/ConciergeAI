@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CommentData, UnifiedTimelineAction, LetterTemplate, CommentAnalytics, PhonebookContact } from '../types';
 import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone, Save, Database, Brain, Plus, FileText, Send, Edit3, Trash2, X, PhoneCall } from 'lucide-react';
-import { formatTRDate, parseElektraActions, buildUnifiedTimeline } from '../utils';
+import { formatTRDate, parseElektraActions, buildUnifiedTimeline, formatHtmlContent } from '../utils';
 import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, where } from "firebase/firestore";
 import { db } from '../firebase';
 import { deleteCommentData } from '../services/firebaseService';
@@ -1181,11 +1181,7 @@ The letter should be empathetic, professional, and address the guest's feedback 
               <div className="bg-white p-8 rounded-xl shadow-sm min-h-[500px] border border-slate-200 font-serif ql-snow">
                 <div 
                   className="ql-editor p-0"
-                  dangerouslySetInnerHTML={{ 
-                    __html: /<\/?[a-z][\s\S]*>/i.test(selectedPreviewAction.content || '') 
-                      ? selectedPreviewAction.content || '' 
-                      : (selectedPreviewAction.content || '').replace(/\n/g, '<br>') 
-                  }}
+                  dangerouslySetInnerHTML={{ __html: formatHtmlContent(selectedPreviewAction.content) }}
                 />
               </div>
             </div>
