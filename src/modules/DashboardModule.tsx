@@ -20,7 +20,9 @@ export function DashboardModule() {
   const [isLoading, setIsLoading] = useState(true);
   
   // Filters
-  const [dateFilter, setDateFilter] = useState<'7days' | 'thisMonth' | 'thisSeason'>('thisMonth');
+  const [dateFilter, setDateFilter] = useState<'7days' | '30days' | 'thisYear' | 'custom'>('30days');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
   const [selectedTopic, setSelectedTopic] = useState<string>('all');
   
@@ -84,6 +86,8 @@ export function DashboardModule() {
 
   const filteredAnalytics = useMemo(() => {
     const now = new Date();
+    const currentYear = now.getFullYear();
+    
     return analytics.filter(item => {
       const itemDate = new Date(item.createdAt || item.date);
       
@@ -91,11 +95,15 @@ export function DashboardModule() {
       let dateMatch = true;
       if (dateFilter === '7days') {
         dateMatch = (now.getTime() - itemDate.getTime()) <= 7 * 24 * 60 * 60 * 1000;
-      } else if (dateFilter === 'thisMonth') {
-        dateMatch = itemDate.getMonth() === now.getMonth() && itemDate.getFullYear() === now.getFullYear();
-      } else if (dateFilter === 'thisSeason') {
-        // Assuming season is last 6 months for simplicity
-        dateMatch = (now.getTime() - itemDate.getTime()) <= 180 * 24 * 60 * 60 * 1000;
+      } else if (dateFilter === '30days') {
+        dateMatch = (now.getTime() - itemDate.getTime()) <= 30 * 24 * 60 * 60 * 1000;
+      } else if (dateFilter === 'thisYear') {
+        dateMatch = itemDate.getFullYear() === currentYear;
+      } else if (dateFilter === 'custom' && customStartDate && customEndDate) {
+        const start = new Date(customStartDate);
+        const end = new Date(customEndDate);
+        end.setHours(23, 59, 59, 999);
+        dateMatch = itemDate >= start && itemDate <= end;
       }
 
       if (!dateMatch) return false;
@@ -253,7 +261,7 @@ export function DashboardModule() {
       3. Öne Çıkan Gündem Konuları (Trending Topics)
       4. Aksiyon Önerileri (Kaliteyi artırmak için 3 somut öneri)
       
-      Veriler (${dateFilter === '7days' ? 'Son 7 Gün' : dateFilter === 'thisMonth' ? 'Bu Ay' : 'Bu Sezon'}):
+      Veriler (${dateFilter === '7days' ? 'Son 7 Gün' : dateFilter === '30days' ? 'Son 30 Gün' : dateFilter === 'thisYear' ? 'Bu Yıl' : 'Özel Tarih Aralığı'}):
       - Toplam Yorum Sayısı: ${kpis.count}
       - Ortalama Memnuniyet: %${kpis.avgScore}
       - En Başarılı Departman: ${kpis.bestDept}
@@ -346,18 +354,42 @@ export function DashboardModule() {
               Son 7 Gün
             </button>
             <button
-              onClick={() => setDateFilter('thisMonth')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === 'thisMonth' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              onClick={() => setDateFilter('30days')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === '30days' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
             >
-              Bu Ay
+              Son 30 Gün
             </button>
             <button
-              onClick={() => setDateFilter('thisSeason')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === 'thisSeason' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              onClick={() => setDateFilter('thisYear')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === 'thisYear' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
             >
-              Bu Sezon
+              Bu Yıl
+            </button>
+            <button
+              onClick={() => setDateFilter('custom')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${dateFilter === 'custom' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              Özel Tarih Aralığı
             </button>
           </div>
+
+          {dateFilter === 'custom' && (
+            <div className="flex items-center gap-2">
+              <input 
+                type="date" 
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+              <span className="text-slate-400">-</span>
+              <input 
+                type="date" 
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="border border-slate-300 rounded-lg px-2 py-1.5 text-sm text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+              />
+            </div>
+          )}
 
           <select
             value={selectedDepartment}
