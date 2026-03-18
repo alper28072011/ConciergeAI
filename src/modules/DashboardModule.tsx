@@ -9,7 +9,8 @@ import {
   BarChart3, TrendingUp, AlertCircle, MessageSquare, Calendar as CalendarIcon, 
   Award, AlertTriangle, FileText, Download, X, Save, Edit3, Trash2, Clock, 
   Filter, Brain, Globe, Database, CheckCircle2, PieChart as PieChartIcon,
-  ChevronRight, ArrowUpRight, ArrowDownRight, Printer, Sparkles, Layout
+  ChevronRight, ArrowUpRight, ArrowDownRight, Printer, Sparkles, Layout,
+  Settings, Eye, EyeOff, LayoutGrid, List
 } from 'lucide-react';
 import { generateAIContent } from '../services/aiService';
 import { 
@@ -22,6 +23,14 @@ import { jsPDF } from 'jspdf';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#71717a'];
 const RADAR_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
+
+const AVAILABLE_MODULES = [
+  { id: 'kpi_cards', label: 'KPI Özet Kartları', icon: LayoutGrid },
+  { id: 'category_satisfaction', label: 'Kategori Bazlı Memnuniyet', icon: BarChart3 },
+  { id: 'source_analysis', label: 'Kanal Dağılımı (OTA)', icon: PieChartIcon },
+  { id: 'nationality_analysis', label: 'Uyruk Memnuniyet Endeksi', icon: Globe },
+  { id: 'hotel_agenda', label: 'Otel Gündemi & Alt Konular', icon: List },
+];
 
 export function DashboardModule() {
   const [analytics, setAnalytics] = useState<CommentAnalytics[]>([]);
@@ -38,6 +47,8 @@ export function DashboardModule() {
   const [selectedNationalities, setSelectedNationalities] = useState<string[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [globalViewMode, setGlobalViewMode] = useState<'chart' | 'table'>('chart');
+  const [activeModules, setActiveModules] = useState<string[]>(['kpi_cards', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda']);
+  const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string }>({ type: 'all', value: 'all' });
   
   // Report State
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -160,6 +171,19 @@ export function DashboardModule() {
       return true;
     });
   }, [analytics, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources]);
+
+  const drillDownComments = useMemo(() => {
+    if (drillDownFilter.type === 'all') return filteredAnalytics;
+    
+    return filteredAnalytics.filter(item => {
+      if (drillDownFilter.type === 'category') {
+        return item.topics?.some(t => t.subCategory === drillDownFilter.value || t.mainCategory === drillDownFilter.value);
+      }
+      if (drillDownFilter.type === 'source') return item.source === drillDownFilter.value;
+      if (drillDownFilter.type === 'nationality') return item.nationality === drillDownFilter.value;
+      return true;
+    });
+  }, [filteredAnalytics, drillDownFilter]);
 
   const dashboardData = useMemo(() => getDashboardData(filteredAnalytics), [filteredAnalytics]);
 
@@ -315,34 +339,112 @@ export function DashboardModule() {
   return (
     <div className="h-full bg-[#f8fafc] overflow-hidden flex flex-col">
       {/* Main Cockpit Layout */}
-      <div className="max-w-[1600px] w-[95%] mx-auto h-full flex gap-6 py-6 overflow-hidden">
+      <div className="w-full h-full flex gap-6 py-6 overflow-hidden px-6">
         
         {/* Left Column: Control Panel (Sticky) */}
-        <aside className="w-1/4 min-w-[320px] flex flex-col gap-6 sticky top-0 h-fit">
+        <aside className="w-80 shrink-0 flex flex-col gap-6 sticky top-0 h-[calc(100vh-3rem)] overflow-y-auto pr-2 custom-scrollbar pb-6">
           {/* Brand & AI Status */}
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg shadow-indigo-200">
-                <Brain className="text-white" size={24} />
-              </div>
-              <div>
-                <h2 className="text-xl font-bold text-slate-900 tracking-tight">Yönetim Kokpiti</h2>
-                <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 uppercase tracking-wider">
-                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  AI Analiz Aktif
+          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full -mr-16 -mt-16 opacity-50" />
+            <div className="relative z-10">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-xl shadow-indigo-200">
+                  <Brain className="text-white" size={28} />
+                </div>
+                <div>
+                  <h2 className="text-xl font-black text-slate-900 tracking-tight leading-none">Yönetim Kokpiti</h2>
+                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 uppercase tracking-widest mt-1">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    AI Analiz Aktif
+                  </div>
                 </div>
               </div>
+              <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                Veri odaklı karar destek sistemi. Tüm kanallardan gelen misafir geri bildirimleri anlık olarak işlenmektedir.
+              </p>
             </div>
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Veri odaklı karar destek sistemi. Tüm kanallardan gelen misafir geri bildirimleri anlık olarak işlenmektedir.
-            </p>
+          </div>
+
+          {/* View Mode Toggle (Modernized) */}
+          <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
+            <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+              <Layout size={14} className="text-indigo-500" />
+              Görünüm Tercihi
+            </h3>
+            <div className="flex p-1 bg-slate-100 rounded-2xl">
+              <button
+                onClick={() => setGlobalViewMode('chart')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                  globalViewMode === 'chart' 
+                    ? 'bg-white text-indigo-600 shadow-md' 
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <BarChart3 size={16} />
+                Grafik
+              </button>
+              <button
+                onClick={() => setGlobalViewMode('table')}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                  globalViewMode === 'table' 
+                    ? 'bg-white text-indigo-600 shadow-md' 
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <Database size={16} />
+                Tablo
+              </button>
+            </div>
+          </div>
+
+          {/* Report Structure (Modular Configuration) */}
+          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                <Settings size={14} className="text-indigo-500" />
+                Rapor Yapılandırması
+              </h3>
+              <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                {activeModules.length}/{AVAILABLE_MODULES.length}
+              </span>
+            </div>
+            <div className="space-y-2">
+              {AVAILABLE_MODULES.map(module => {
+                const isActive = activeModules.includes(module.id);
+                return (
+                  <button
+                    key={module.id}
+                    onClick={() => {
+                      if (isActive) {
+                        setActiveModules(prev => prev.filter(id => id !== module.id));
+                      } else {
+                        setActiveModules(prev => [...prev, module.id]);
+                      }
+                    }}
+                    className={`w-full flex items-center justify-between p-3 rounded-2xl transition-all border ${
+                      isActive 
+                        ? 'bg-indigo-50/50 border-indigo-100 text-indigo-700' 
+                        : 'bg-white border-slate-50 text-slate-500 hover:border-slate-200'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-2 rounded-xl ${isActive ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}>
+                        <module.icon size={16} />
+                      </div>
+                      <span className="text-xs font-bold">{module.label}</span>
+                    </div>
+                    {isActive ? <Eye size={14} /> : <EyeOff size={14} className="opacity-30" />}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Filters Section */}
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col gap-5">
+          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col gap-6">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <Filter size={16} className="text-indigo-500" />
+              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                <Filter size={14} className="text-indigo-500" />
                 Denetim Filtreleri
               </h3>
               <button 
@@ -353,14 +455,14 @@ export function DashboardModule() {
                   setSelectedNationalities([]);
                   setSelectedSources([]);
                 }}
-                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 uppercase tracking-tight"
+                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 uppercase tracking-widest"
               >
                 Sıfırla
               </button>
             </div>
 
             {/* Date Presets */}
-            <div className="space-y-2">
+            <div className="space-y-3">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Rapor Dönemi</label>
               <div className="grid grid-cols-2 gap-2">
                 {[
@@ -372,9 +474,9 @@ export function DashboardModule() {
                   <button
                     key={preset.id}
                     onClick={() => setDateFilter(preset.id as any)}
-                    className={`px-3 py-2 text-xs font-semibold rounded-xl border transition-all ${
+                    className={`px-3 py-2.5 text-[11px] font-bold rounded-xl border transition-all ${
                       dateFilter === preset.id 
-                        ? 'bg-indigo-50 border-indigo-200 text-indigo-700 shadow-sm' 
+                        ? 'bg-slate-900 border-slate-900 text-white shadow-lg shadow-slate-200' 
                         : 'bg-white border-slate-100 text-slate-600 hover:border-slate-300'
                     }`}
                   >
@@ -386,35 +488,42 @@ export function DashboardModule() {
 
             {dateFilter === 'custom' && (
               <div className="grid grid-cols-2 gap-2 animate-in fade-in slide-in-from-top-2">
-                <input 
-                  type="date" 
-                  value={customStartDate}
-                  onChange={(e) => setCustomStartDate(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                />
-                <input 
-                  type="date" 
-                  value={customEndDate}
-                  onChange={(e) => setCustomEndDate(e.target.value)}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
-                />
+                <div className="space-y-1">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase ml-1">Başlangıç</span>
+                  <input 
+                    type="date" 
+                    value={customStartDate}
+                    onChange={(e) => setCustomStartDate(e.target.value)}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase ml-1">Bitiş</span>
+                  <input 
+                    type="date" 
+                    value={customEndDate}
+                    onChange={(e) => setCustomEndDate(e.target.value)}
+                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                  />
+                </div>
               </div>
             )}
 
             {/* Multi-selects for Source & Nationality */}
-            <div className="space-y-4">
+            <div className="space-y-5">
               <div className="space-y-2">
                 <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Kanal Kaynağı</label>
                 <select
                   multiple
                   value={selectedSources}
                   onChange={(e) => setSelectedSources(Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => option.value))}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 h-24"
+                  className="w-full border border-slate-200 rounded-2xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 h-28 custom-scrollbar"
                 >
                   {allSources.map(source => (
-                    <option key={source} value={source}>{source}</option>
+                    <option key={source} value={source} className="py-1 px-2 rounded-lg mb-1">{source}</option>
                   ))}
                 </select>
+                <p className="text-[9px] text-slate-400 italic">Birden fazla seçmek için Ctrl/Cmd tuşuna basın.</p>
               </div>
 
               <div className="space-y-2">
@@ -423,10 +532,10 @@ export function DashboardModule() {
                   multiple
                   value={selectedNationalities}
                   onChange={(e) => setSelectedNationalities(Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => option.value))}
-                  className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 h-24"
+                  className="w-full border border-slate-200 rounded-2xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 h-28 custom-scrollbar"
                 >
                   {allNationalities.map(nat => (
-                    <option key={nat} value={nat}>{nat}</option>
+                    <option key={nat} value={nat} className="py-1 px-2 rounded-lg mb-1">{nat}</option>
                   ))}
                 </select>
               </div>
@@ -437,71 +546,45 @@ export function DashboardModule() {
           <div className="flex flex-col gap-3">
             <button
               onClick={handleGenerateDashboardReport}
-              className="w-full bg-slate-900 text-white p-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-3 hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 group"
+              className="w-full bg-indigo-600 text-white p-4 rounded-3xl font-bold text-sm flex items-center justify-center gap-3 hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 group"
             >
-              <Sparkles size={18} className="text-amber-400 group-hover:scale-110 transition-transform" />
+              <Sparkles size={18} className="text-amber-300 group-hover:scale-110 transition-transform" />
               AI Yönetici Özeti Üret
             </button>
-            <button
-              onClick={handleExportPdf}
-              className="w-full bg-white text-slate-700 border border-slate-200 p-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-3 hover:bg-slate-50 transition-all shadow-sm"
-            >
-              <Printer size={18} className="text-slate-400" />
-              Raporu PDF İndir
-            </button>
-            <button
-              onClick={() => setIsSavedReportsModalOpen(true)}
-              className="w-full bg-white text-slate-700 border border-slate-200 p-4 rounded-2xl font-bold text-sm flex items-center justify-center gap-3 hover:bg-slate-50 transition-all shadow-sm"
-            >
-              <Database size={18} className="text-slate-400" />
-              Kayıtlı Raporlar ({savedReports.length})
-            </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={handleExportPdf}
+                className="bg-white text-slate-700 border border-slate-200 p-4 rounded-3xl font-bold text-[11px] flex flex-col items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
+              >
+                <Printer size={18} className="text-slate-400" />
+                PDF İndir
+              </button>
+              <button
+                onClick={() => setIsSavedReportsModalOpen(true)}
+                className="bg-white text-slate-700 border border-slate-200 p-4 rounded-3xl font-bold text-[11px] flex flex-col items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
+              >
+                <Database size={18} className="text-slate-400" />
+                Kayıtlı ({savedReports.length})
+              </button>
+            </div>
           </div>
         </aside>
 
-        {/* Right Column: Graphics Area (Scrollable) */}
-        <main className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar" ref={dashboardRef}>
+        {/* Middle Column: Graphics Area (Scrollable) */}
+        <main className="flex-1 flex flex-col gap-6 overflow-y-auto pr-4 custom-scrollbar pb-20" ref={dashboardRef}>
           
-          {/* Global View Mode Toggle */}
-          <div className="flex items-center justify-between bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
-                <Layout size={20} className="text-indigo-600" />
-              </div>
-              <div>
-                <h4 className="text-sm font-bold text-slate-900">Rapor Görünüm Modu</h4>
-                <p className="text-[10px] text-slate-500 font-medium">Tüm analizleri grafik veya tablo olarak listeleyin</p>
-              </div>
+          {activeModules.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200 text-slate-400">
+              <LayoutGrid size={48} className="mb-4 opacity-20" />
+              <p className="font-bold text-lg">Rapor İçeriği Boş</p>
+              <p className="text-sm">Sol panelden görüntülemek istediğiniz rapor parçalarını seçebilirsiniz.</p>
             </div>
-            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
-              <button
-                onClick={() => setGlobalViewMode('chart')}
-                className={`px-6 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                  globalViewMode === 'chart' 
-                    ? 'bg-white text-indigo-600 shadow-sm' 
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <BarChart3 size={16} />
-                Grafik Görünümü
-              </button>
-              <button
-                onClick={() => setGlobalViewMode('table')}
-                className={`px-6 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                  globalViewMode === 'table' 
-                    ? 'bg-white text-indigo-600 shadow-sm' 
-                    : 'text-slate-500 hover:text-slate-700'
-                }`}
-              >
-                <Database size={16} />
-                Tablo Görünümü
-              </button>
-            </div>
-          </div>
+          )}
 
           {/* Row 1: KPI Cards */}
-          <div className="grid grid-cols-4 gap-4">
-            {[
+          {activeModules.includes('kpi_cards') && (
+            <div className="grid grid-cols-4 gap-4">
+              {[
               { 
                 label: 'Ort. Memnuniyet', 
                 value: `%${dashboardData.kpis.avgScore}`, 
@@ -529,7 +612,17 @@ export function DashboardModule() {
                 color: 'red' 
               }
             ].map((kpi, idx) => (
-              <div key={idx} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden group">
+              <div 
+                key={idx} 
+                className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden group cursor-pointer hover:border-indigo-300 transition-all"
+                onClick={() => {
+                  if (kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı') {
+                    setDrillDownFilter({ type: 'category', value: kpi.value });
+                  } else {
+                    setDrillDownFilter({ type: 'all', value: 'all' });
+                  }
+                }}
+              >
                 <div className={`absolute top-0 right-0 w-24 h-24 bg-${kpi.color}-50 rounded-full -mr-12 -mt-12 transition-transform group-hover:scale-110`} />
                 <div className="relative z-10">
                   <div className="flex items-center justify-between mb-3">
@@ -549,47 +642,30 @@ export function DashboardModule() {
               </div>
             ))}
           </div>
+          )}
 
           {/* Row 2: Category Performance (Horizontal Bar Chart or Table) */}
+          {activeModules.includes('category_satisfaction') && (
           <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Kategori Bazlı Memnuniyet</h3>
                 <p className="text-xs text-slate-500">Ana ve alt kategorilerdeki misafir deneyim puanları</p>
               </div>
-              <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
-                <button
-                  onClick={() => setGlobalViewMode('chart')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                    globalViewMode === 'chart' 
-                      ? 'bg-white text-indigo-600 shadow-sm' 
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <BarChart3 size={14} />
-                  Grafik
-                </button>
-                <button
-                  onClick={() => setGlobalViewMode('table')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                    globalViewMode === 'table' 
-                      ? 'bg-white text-indigo-600 shadow-sm' 
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <Database size={14} />
-                  Tablo
-                </button>
-              </div>
             </div>
 
             {globalViewMode === 'chart' ? (
               <div className="h-[300px] w-full relative min-w-0 min-h-0">
-                <ResponsiveContainer width="99%" height="100%" minWidth={0} minHeight={0} debounce={100}>
+                <ResponsiveContainer width="100%" height={300}>
                   <BarChart 
                     layout="vertical" 
                     data={dashboardData.categoryPerformance} 
                     margin={{ left: 40, right: 40 }}
+                    onClick={(data: any) => {
+                      if (data && data.activeLabel) {
+                        setDrillDownFilter({ type: 'category', value: data.activeLabel });
+                      }
+                    }}
                   >
                     <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
                     <XAxis type="number" domain={[0, 100]} hide />
@@ -628,7 +704,11 @@ export function DashboardModule() {
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {dashboardData.mostMentioned.map((item, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 transition-colors group">
+                      <tr 
+                        key={idx} 
+                        className="hover:bg-slate-50 transition-colors group cursor-pointer"
+                        onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                      >
                         <td className="py-3 px-4">
                           <span className="text-[10px] font-bold text-slate-400 uppercase bg-slate-100 px-2 py-0.5 rounded">
                             {item.mainCategory}
@@ -670,44 +750,28 @@ export function DashboardModule() {
               </div>
             )}
           </section>
+          )}
 
           {/* Row 3: Source Analysis */}
+          {activeModules.includes('source_analysis') && (
           <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Kanal Dağılımı</h3>
                 <p className="text-xs text-slate-500">Yorumların geldiği platformlar ve kanal bazlı performans</p>
               </div>
-              <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
-                <button
-                  onClick={() => setGlobalViewMode('chart')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                    globalViewMode === 'chart' 
-                      ? 'bg-white text-indigo-600 shadow-sm' 
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <PieChartIcon size={14} />
-                  Grafik
-                </button>
-                <button
-                  onClick={() => setGlobalViewMode('table')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                    globalViewMode === 'table' 
-                      ? 'bg-white text-indigo-600 shadow-sm' 
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <Database size={14} />
-                  Tablo
-                </button>
-              </div>
             </div>
 
             {globalViewMode === 'chart' ? (
               <div className="h-[300px] w-full relative min-w-0 min-h-0">
-                <ResponsiveContainer width="99%" height="100%" minWidth={0} minHeight={0} debounce={100}>
-                  <PieChart>
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart
+                    onClick={(data: any) => {
+                      if (data && data.activePayload && data.activePayload[0]) {
+                        setDrillDownFilter({ type: 'source', value: data.activePayload[0].name });
+                      }
+                    }}
+                  >
                     <Pie
                       data={dashboardData.sourceAnalysis}
                       innerRadius={80}
@@ -739,7 +803,11 @@ export function DashboardModule() {
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {dashboardData.sourceAnalysis.map((item, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                      <tr 
+                        key={idx} 
+                        className="hover:bg-slate-50 transition-colors cursor-pointer"
+                        onClick={() => setDrillDownFilter({ type: 'source', value: item.name })}
+                      >
                         <td className="py-3 px-4">
                           <div className="flex items-center gap-3">
                             <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
@@ -779,44 +847,32 @@ export function DashboardModule() {
               </div>
             )}
           </section>
+          )}
 
           {/* Row 4: Nationality Analysis */}
+          {activeModules.includes('nationality_analysis') && (
           <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Uyruk Memnuniyet Endeksi</h3>
                 <p className="text-xs text-slate-500">Pazar bazlı ortalama skorlar ve misafir dağılımı</p>
               </div>
-              <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
-                <button
-                  onClick={() => setGlobalViewMode('chart')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                    globalViewMode === 'chart' 
-                      ? 'bg-white text-indigo-600 shadow-sm' 
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <Globe size={14} />
-                  Grafik
-                </button>
-                <button
-                  onClick={() => setGlobalViewMode('table')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                    globalViewMode === 'table' 
-                      ? 'bg-white text-indigo-600 shadow-sm' 
-                      : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  <Database size={14} />
-                  Tablo
-                </button>
-              </div>
             </div>
 
             {globalViewMode === 'chart' ? (
               <div className="h-[350px] w-full relative min-w-0 min-h-0">
-                <ResponsiveContainer width="99%" height="100%" minWidth={0} minHeight={0} debounce={100}>
-                  <RadarChart cx="50%" cy="50%" outerRadius="80%" data={dashboardData.nationalityAnalysis.slice(0, 8)}>
+                <ResponsiveContainer width="100%" height={350}>
+                  <RadarChart 
+                    cx="50%" 
+                    cy="50%" 
+                    outerRadius="80%" 
+                    data={dashboardData.nationalityAnalysis.slice(0, 8)}
+                    onClick={(data: any) => {
+                      if (data && data.activeLabel) {
+                        setDrillDownFilter({ type: 'nationality', value: data.activeLabel });
+                      }
+                    }}
+                  >
                     <PolarGrid stroke="#e2e8f0" />
                     <PolarAngleAxis dataKey="name" tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }} />
                     <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 9 }} />
@@ -845,7 +901,11 @@ export function DashboardModule() {
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {dashboardData.nationalityAnalysis.map((item, idx) => (
-                      <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                      <tr 
+                        key={idx} 
+                        className="hover:bg-slate-50 transition-colors cursor-pointer"
+                        onClick={() => setDrillDownFilter({ type: 'nationality', value: item.name })}
+                      >
                         <td className="py-3 px-4">
                           <span className="text-sm font-semibold text-slate-700">{item.name}</span>
                         </td>
@@ -882,8 +942,10 @@ export function DashboardModule() {
               </div>
             )}
           </section>
+          )}
 
           {/* Row 4: Hotel Agenda & Sub-Topics (Tables) */}
+          {activeModules.includes('hotel_agenda') && (
           <div className="grid grid-cols-3 gap-6">
             {/* Most Mentioned */}
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -895,7 +957,11 @@ export function DashboardModule() {
               </div>
               <div className="divide-y divide-slate-100">
                 {dashboardData.mostMentioned.slice(0, 6).map((item, idx) => (
-                  <div key={idx} className="p-3 hover:bg-slate-50 transition-colors flex items-center justify-between group">
+                  <div 
+                    key={idx} 
+                    className="p-3 hover:bg-slate-50 transition-colors flex items-center justify-between group cursor-pointer"
+                    onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                  >
                     <div>
                       <p className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{item.subCategory}</p>
                       <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
@@ -919,7 +985,11 @@ export function DashboardModule() {
               </div>
               <div className="divide-y divide-slate-100">
                 {dashboardData.topPositive.slice(0, 6).map((item, idx) => (
-                  <div key={idx} className="p-3 hover:bg-emerald-50/20 transition-colors flex items-center justify-between">
+                  <div 
+                    key={idx} 
+                    className="p-3 hover:bg-emerald-50/20 transition-colors flex items-center justify-between cursor-pointer"
+                    onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                  >
                     <div>
                       <p className="text-xs font-bold text-slate-800">{item.subCategory}</p>
                       <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
@@ -945,7 +1015,11 @@ export function DashboardModule() {
               </div>
               <div className="divide-y divide-slate-100">
                 {dashboardData.topNegative.slice(0, 6).map((item, idx) => (
-                  <div key={idx} className="p-3 hover:bg-red-50/20 transition-colors flex items-center justify-between">
+                  <div 
+                    key={idx} 
+                    className="p-3 hover:bg-red-50/20 transition-colors flex items-center justify-between cursor-pointer"
+                    onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                  >
                     <div>
                       <p className="text-xs font-bold text-slate-800">{item.subCategory}</p>
                       <div className="flex items-center gap-2">
@@ -962,10 +1036,83 @@ export function DashboardModule() {
               </div>
             </div>
           </div>
+          )}
 
           {/* Bottom Spacing */}
           <div className="h-12 shrink-0" />
         </main>
+
+        {/* Right Column: Live Comments (Drill-down) */}
+        <section className="w-[420px] shrink-0 flex flex-col gap-4 sticky top-0 h-[calc(100vh-3rem)] overflow-hidden">
+          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
+            <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                  <MessageSquare size={16} className="text-indigo-500" />
+                  Yorum Detayları
+                </h3>
+                <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">
+                  {drillDownFilter.type === 'all' ? 'Tüm Filtrelenmiş Yorumlar' : `${drillDownFilter.value} Analizi`}
+                </p>
+              </div>
+              {drillDownFilter.type !== 'all' && (
+                <button 
+                  onClick={() => setDrillDownFilter({ type: 'all', value: 'all' })}
+                  className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 transition-colors"
+                  title="Filtreyi Temizle"
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col gap-3">
+              {drillDownComments.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 opacity-50">
+                  <MessageSquare size={40} className="mb-2" />
+                  <p className="text-xs font-bold">Yorum Bulunamadı</p>
+                </div>
+              ) : (
+                drillDownComments.map((comment, idx) => (
+                  <div key={idx} className="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">
+                          {comment.source}
+                        </span>
+                        <span className="text-[10px] font-bold text-slate-400">
+                          {new Date(comment.date).toLocaleDateString('tr-TR')}
+                        </span>
+                      </div>
+                      <div className={`text-xs font-black ${
+                        comment.score >= 80 ? 'text-emerald-600' :
+                        comment.score >= 60 ? 'text-blue-600' :
+                        comment.score >= 40 ? 'text-amber-600' :
+                        'text-red-600'
+                      }`}>
+                        {comment.score}/100
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-700 leading-relaxed italic">"{comment.comment}"</p>
+                    <div className="mt-3 pt-3 border-t border-slate-50 flex flex-wrap gap-1">
+                      {comment.topics?.map((topic, tidx) => (
+                        <span key={tidx} className="text-[8px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase">
+                          {topic.subCategory}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            
+            <div className="p-4 border-t border-slate-100 bg-slate-50/30">
+              <p className="text-[10px] font-bold text-slate-400 text-center uppercase">
+                Toplam {drillDownComments.length} Yorum Listeleniyor
+              </p>
+            </div>
+          </div>
+        </section>
       </div>
 
       {/* Report Generation Modal */}
