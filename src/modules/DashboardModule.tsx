@@ -1076,7 +1076,7 @@ export function DashboardModule() {
               ) : (
                 drillDownComments.map((comment, idx) => {
                   const isExpanded = expandedComments[comment.commentId];
-                  const commentText = comment.comment || '';
+                  const commentText = comment.comment || (comment as any).rawText || (comment as any).COMMENT || 'Yorum metni sistemde bulunamadı.';
                   const isLong = commentText.length > 150;
                   const displayedText = isExpanded ? commentText : commentText.slice(0, 150);
 
