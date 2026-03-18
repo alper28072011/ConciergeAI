@@ -584,8 +584,8 @@ export function DashboardModule() {
             </div>
 
             {globalViewMode === 'chart' ? (
-              <div className="h-[300px] min-w-0">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <div className="h-[300px] w-full relative min-w-0 min-h-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} debounce={100}>
                   <BarChart 
                     layout="vertical" 
                     data={dashboardData.categoryPerformance} 
@@ -705,8 +705,8 @@ export function DashboardModule() {
             </div>
 
             {globalViewMode === 'chart' ? (
-              <div className="h-[300px] min-w-0">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <div className="h-[300px] w-full relative min-w-0 min-h-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} debounce={100}>
                   <PieChart>
                     <Pie
                       data={dashboardData.sourceAnalysis}
@@ -814,8 +814,8 @@ export function DashboardModule() {
             </div>
 
             {globalViewMode === 'chart' ? (
-              <div className="h-[350px] min-w-0">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+              <div className="h-[350px] w-full relative min-w-0 min-h-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0} debounce={100}>
                   <RadarChart cx="50%" cy="50%" outerRadius="80%" data={dashboardData.nationalityAnalysis.slice(0, 8)}>
                     <PolarGrid stroke="#e2e8f0" />
                     <PolarAngleAxis dataKey="name" tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }} />
