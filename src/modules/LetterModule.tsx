@@ -5,7 +5,7 @@ import { BulkAnalysisModal } from '../components/BulkAnalysisModal';
 import { CommentData, ApiSettings } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { buildDynamicPayload, groupCommentDetails } from '../utils';
-import { collection, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { deleteCommentData } from '../services/firebaseService';
 import { Sparkles, Brain, Trash2 } from 'lucide-react';
@@ -15,6 +15,7 @@ export function LetterModule() {
   const [selectedCommentIds, setSelectedCommentIds] = useState<string[]>([]);
   const [comments, setComments] = useState<CommentData[]>([]);
   const [isFetching, setIsFetching] = useState(false);
+  const [viewMode, setViewMode] = useState<'spacious' | 'compact'>('spacious');
 
   // Pagination & Lazy Loading State
   const [fetchLimit, setFetchLimit] = useState<number>(100);
@@ -29,6 +30,22 @@ export function LetterModule() {
   const [isBulkResetting, setIsBulkResetting] = useState(false);
 
   useEffect(() => {
+    // Load UI preferences
+    const loadPrefs = async () => {
+      try {
+        const prefDoc = await getDoc(doc(db, 'config', 'ui_preferences'));
+        if (prefDoc.exists()) {
+          const data = prefDoc.data();
+          if (data.letterModuleViewMode) {
+            setViewMode(data.letterModuleViewMode);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading UI preferences:", error);
+      }
+    };
+    loadPrefs();
+
     const unsubscribe = onSnapshot(collection(db, 'agenda_notes'), (snapshot) => {
       const notes: Record<string, any> = {};
       snapshot.forEach((doc) => {
@@ -212,6 +229,17 @@ export function LetterModule() {
     }
   };
 
+  const handleViewModeChange = async (mode: 'spacious' | 'compact') => {
+    setViewMode(mode);
+    try {
+      await setDoc(doc(db, 'config', 'ui_preferences'), {
+        letterModuleViewMode: mode
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error saving UI preference:", error);
+    }
+  };
+
   const selectedCommentsForBulk = comments.filter(c => selectedCommentIds.includes(c.ID));
 
   return (
@@ -270,6 +298,8 @@ export function LetterModule() {
           hasMoreData={hasMoreData}
           isLoadingMore={isLoadingMore}
           agendaNotes={agendaNotes}
+          viewMode={viewMode}
+          onViewModeChange={handleViewModeChange}
         />
         <DetailPanel comment={selectedComment} />
       </div>

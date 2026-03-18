@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CommentData } from '../types';
-import { MessageSquare, Calendar, Globe, RefreshCw, DoorOpen, ChevronDown, Filter } from 'lucide-react';
+import { MessageSquare, Calendar, Globe, RefreshCw, DoorOpen, ChevronDown, Filter, LayoutTemplate } from 'lucide-react';
 import { formatTRDate } from '../utils';
 
 interface SidebarProps {
@@ -17,6 +17,8 @@ interface SidebarProps {
   hasMoreData: boolean;
   isLoadingMore: boolean;
   agendaNotes?: Record<string, any>;
+  viewMode: 'spacious' | 'compact';
+  onViewModeChange: (mode: 'spacious' | 'compact') => void;
 }
 
 export function Sidebar({ 
@@ -32,7 +34,9 @@ export function Sidebar({
   setFetchLimit,
   hasMoreData,
   isLoadingMore,
-  agendaNotes = {}
+  agendaNotes = {},
+  viewMode,
+  onViewModeChange
 }: SidebarProps) {
   return (
     <div className="w-1/3 min-w-[320px] max-w-[400px] bg-white border-r border-slate-200 flex flex-col h-full print:hidden">
@@ -42,7 +46,22 @@ export function Sidebar({
             <MessageSquare size={20} className="text-slate-500" />
             Gelen Yorumlar
           </h2>
-          <span className="text-xs font-medium text-slate-400 bg-slate-200/50 px-2 py-1 rounded-full">{comments.length} Mesaj</span>
+          <div className="flex items-center gap-1 bg-slate-200/50 p-1 rounded-lg">
+            <button 
+              onClick={() => onViewModeChange('spacious')}
+              className={`p-1.5 rounded-md transition-all ${viewMode === 'spacious' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              title="Ferah Görünüm"
+            >
+              <Filter size={14} />
+            </button>
+            <button 
+              onClick={() => onViewModeChange('compact')}
+              className={`p-1.5 rounded-md transition-all ${viewMode === 'compact' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+              title="Sıkıştırılmış Görünüm"
+            >
+              <LayoutTemplate size={14} />
+            </button>
+          </div>
         </div>
         
         <div className="flex flex-col gap-3 relative">
@@ -102,16 +121,68 @@ export function Sidebar({
         {comments.map((comment) => {
           const note = agendaNotes[String(comment.ID)];
           const score = note?.sentimentScore;
+          const isSelected = selectedId === comment.ID;
           
+          if (viewMode === 'compact') {
+            return (
+              <div
+                key={comment.ID || Math.random().toString()}
+                className={`px-3 py-2 rounded-lg border transition-all duration-200 cursor-pointer relative overflow-hidden ${
+                  isSelected
+                    ? 'bg-slate-50 border-slate-900 shadow-sm'
+                    : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'
+                }`}
+                onClick={() => onSelect(comment.ID)}
+              >
+                {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600" />}
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                    checked={selectedIds.includes(comment.ID)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      onToggleSelect(comment.ID);
+                    }}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-center gap-2">
+                      <h3 className={`font-semibold text-slate-900 truncate text-xs ${isSelected ? 'text-indigo-600' : ''}`}>
+                        {comment.RESNAMEID_LOOKUP ? comment.RESNAMEID_LOOKUP.split('-')[1] : 'Misafir Yorumu'}
+                      </h3>
+                      <span className="text-[10px] text-slate-400 whitespace-nowrap font-medium">
+                        {formatTRDate(comment.COMMENTDATE)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2 mt-0.5">
+                      <p className="text-[11px] text-slate-500 truncate flex-1">
+                        {comment.COMMENT}
+                      </p>
+                      {score !== undefined && score !== null && (
+                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          score >= 0.8 ? 'bg-emerald-500' :
+                          score >= 0.6 ? 'bg-blue-500' :
+                          score >= 0.4 ? 'bg-yellow-500' :
+                          'bg-red-500'
+                        }`} />
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          }
+
           return (
             <div
               key={comment.ID || Math.random().toString()}
-              className={`p-4 rounded-xl border transition-all duration-200 ${
-                selectedId === comment.ID
+              className={`p-4 rounded-xl border transition-all duration-200 relative overflow-hidden ${
+                isSelected
                   ? 'bg-slate-50 border-slate-900 shadow-sm'
                   : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'
               }`}
             >
+              {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600" />}
               <div className="flex items-start gap-3 mb-2">
                 <input 
                   type="checkbox" 

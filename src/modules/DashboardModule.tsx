@@ -17,7 +17,8 @@ import {
   LineChart, Line, PieChart, Pie, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
 } from 'recharts';
 import { getDashboardData } from '../utils/biEngine';
-import html2pdf from 'html2pdf.js';
+import { toPng } from 'html-to-image';
+import { jsPDF } from 'jspdf';
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#71717a'];
 const RADAR_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
@@ -36,6 +37,7 @@ export function DashboardModule() {
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('all');
   const [selectedNationalities, setSelectedNationalities] = useState<string[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [categoryViewMode, setCategoryViewMode] = useState<'chart' | 'table'>('chart');
   
   // Report State
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -173,19 +175,37 @@ export function DashboardModule() {
     return Array.from(sources).sort();
   }, [analytics]);
 
-  const handleExportPdf = () => {
+  const handleExportPdf = async () => {
     if (!dashboardRef.current) return;
     
-    const element = dashboardRef.current;
-    const opt = {
-      margin: 10,
-      filename: `Otel_CRM_Kokpit_Raporu_${new Date().toISOString().split('T')[0]}.pdf`,
-      image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'landscape' as const }
-    };
+    try {
+      const element = dashboardRef.current;
+      const dataUrl = await toPng(element, {
+        quality: 0.95,
+        pixelRatio: 2,
+        backgroundColor: '#ffffff',
+        style: {
+          transform: 'scale(1)',
+          transformOrigin: 'top left'
+        }
+      });
 
-    html2pdf().set(opt).from(element).save();
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      const imgProps = pdf.getImageProperties(dataUrl);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`Otel_CRM_Kokpit_Raporu_${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (error) {
+      console.error('PDF export error:', error);
+      alert('PDF oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.');
+    }
   };
 
   const handleGenerateDashboardReport = async () => {
@@ -493,46 +513,125 @@ export function DashboardModule() {
             ))}
           </div>
 
-          {/* Row 2: Category Performance (Horizontal Bar Chart) */}
+          {/* Row 2: Category Performance (Horizontal Bar Chart or Table) */}
           <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h3 className="text-lg font-bold text-slate-900">Kategori Bazlı Memnuniyet</h3>
-                <p className="text-xs text-slate-500">Ana kategorilerdeki misafir deneyim puanları</p>
+                <p className="text-xs text-slate-500">Ana ve alt kategorilerdeki misafir deneyim puanları</p>
               </div>
-              <BarChart3 className="text-slate-300" size={24} />
-            </div>
-            <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart 
-                  layout="vertical" 
-                  data={dashboardData.categoryPerformance} 
-                  margin={{ left: 40, right: 40 }}
+              <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+                <button
+                  onClick={() => setCategoryViewMode('chart')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                    categoryViewMode === 'chart' 
+                      ? 'bg-white text-indigo-600 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
                 >
-                  <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
-                  <XAxis type="number" domain={[0, 100]} hide />
-                  <YAxis 
-                    dataKey="name" 
-                    type="category" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }}
-                    width={100}
-                  />
-                  <Tooltip 
-                    cursor={{ fill: '#f8fafc' }}
-                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                  />
-                  <Bar 
-                    dataKey="score" 
-                    fill="#4f46e5" 
-                    radius={[0, 4, 4, 0]} 
-                    barSize={20}
-                    label={{ position: 'right', fontSize: 11, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+                  <BarChart3 size={14} />
+                  Grafik
+                </button>
+                <button
+                  onClick={() => setCategoryViewMode('table')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                    categoryViewMode === 'table' 
+                      ? 'bg-white text-indigo-600 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <Database size={14} />
+                  Tablo
+                </button>
+              </div>
             </div>
+
+            {categoryViewMode === 'chart' ? (
+              <div className="h-[300px] min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                  <BarChart 
+                    layout="vertical" 
+                    data={dashboardData.categoryPerformance} 
+                    margin={{ left: 40, right: 40 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                    <XAxis type="number" domain={[0, 100]} hide />
+                    <YAxis 
+                      dataKey="name" 
+                      type="category" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }}
+                      width={100}
+                    />
+                    <Tooltip 
+                      cursor={{ fill: '#f8fafc' }}
+                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                    />
+                    <Bar 
+                      dataKey="score" 
+                      fill="#4f46e5" 
+                      radius={[0, 4, 4, 0]} 
+                      barSize={20}
+                      label={{ position: 'right', fontSize: 11, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ana Kategori</th>
+                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Alt Kategori</th>
+                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {dashboardData.mostMentioned.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50 transition-colors group">
+                        <td className="py-3 px-4">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase bg-slate-100 px-2 py-0.5 rounded">
+                            {item.mainCategory}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-sm font-semibold text-slate-700">
+                          {item.subCategory}
+                        </td>
+                        <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">
+                          {item.count}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
+                              <div 
+                                className={`h-full rounded-full ${
+                                  item.avgScore >= 80 ? 'bg-emerald-500' :
+                                  item.avgScore >= 60 ? 'bg-blue-500' :
+                                  item.avgScore >= 40 ? 'bg-amber-500' :
+                                  'bg-red-500'
+                                }`}
+                                style={{ width: `${item.avgScore}%` }}
+                              />
+                            </div>
+                            <span className={`text-xs font-bold w-10 ${
+                              item.avgScore >= 80 ? 'text-emerald-600' :
+                              item.avgScore >= 60 ? 'text-blue-600' :
+                              item.avgScore >= 40 ? 'text-amber-600' :
+                              'text-red-600'
+                            }`}>
+                              %{item.avgScore}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </section>
 
           {/* Row 3: Source & Nationality Analysis */}
@@ -546,8 +645,8 @@ export function DashboardModule() {
                 </div>
                 <PieChartIcon className="text-slate-300" size={24} />
               </div>
-              <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[250px] min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <PieChart>
                     <Pie
                       data={dashboardData.sourceAnalysis}
@@ -579,8 +678,8 @@ export function DashboardModule() {
                 </div>
                 <Globe className="text-slate-300" size={24} />
               </div>
-              <div className="h-[250px]">
-                <ResponsiveContainer width="100%" height="100%">
+              <div className="h-[250px] min-w-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <RadarChart cx="50%" cy="50%" outerRadius="80%" data={dashboardData.nationalityAnalysis.slice(0, 6)}>
                     <PolarGrid stroke="#e2e8f0" />
                     <PolarAngleAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 600, fill: '#64748b' }} />

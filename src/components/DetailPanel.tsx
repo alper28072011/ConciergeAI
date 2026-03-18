@@ -701,27 +701,71 @@ ${JSON.stringify(timelineActions.map(a => ({
               </div>
             )}
             
-            {/* Deep Analytics Tag Cloud */}
+            {/* Deep Analytics Infographic */}
             {deepAnalytics && deepAnalytics.topics && deepAnalytics.topics.length > 0 && (
-              <div className="mt-4 p-4 bg-slate-50 rounded-xl border border-slate-100">
-                <div className="text-xs font-semibold text-slate-500 mb-3 uppercase tracking-wider">Kapsamlı Zeka Analizi Sonuçları</div>
-                <div className="flex flex-col gap-2">
+              <div className="mt-6 p-6 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <div className="p-2 bg-purple-100 rounded-lg">
+                      <Brain size={20} className="text-purple-600" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-bold text-slate-800">Kapsamlı Zeka Analizi</h4>
+                      <p className="text-[10px] text-slate-500 uppercase tracking-wider font-medium">Yapay Zeka Destekli Detaylı Kategori Analizi</p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-black text-slate-900 leading-none">%{deepAnalytics.overallScore}</div>
+                    <div className="text-[10px] text-slate-400 font-bold uppercase">Genel Skor</div>
+                  </div>
+                </div>
+
+                <div className="space-y-5">
                   {deepAnalytics.topics.map((topic, idx) => (
-                    <div 
-                      key={idx} 
-                      className={`inline-flex items-center px-3 py-2 rounded-lg text-sm font-medium border shadow-sm w-fit ${
-                        topic.score > 70 ? 'bg-emerald-50 text-emerald-800 border-emerald-200' :
-                        topic.score >= 40 ? 'bg-amber-50 text-amber-800 border-amber-200' :
-                        'bg-red-50 text-red-800 border-red-200'
-                      }`}
-                    >
-                      <span className="font-bold opacity-70 mr-2">[{topic.mainCategory}]</span>
-                      <span>{topic.subCategory}</span>
-                      <span className="ml-3 font-bold opacity-90">
-                        (%{topic.score} {topic.score > 70 ? '🟩' : topic.score >= 40 ? '🟨' : '🟥'})
-                      </span>
+                    <div key={idx} className="group">
+                      <div className="flex justify-between items-end mb-1.5">
+                        <div className="flex flex-col">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tight leading-none mb-1">
+                            {topic.mainCategory}
+                          </span>
+                          <span className="text-sm font-semibold text-slate-700 leading-none">
+                            {topic.subCategory}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-bold ${
+                            topic.score > 70 ? 'text-emerald-600' :
+                            topic.score >= 40 ? 'text-amber-600' :
+                            'text-red-600'
+                          }`}>
+                            %{topic.score}
+                          </span>
+                          <span className="text-sm">
+                            {topic.score > 70 ? '🟩' : topic.score >= 40 ? '🟨' : '🟥'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden border border-slate-50">
+                        <div 
+                          className={`h-full transition-all duration-1000 ease-out rounded-full ${
+                            topic.score > 70 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]' :
+                            topic.score >= 40 ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.3)]' :
+                            'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.3)]'
+                          }`}
+                          style={{ width: `${topic.score}%` }}
+                        />
+                      </div>
                     </div>
                   ))}
+                </div>
+                
+                <div className="mt-8 pt-4 border-t border-slate-100 flex justify-between items-center text-[10px] text-slate-400 font-medium italic">
+                  <span>* Analiz sonuçları yapay zeka tarafından yorum içeriğine göre üretilmiştir.</span>
+                  <div className="flex gap-4">
+                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-emerald-500" /> Pozitif</span>
+                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-amber-500" /> Nötr</span>
+                    <span className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-500" /> Negatif</span>
+                  </div>
                 </div>
               </div>
             )}
