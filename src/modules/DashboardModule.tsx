@@ -236,56 +236,55 @@ export function DashboardModule() {
   };
 
   const handleRepairMissingComments = async () => {
-    const missingComments = analytics.filter(item => 
-      !item.comment || 
-      item.comment === 'Yorum metni sistemde bulunamadı.' || 
-      item.comment.trim() === ''
-    );
-
-    const missingIds = missingComments.map(item => Number(item.commentId)).filter(id => !isNaN(id));
-
-    if (missingIds.length === 0) {
-      alert('Eksik metin bulunamadı, tüm veriler sağlam.');
-      return;
-    }
-
-    if (!window.confirm(`${missingIds.length} adet eksik yorum metni tespit edildi. Elektra API üzerinden senkronize edilsin mi?`)) {
-      return;
-    }
-
     setIsRepairing(true);
     try {
-      const savedSettings = localStorage.getItem('hotelApiSettings');
-      if (!savedSettings) {
-        throw new Error('API ayarları bulunamadı.');
-      }
-      const settings = JSON.parse(savedSettings);
-      if (!settings.commentPayloadTemplate) {
-        throw new Error('Yorum sorgu şablonu bulunamadı.');
+      const missingComments = analytics.filter(c => !c.comment || c.comment === 'Yorum metni sistemde bulunamadı.');
+      if (missingComments.length === 0) {
+        alert('Harika! Tüm yorum metinleri zaten sistemde mevcut.');
+        return;
       }
 
-      const payload = JSON.parse(settings.commentPayloadTemplate);
-      if (!payload.Where) payload.Where = [];
+      const missingIds = missingComments.map(c => Number(c.commentId));
       
-      // Add the filter for missing IDs
-      payload.Where.push({ "Column": "ID", "Operator": "IN", "Value": missingIds });
+      let settings: any = {};
+      const savedSettings = localStorage.getItem('hotelApiSettings');
+      if (savedSettings) settings = JSON.parse(savedSettings);
+
+      if (!settings.commentPayloadTemplate) {
+        alert('Elektra API ayarları bulunamadı.');
+        return;
+      }
+
+      const basePayload = JSON.parse(settings.commentPayloadTemplate);
+      const payload = {
+        ...basePayload,
+        Select: ["ID", "COMMENT"],
+        Where: [
+          { Column: "ID", Operator: "IN", Value: missingIds }
+        ],
+        Paging: { Current: 1, ItemsPerPage: 9999 }
+      };
 
       const response = await executeElektraQuery(payload);
       
-      if (!Array.isArray(response)) {
-        throw new Error('API geçersiz yanıt döndürdü.');
+      if (!response || !Array.isArray(response)) {
+        throw new Error("Elektra API'den yanıt alınamadı.");
       }
 
-      // Update Firebase documents
-      await Promise.all(response.map(async (item: any) => {
-        const docRef = doc(db, 'comment_analytics', String(item.ID));
-        await updateDoc(docRef, { comment: item.COMMENT });
-      }));
+      let updatedCount = 0;
+      for (const item of response) {
+        if (item.ID && item.COMMENT) {
+          await updateDoc(doc(db, 'comment_analytics', String(item.ID)), {
+            comment: item.COMMENT
+          });
+          updatedCount++;
+        }
+      }
 
-      alert('Eksik veriler başarıyla onarıldı ve senkronize edildi.');
+      alert(updatedCount + ' adet eksik yorum metni Elektra üzerinden başarıyla onarıldı!');
     } catch (error: any) {
-      console.error("Repair error:", error);
-      alert(`Onarım sırasında hata oluştu: ${error.message}`);
+      console.error("Onarım hatası:", error);
+      alert("Onarım sırasında hata: " + error.message);
     } finally {
       setIsRepairing(false);
     }
@@ -629,14 +628,10 @@ export function DashboardModule() {
             <button
               onClick={handleRepairMissingComments}
               disabled={isRepairing}
-              className={`w-full p-3 rounded-2xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all border ${
-                isRepairing 
-                  ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' 
-                  : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 shadow-sm'
-              }`}
+              className="w-full bg-amber-50 text-amber-700 border border-amber-200 p-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-amber-100 transition-all shadow-sm mt-3"
             >
-              <Database size={14} className={isRepairing ? 'animate-pulse' : ''} />
-              {isRepairing ? 'Eksik Metinler Onarılıyor...' : 'Eksik Metinleri Senkronize Et'}
+              <Database size={16} className={isRepairing ? "animate-bounce" : ""} />
+              {isRepairing ? 'Veritabanı Onarılıyor...' : 'Eksik Metinleri Senkronize Et'}
             </button>
           </div>
         </aside>
