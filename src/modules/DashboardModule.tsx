@@ -9,7 +9,7 @@ import {
   BarChart3, TrendingUp, AlertCircle, MessageSquare, Calendar as CalendarIcon, 
   Award, AlertTriangle, FileText, Download, X, Save, Edit3, Trash2, Clock, 
   Filter, Brain, Globe, Database, CheckCircle2, PieChart as PieChartIcon,
-  ChevronRight, ArrowUpRight, ArrowDownRight, Printer, Sparkles
+  ChevronRight, ArrowUpRight, ArrowDownRight, Printer, Sparkles, Layout
 } from 'lucide-react';
 import { generateAIContent } from '../services/aiService';
 import { 
@@ -37,7 +37,7 @@ export function DashboardModule() {
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('all');
   const [selectedNationalities, setSelectedNationalities] = useState<string[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
-  const [categoryViewMode, setCategoryViewMode] = useState<'chart' | 'table'>('chart');
+  const [globalViewMode, setGlobalViewMode] = useState<'chart' | 'table'>('chart');
   
   // Report State
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -462,6 +462,43 @@ export function DashboardModule() {
         {/* Right Column: Graphics Area (Scrollable) */}
         <main className="flex-1 flex flex-col gap-6 overflow-y-auto pr-2 custom-scrollbar" ref={dashboardRef}>
           
+          {/* Global View Mode Toggle */}
+          <div className="flex items-center justify-between bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center">
+                <Layout size={20} className="text-indigo-600" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-slate-900">Rapor Görünüm Modu</h4>
+                <p className="text-[10px] text-slate-500 font-medium">Tüm analizleri grafik veya tablo olarak listeleyin</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+              <button
+                onClick={() => setGlobalViewMode('chart')}
+                className={`px-6 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                  globalViewMode === 'chart' 
+                    ? 'bg-white text-indigo-600 shadow-sm' 
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <BarChart3 size={16} />
+                Grafik Görünümü
+              </button>
+              <button
+                onClick={() => setGlobalViewMode('table')}
+                className={`px-6 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                  globalViewMode === 'table' 
+                    ? 'bg-white text-indigo-600 shadow-sm' 
+                    : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                <Database size={16} />
+                Tablo Görünümü
+              </button>
+            </div>
+          </div>
+
           {/* Row 1: KPI Cards */}
           <div className="grid grid-cols-4 gap-4">
             {[
@@ -522,9 +559,9 @@ export function DashboardModule() {
               </div>
               <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
                 <button
-                  onClick={() => setCategoryViewMode('chart')}
+                  onClick={() => setGlobalViewMode('chart')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                    categoryViewMode === 'chart' 
+                    globalViewMode === 'chart' 
                       ? 'bg-white text-indigo-600 shadow-sm' 
                       : 'text-slate-500 hover:text-slate-700'
                   }`}
@@ -533,9 +570,9 @@ export function DashboardModule() {
                   Grafik
                 </button>
                 <button
-                  onClick={() => setCategoryViewMode('table')}
+                  onClick={() => setGlobalViewMode('table')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
-                    categoryViewMode === 'table' 
+                    globalViewMode === 'table' 
                       ? 'bg-white text-indigo-600 shadow-sm' 
                       : 'text-slate-500 hover:text-slate-700'
                   }`}
@@ -546,7 +583,7 @@ export function DashboardModule() {
               </div>
             </div>
 
-            {categoryViewMode === 'chart' ? (
+            {globalViewMode === 'chart' ? (
               <div className="h-[300px] min-w-0">
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <BarChart 
@@ -634,24 +671,47 @@ export function DashboardModule() {
             )}
           </section>
 
-          {/* Row 3: Source & Nationality Analysis */}
-          <div className="grid grid-cols-2 gap-6">
-            {/* Source Analysis (Donut) */}
-            <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">Kanal Dağılımı</h3>
-                  <p className="text-xs text-slate-500">Yorumların geldiği platformlar</p>
-                </div>
-                <PieChartIcon className="text-slate-300" size={24} />
+          {/* Row 3: Source Analysis */}
+          <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Kanal Dağılımı</h3>
+                <p className="text-xs text-slate-500">Yorumların geldiği platformlar ve kanal bazlı performans</p>
               </div>
-              <div className="h-[250px] min-w-0">
+              <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+                <button
+                  onClick={() => setGlobalViewMode('chart')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                    globalViewMode === 'chart' 
+                      ? 'bg-white text-indigo-600 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <PieChartIcon size={14} />
+                  Grafik
+                </button>
+                <button
+                  onClick={() => setGlobalViewMode('table')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                    globalViewMode === 'table' 
+                      ? 'bg-white text-indigo-600 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <Database size={14} />
+                  Tablo
+                </button>
+              </div>
+            </div>
+
+            {globalViewMode === 'chart' ? (
+              <div className="h-[300px] min-w-0">
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <PieChart>
                     <Pie
                       data={dashboardData.sourceAnalysis}
-                      innerRadius={60}
-                      outerRadius={80}
+                      innerRadius={80}
+                      outerRadius={110}
                       paddingAngle={8}
                       dataKey="count"
                       nameKey="name"
@@ -667,22 +727,98 @@ export function DashboardModule() {
                   </PieChart>
                 </ResponsiveContainer>
               </div>
-            </section>
-
-            {/* Nationality Analysis (Radar) */}
-            <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between mb-6">
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">Uyruk Memnuniyet Endeksi</h3>
-                  <p className="text-xs text-slate-500">Pazar bazlı ortalama skorlar</p>
-                </div>
-                <Globe className="text-slate-300" size={24} />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kanal Kaynağı</th>
+                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {dashboardData.sourceAnalysis.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                            <span className="text-sm font-semibold text-slate-700">{item.name}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">
+                          {item.count}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
+                              <div 
+                                className={`h-full rounded-full ${
+                                  item.avgScore >= 80 ? 'bg-emerald-500' :
+                                  item.avgScore >= 60 ? 'bg-blue-500' :
+                                  item.avgScore >= 40 ? 'bg-amber-500' :
+                                  'bg-red-500'
+                                }`}
+                                style={{ width: `${item.avgScore}%` }}
+                              />
+                            </div>
+                            <span className={`text-xs font-bold w-10 ${
+                              item.avgScore >= 80 ? 'text-emerald-600' :
+                              item.avgScore >= 60 ? 'text-blue-600' :
+                              item.avgScore >= 40 ? 'text-amber-600' :
+                              'text-red-600'
+                            }`}>
+                              %{item.avgScore}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <div className="h-[250px] min-w-0">
+            )}
+          </section>
+
+          {/* Row 4: Nationality Analysis */}
+          <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Uyruk Memnuniyet Endeksi</h3>
+                <p className="text-xs text-slate-500">Pazar bazlı ortalama skorlar ve misafir dağılımı</p>
+              </div>
+              <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+                <button
+                  onClick={() => setGlobalViewMode('chart')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                    globalViewMode === 'chart' 
+                      ? 'bg-white text-indigo-600 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <Globe size={14} />
+                  Grafik
+                </button>
+                <button
+                  onClick={() => setGlobalViewMode('table')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-2 ${
+                    globalViewMode === 'table' 
+                      ? 'bg-white text-indigo-600 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  <Database size={14} />
+                  Tablo
+                </button>
+              </div>
+            </div>
+
+            {globalViewMode === 'chart' ? (
+              <div className="h-[350px] min-w-0">
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-                  <RadarChart cx="50%" cy="50%" outerRadius="80%" data={dashboardData.nationalityAnalysis.slice(0, 6)}>
+                  <RadarChart cx="50%" cy="50%" outerRadius="80%" data={dashboardData.nationalityAnalysis.slice(0, 8)}>
                     <PolarGrid stroke="#e2e8f0" />
-                    <PolarAngleAxis dataKey="name" tick={{ fontSize: 10, fontWeight: 600, fill: '#64748b' }} />
+                    <PolarAngleAxis dataKey="name" tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }} />
                     <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 9 }} />
                     <Radar
                       name="Memnuniyet Skoru"
@@ -697,8 +833,55 @@ export function DashboardModule() {
                   </RadarChart>
                 </ResponsiveContainer>
               </div>
-            </section>
-          </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-100">
+                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Uyruk / Pazar</th>
+                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {dashboardData.nationalityAnalysis.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50 transition-colors">
+                        <td className="py-3 px-4">
+                          <span className="text-sm font-semibold text-slate-700">{item.name}</span>
+                        </td>
+                        <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">
+                          {item.count}
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center gap-3">
+                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
+                              <div 
+                                className={`h-full rounded-full ${
+                                  item.avgScore >= 80 ? 'bg-emerald-500' :
+                                  item.avgScore >= 60 ? 'bg-blue-500' :
+                                  item.avgScore >= 40 ? 'bg-amber-500' :
+                                  'bg-red-500'
+                                }`}
+                                style={{ width: `${item.avgScore}%` }}
+                              />
+                            </div>
+                            <span className={`text-xs font-bold w-10 ${
+                              item.avgScore >= 80 ? 'text-emerald-600' :
+                              item.avgScore >= 60 ? 'text-blue-600' :
+                              item.avgScore >= 40 ? 'text-amber-600' :
+                              'text-red-600'
+                            }`}>
+                              %{item.avgScore}
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
 
           {/* Row 4: Hotel Agenda & Sub-Topics (Tables) */}
           <div className="grid grid-cols-3 gap-6">
