@@ -49,6 +49,7 @@ export function DashboardModule() {
   const [globalViewMode, setGlobalViewMode] = useState<'chart' | 'table'>('chart');
   const [activeModules, setActiveModules] = useState<string[]>(['kpi_cards', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda']);
   const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string }>({ type: 'all', value: 'all' });
+  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   
   // Report State
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -337,9 +338,9 @@ export function DashboardModule() {
   }
 
   return (
-    <div className="h-full bg-[#f8fafc] overflow-hidden flex flex-col">
+    <div className="h-full w-full bg-[#f8fafc] overflow-hidden flex flex-col">
       {/* Main Cockpit Layout */}
-      <div className="w-full h-full flex gap-6 py-6 overflow-hidden px-6">
+      <div className="w-full max-w-[1850px] mx-auto h-full flex justify-between gap-8 py-6 overflow-hidden px-6">
         
         {/* Left Column: Control Panel (Sticky) */}
         <aside className="w-80 shrink-0 flex flex-col gap-6 sticky top-0 h-[calc(100vh-3rem)] overflow-y-auto pr-2 custom-scrollbar pb-6">
@@ -571,7 +572,7 @@ export function DashboardModule() {
         </aside>
 
         {/* Middle Column: Graphics Area (Scrollable) */}
-        <main className="flex-1 flex flex-col gap-6 overflow-y-auto pr-4 custom-scrollbar pb-20" ref={dashboardRef}>
+        <main className="flex-1 min-w-0 flex flex-col gap-6 overflow-y-auto pr-4 custom-scrollbar pb-20" ref={dashboardRef}>
           
           {activeModules.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200 text-slate-400">
@@ -1073,36 +1074,55 @@ export function DashboardModule() {
                   <p className="text-xs font-bold">Yorum Bulunamadı</p>
                 </div>
               ) : (
-                drillDownComments.map((comment, idx) => (
-                  <div key={idx} className="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group">
-                    <div className="flex items-center justify-between mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">
-                          {comment.source}
-                        </span>
-                        <span className="text-[10px] font-bold text-slate-400">
-                          {new Date(comment.date).toLocaleDateString('tr-TR')}
-                        </span>
+                drillDownComments.map((comment, idx) => {
+                  const isExpanded = expandedComments[comment.commentId];
+                  const commentText = comment.comment || '';
+                  const isLong = commentText.length > 150;
+                  const displayedText = isExpanded ? commentText : commentText.slice(0, 150);
+
+                  return (
+                    <div key={idx} className="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group">
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">
+                            {comment.source}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-400">
+                            {new Date(comment.date).toLocaleDateString('tr-TR')}
+                          </span>
+                        </div>
+                        <div className={`text-xs font-black ${
+                          comment.overallScore >= 80 ? 'text-emerald-600' :
+                          comment.overallScore >= 60 ? 'text-blue-600' :
+                          comment.overallScore >= 40 ? 'text-amber-600' :
+                          'text-red-600'
+                        }`}>
+                          {comment.overallScore}/100
+                        </div>
                       </div>
-                      <div className={`text-xs font-black ${
-                        comment.score >= 80 ? 'text-emerald-600' :
-                        comment.score >= 60 ? 'text-blue-600' :
-                        comment.score >= 40 ? 'text-amber-600' :
-                        'text-red-600'
-                      }`}>
-                        {comment.score}/100
+                      <div className="relative">
+                        <p className="text-xs text-slate-700 leading-relaxed italic">
+                          "{displayedText}{!isExpanded && isLong ? '...' : ''}"
+                        </p>
+                        {isLong && (
+                          <button 
+                            onClick={() => setExpandedComments(prev => ({ ...prev, [comment.commentId]: !isExpanded }))}
+                            className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 mt-1 uppercase tracking-tighter"
+                          >
+                            {isExpanded ? 'Daha Az Göster' : 'Devamını Oku'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-slate-50 flex flex-wrap gap-1">
+                        {comment.topics?.map((topic, tidx) => (
+                          <span key={tidx} className="text-[8px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase">
+                            {topic.subCategory}
+                          </span>
+                        ))}
                       </div>
                     </div>
-                    <p className="text-xs text-slate-700 leading-relaxed italic">"{comment.comment}"</p>
-                    <div className="mt-3 pt-3 border-t border-slate-50 flex flex-wrap gap-1">
-                      {comment.topics?.map((topic, tidx) => (
-                        <span key={tidx} className="text-[8px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase">
-                          {topic.subCategory}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
             
