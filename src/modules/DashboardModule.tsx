@@ -61,7 +61,60 @@ export function DashboardModule() {
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
   const [editingReportType, setEditingReportType] = useState<string>('dashboard_summary');
   const [isSavingReport, setIsSavingReport] = useState(false);
-  const [isRepairing, setIsRepairing] = useState(false);
+
+  // Otonom Yorum Senkronizasyonu (Silent Background Sync)
+  useEffect(() => {
+    const syncMissingComments = async () => {
+      try {
+        // 1. Eksik metinli yorumları tespit et
+        const missingComments = analytics.filter(c => !c.comment || c.comment.trim() === '' || c.comment === 'Yorum metni sistemde bulunamadı.');
+        if (missingComments.length === 0) return; // Eksik yoksa dur.
+
+        const missingIds = missingComments.map(c => Number(c.commentId)).filter(id => !isNaN(id));
+        if (missingIds.length === 0) return;
+
+        // 2. API Ayarlarını çek
+        const savedSettings = localStorage.getItem('hotelApiSettings');
+        if (!savedSettings) return;
+        const settings = JSON.parse(savedSettings);
+        if (!settings.commentPayloadTemplate) return;
+
+        // 3. Elektra IN operatörü ile toplu sorgu hazırla
+        const basePayload = JSON.parse(settings.commentPayloadTemplate);
+        const payload = {
+          ...basePayload,
+          Select: ["ID", "COMMENT"],
+          Where: [
+            ...((basePayload.Where && Array.isArray(basePayload.Where)) ? basePayload.Where : []),
+            { Column: "ID", Operator: "IN", Value: missingIds }
+          ],
+          Paging: { Current: 1, ItemsPerPage: 5000 }
+        };
+
+        // 4. Arka planda sessizce çek
+        const response = await executeElektraQuery(payload);
+        
+        // 5. Firebase'i sessizce güncelle (onSnapshot sayesinde UI otomatik yenilenecek)
+        if (response && Array.isArray(response)) {
+          response.forEach(async (item: any) => {
+            if (item.ID && item.COMMENT) {
+              const docRef = doc(db, 'comment_analytics', String(item.ID));
+              await updateDoc(docRef, { comment: item.COMMENT }).catch(e => console.warn("Sessiz güncelleme atlandı:", e));
+            }
+          });
+        }
+      } catch (error) {
+        console.error("Arka plan yorum senkronizasyonu hatası:", error);
+      }
+    };
+
+    // Sayfa yüklenmesini engellememek için 2 saniye gecikmeli (debounce) çalıştır
+    const timeoutId = setTimeout(() => {
+      syncMissingComments();
+    }, 2000);
+
+    return () => clearTimeout(timeoutId);
+  }, [analytics]);
 
   useEffect(() => {
     setIsLoading(true);
@@ -232,61 +285,6 @@ export function DashboardModule() {
     } catch (error) {
       console.error('PDF export error:', error);
       alert('PDF oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.');
-    }
-  };
-
-  const handleRepairMissingComments = async () => {
-    setIsRepairing(true);
-    try {
-      const missingComments = analytics.filter(c => !c.comment || c.comment === 'Yorum metni sistemde bulunamadı.');
-      if (missingComments.length === 0) {
-        alert('Harika! Tüm yorum metinleri zaten sistemde mevcut.');
-        return;
-      }
-
-      const missingIds = missingComments.map(c => Number(c.commentId));
-      
-      let settings: any = {};
-      const savedSettings = localStorage.getItem('hotelApiSettings');
-      if (savedSettings) settings = JSON.parse(savedSettings);
-
-      if (!settings.commentPayloadTemplate) {
-        alert('Elektra API ayarları bulunamadı.');
-        return;
-      }
-
-      const basePayload = JSON.parse(settings.commentPayloadTemplate);
-      const payload = {
-        ...basePayload,
-        Select: ["ID", "COMMENT"],
-        Where: [
-          { Column: "ID", Operator: "IN", Value: missingIds }
-        ],
-        Paging: { Current: 1, ItemsPerPage: 9999 }
-      };
-
-      const response = await executeElektraQuery(payload);
-      
-      if (!response || !Array.isArray(response)) {
-        throw new Error("Elektra API'den yanıt alınamadı.");
-      }
-
-      let updatedCount = 0;
-      for (const item of response) {
-        if (item.ID && item.COMMENT) {
-          await updateDoc(doc(db, 'comment_analytics', String(item.ID)), {
-            comment: item.COMMENT
-          });
-          updatedCount++;
-        }
-      }
-
-      alert(updatedCount + ' adet eksik yorum metni Elektra üzerinden başarıyla onarıldı!');
-    } catch (error: any) {
-      console.error("Onarım hatası:", error);
-      alert("Onarım sırasında hata: " + error.message);
-    } finally {
-      setIsRepairing(false);
     }
   };
 
@@ -625,14 +623,6 @@ export function DashboardModule() {
                 Kayıtlı ({savedReports.length})
               </button>
             </div>
-            <button
-              onClick={handleRepairMissingComments}
-              disabled={isRepairing}
-              className="w-full bg-amber-50 text-amber-700 border border-amber-200 p-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 hover:bg-amber-100 transition-all shadow-sm mt-3"
-            >
-              <Database size={16} className={isRepairing ? "animate-bounce" : ""} />
-              {isRepairing ? 'Veritabanı Onarılıyor...' : 'Eksik Metinleri Senkronize Et'}
-            </button>
           </div>
         </aside>
 
@@ -1139,47 +1129,40 @@ export function DashboardModule() {
                   <p className="text-xs font-bold">Yorum Bulunamadı</p>
                 </div>
               ) : (
-                drillDownComments.map((comment, idx) => {
-                  const isExpanded = expandedComments[comment.commentId];
-                  const commentText = comment.comment || (comment as any).rawText || (comment as any).COMMENT || 'Yorum metni sistemde bulunamadı.';
-                  const isLong = commentText.length > 150;
-                  const displayedText = isExpanded ? commentText : commentText.slice(0, 150);
+                drillDownComments.map((commentData, idx) => {
+                  const localText = commentData.comment || (commentData as any).rawText || (commentData as any).COMMENT || '';
+                  const isExpanded = !!expandedComments[commentData.commentId];
+                  const isLong = localText.length > 150;
+                  const displayedText = isExpanded ? localText : localText.slice(0, 150);
 
                   return (
-                    <div key={idx} className="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group">
+                    <div key={commentData.commentId || idx} className="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group">
                       <div className="flex items-center justify-between mb-2">
                         <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">
-                            {comment.source}
-                          </span>
-                          <span className="text-[10px] font-bold text-slate-400">
-                            {new Date(comment.date).toLocaleDateString('tr-TR')}
-                          </span>
+                          <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">{commentData.source}</span>
+                          <span className="text-[10px] font-bold text-slate-400">{new Date(commentData.date).toLocaleDateString('tr-TR')}</span>
                         </div>
-                        <div className={`text-xs font-black ${
-                          comment.overallScore >= 80 ? 'text-emerald-600' :
-                          comment.overallScore >= 60 ? 'text-blue-600' :
-                          comment.overallScore >= 40 ? 'text-amber-600' :
-                          'text-red-600'
-                        }`}>
-                          {comment.overallScore}/100
-                        </div>
+                        <div className="text-xs font-black text-slate-600">{commentData.overallScore}/100</div>
                       </div>
                       <div className="relative">
-                        <p className="text-xs text-slate-700 leading-relaxed italic">
-                          "{displayedText}{!isExpanded && isLong ? '...' : ''}"
-                        </p>
-                        {isLong && (
-                          <button 
-                            onClick={() => setExpandedComments(prev => ({ ...prev, [comment.commentId]: !isExpanded }))}
-                            className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 mt-1 uppercase tracking-tighter"
-                          >
-                            {isExpanded ? 'Daha Az Göster' : 'Devamını Oku'}
-                          </button>
+                        {localText ? (
+                          <>
+                            <p className="text-xs text-slate-700 leading-relaxed italic">"{displayedText}{!isExpanded && isLong ? '...' : ''}"</p>
+                            {isLong && (
+                              <button 
+                                onClick={() => setExpandedComments(prev => ({ ...prev, [commentData.commentId]: !prev[commentData.commentId] }))} 
+                                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 mt-1 uppercase"
+                              >
+                                {isExpanded ? 'Daha Az Göster' : 'Devamını Oku'}
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <p className="text-xs text-slate-400 italic animate-pulse">Metin senkronize ediliyor...</p>
                         )}
                       </div>
                       <div className="mt-3 pt-3 border-t border-slate-50 flex flex-wrap gap-1">
-                        {comment.topics?.map((topic, tidx) => (
+                        {commentData.topics?.map((topic, tidx) => (
                           <span key={tidx} className="text-[8px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase">
                             {topic.subCategory}
                           </span>
