@@ -3,6 +3,7 @@ import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query, orderBy, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { executeElektraQuery } from '../services/api';
 import { CommentAnalytics, HotelTaxonomy } from '../types';
 import { HOTEL_MAIN_CATEGORIES } from '../utils/constants';
 import { 
@@ -60,6 +61,7 @@ export function DashboardModule() {
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
   const [editingReportType, setEditingReportType] = useState<string>('dashboard_summary');
   const [isSavingReport, setIsSavingReport] = useState(false);
+  const [isRepairing, setIsRepairing] = useState(false);
 
   useEffect(() => {
     setIsLoading(true);
@@ -230,6 +232,62 @@ export function DashboardModule() {
     } catch (error) {
       console.error('PDF export error:', error);
       alert('PDF oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.');
+    }
+  };
+
+  const handleRepairMissingComments = async () => {
+    const missingComments = analytics.filter(item => 
+      !item.comment || 
+      item.comment === 'Yorum metni sistemde bulunamadı.' || 
+      item.comment.trim() === ''
+    );
+
+    const missingIds = missingComments.map(item => Number(item.commentId)).filter(id => !isNaN(id));
+
+    if (missingIds.length === 0) {
+      alert('Eksik metin bulunamadı, tüm veriler sağlam.');
+      return;
+    }
+
+    if (!window.confirm(`${missingIds.length} adet eksik yorum metni tespit edildi. Elektra API üzerinden senkronize edilsin mi?`)) {
+      return;
+    }
+
+    setIsRepairing(true);
+    try {
+      const savedSettings = localStorage.getItem('hotelApiSettings');
+      if (!savedSettings) {
+        throw new Error('API ayarları bulunamadı.');
+      }
+      const settings = JSON.parse(savedSettings);
+      if (!settings.commentPayloadTemplate) {
+        throw new Error('Yorum sorgu şablonu bulunamadı.');
+      }
+
+      const payload = JSON.parse(settings.commentPayloadTemplate);
+      if (!payload.Where) payload.Where = [];
+      
+      // Add the filter for missing IDs
+      payload.Where.push({ "Column": "ID", "Operator": "IN", "Value": missingIds });
+
+      const response = await executeElektraQuery(payload);
+      
+      if (!Array.isArray(response)) {
+        throw new Error('API geçersiz yanıt döndürdü.');
+      }
+
+      // Update Firebase documents
+      await Promise.all(response.map(async (item: any) => {
+        const docRef = doc(db, 'comment_analytics', String(item.ID));
+        await updateDoc(docRef, { comment: item.COMMENT });
+      }));
+
+      alert('Eksik veriler başarıyla onarıldı ve senkronize edildi.');
+    } catch (error: any) {
+      console.error("Repair error:", error);
+      alert(`Onarım sırasında hata oluştu: ${error.message}`);
+    } finally {
+      setIsRepairing(false);
     }
   };
 
@@ -568,6 +626,18 @@ export function DashboardModule() {
                 Kayıtlı ({savedReports.length})
               </button>
             </div>
+            <button
+              onClick={handleRepairMissingComments}
+              disabled={isRepairing}
+              className={`w-full p-3 rounded-2xl font-bold text-[10px] flex items-center justify-center gap-2 transition-all border ${
+                isRepairing 
+                  ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' 
+                  : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 shadow-sm'
+              }`}
+            >
+              <Database size={14} className={isRepairing ? 'animate-pulse' : ''} />
+              {isRepairing ? 'Eksik Metinler Onarılıyor...' : 'Eksik Metinleri Senkronize Et'}
+            </button>
           </div>
         </aside>
 
