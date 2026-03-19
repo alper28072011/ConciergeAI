@@ -190,6 +190,7 @@ export default function App() {
           
           <div className="flex items-center gap-3">
              {/* Additional header actions can go here */}
+             <div id="header-actions-portal"></div>
              <div className="px-3 py-1.5 bg-slate-100 rounded-full border border-slate-200">
                 <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>

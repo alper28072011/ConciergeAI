@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
+import { createPortal } from 'react-dom';
 import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { db, auth } from '../firebase';
@@ -106,11 +107,16 @@ export function DashboardModule() {
   const [modulesOrder, setModulesOrder] = useState(AVAILABLE_MODULES);
   const [userId, setUserId] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [lastSavedState, setLastSavedState] = useState<any>(null);
+  const [savedPrefs, setSavedPrefs] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string }>({ type: 'all', value: 'all' });
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setPortalTarget(document.getElementById('header-actions-portal'));
+  }, []);
   
   // Report State
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -188,12 +194,12 @@ export function DashboardModule() {
           setSelectedNationalities(resolvedState.selectedNationalities);
           setSelectedSources(resolvedState.selectedSources);
 
-          // Set lastSavedState to exactly match the resolved state structure
-          setLastSavedState(resolvedState);
+          // Set savedPrefs to exactly match the resolved state structure
+          setSavedPrefs(resolvedState);
 
         } catch (error) {
           console.error("Tercihler yüklenirken hata:", error);
-          setLastSavedState(defaultState);
+          setSavedPrefs(defaultState);
           try {
             handleFirestoreError(error, OperationType.GET, `user_preferences/${user.uid}`);
           } catch (e) { /* Logged */ }
@@ -203,7 +209,7 @@ export function DashboardModule() {
       } else {
         setUserId(null);
         setIsInitialLoad(false);
-        setLastSavedState({});
+        setSavedPrefs({});
       }
     });
     return () => unsubscribe();
@@ -211,26 +217,28 @@ export function DashboardModule() {
 
   // Change Detection
   const hasUnsavedChanges = useMemo(() => {
-    if (!lastSavedState || isInitialLoad) return false;
+    if (!userId || !savedPrefs || isInitialLoad) return false;
     
-    const currentState = {
-      modulesOrder: modulesOrder.map(m => m.id),
-      activeModules,
-      globalViewMode,
-      dateFilter,
-      customStartDate,
-      customEndDate,
-      selectedMainCategory,
-      selectedSubCategory,
-      selectedNationalities,
-      selectedSources,
-    };
+    const currentModulesOrderIds = modulesOrder.map(m => m.id);
 
-    return JSON.stringify(currentState) !== JSON.stringify(lastSavedState);
-  }, [modulesOrder, activeModules, globalViewMode, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources, lastSavedState, isInitialLoad]);
+    const sortArray = (arr: string[]) => [...(arr || [])].sort();
+
+    return (
+      JSON.stringify(currentModulesOrderIds) !== JSON.stringify(savedPrefs.modulesOrder) ||
+      JSON.stringify(sortArray(activeModules)) !== JSON.stringify(sortArray(savedPrefs.activeModules)) ||
+      globalViewMode !== savedPrefs.globalViewMode ||
+      dateFilter !== savedPrefs.dateFilter ||
+      customStartDate !== savedPrefs.customStartDate ||
+      customEndDate !== savedPrefs.customEndDate ||
+      selectedMainCategory !== savedPrefs.selectedMainCategory ||
+      selectedSubCategory !== savedPrefs.selectedSubCategory ||
+      JSON.stringify(sortArray(selectedNationalities)) !== JSON.stringify(sortArray(savedPrefs.selectedNationalities)) ||
+      JSON.stringify(sortArray(selectedSources)) !== JSON.stringify(sortArray(savedPrefs.selectedSources))
+    );
+  }, [userId, modulesOrder, activeModules, globalViewMode, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources, savedPrefs, isInitialLoad]);
 
   // Save User Preferences Function
-  const savePrefs = React.useCallback(async () => {
+  const handleSavePreferences = React.useCallback(async () => {
     if (!userId || isInitialLoad) return;
     
     setIsSaving(true);
@@ -254,7 +262,7 @@ export function DashboardModule() {
         updatedAt: new Date().toISOString()
       }, { merge: true });
       
-      setLastSavedState(stateToSave);
+      setSavedPrefs(stateToSave);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (error) {
@@ -268,14 +276,6 @@ export function DashboardModule() {
       setIsSaving(false);
     }
   }, [userId, modulesOrder, activeModules, globalViewMode, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources, isInitialLoad]);
-
-  // Auto-save effect
-  useEffect(() => {
-    if (!hasUnsavedChanges) return;
-    
-    const timeout = setTimeout(savePrefs, 2000); // Increased debounce to 2s
-    return () => clearTimeout(timeout);
-  }, [hasUnsavedChanges, savePrefs]);
 
   const moveModule = (id: string, direction: 'up' | 'down') => {
     const index = modulesOrder.findIndex(m => m.id === id);
@@ -672,6 +672,41 @@ export function DashboardModule() {
 
   return (
     <div className="h-full w-full bg-[#f8fafc] overflow-hidden flex flex-col">
+      {/* Portal for Header Actions */}
+      {portalTarget && createPortal(
+        <AnimatePresence>
+          {hasUnsavedChanges && (
+            <motion.div
+              key="save-button"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="flex items-center gap-3"
+            >
+              <span className={`text-xs font-medium flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${saveStatus === 'success' ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : 'text-amber-600 bg-amber-50 border-amber-200'}`}>
+                {saveStatus !== 'success' && <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
+                {saveStatus === 'success' ? 'Değişiklikler Kaydedildi' : 'Kaydedilmemiş Değişiklikler'}
+              </span>
+              <button
+                onClick={handleSavePreferences}
+                disabled={isSaving}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm ${
+                  saveStatus === 'success' 
+                    ? 'bg-emerald-500 text-white hover:bg-emerald-600' 
+                    : saveStatus === 'error'
+                    ? 'bg-rose-500 text-white hover:bg-rose-600'
+                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                }`}
+              >
+                {saveStatus === 'success' ? <CheckCircle2 size={14} /> : <Save size={14} />}
+                {isSaving ? 'Kaydediliyor...' : saveStatus === 'success' ? 'Kaydedildi' : saveStatus === 'error' ? 'Hata!' : 'Görünümü Kaydet'}
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        portalTarget
+      )}
+
       {/* Main Cockpit Layout */}
       <div className="w-full max-w-[1850px] mx-auto h-full flex justify-between gap-8 py-6 overflow-hidden px-6">
         
@@ -717,34 +752,11 @@ export function DashboardModule() {
                 Yapılandırma
               </h3>
               <div className="flex items-center gap-2">
-                {hasUnsavedChanges && (
-                  <button 
-                    onClick={savePrefs}
-                    disabled={isSaving}
-                    className={`flex items-center gap-1 px-2 py-1 rounded text-[8px] font-bold transition-all shadow-sm ${
-                      saveStatus === 'success' 
-                        ? 'bg-emerald-500 text-white' 
-                        : saveStatus === 'error'
-                        ? 'bg-rose-500 text-white'
-                        : 'bg-indigo-600 text-white hover:bg-indigo-700 animate-pulse'
-                    }`}
-                    title="Değişiklikleri Kaydet"
-                  >
-                    {saveStatus === 'success' ? <CheckCircle2 size={10} /> : <Save size={10} />}
-                    {isSaving ? '...' : saveStatus === 'success' ? 'Kaydedildi' : saveStatus === 'error' ? 'Hata!' : 'Kaydet'}
-                  </button>
-                )}
                 <span className="text-[8px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
                   {activeModules.length}/{AVAILABLE_MODULES.length}
                 </span>
               </div>
             </div>
-            {hasUnsavedChanges && (
-              <div className="mb-2 px-2 py-1 bg-amber-50 border border-amber-100 rounded flex items-center gap-1.5">
-                <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
-                <span className="text-[8px] font-medium text-amber-700">Kaydedilmemiş değişiklikler var</span>
-              </div>
-            )}
             <div className="space-y-1">
               {modulesOrder.map((module, index) => {
                 const isActive = activeModules.includes(module.id);
