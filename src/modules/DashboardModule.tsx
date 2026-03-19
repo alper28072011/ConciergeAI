@@ -113,6 +113,24 @@ export function DashboardModule() {
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
+  const currentPrefsRef = useRef<any>(null);
+
+  useEffect(() => {
+    currentPrefsRef.current = {
+      userId,
+      modulesOrder: modulesOrder.map(m => m.id),
+      activeModules,
+      globalViewMode,
+      dateFilter,
+      customStartDate,
+      customEndDate,
+      selectedMainCategory,
+      selectedSubCategory,
+      selectedNationalities,
+      selectedSources,
+    };
+  }, [userId, modulesOrder, activeModules, globalViewMode, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources]);
+
   useEffect(() => {
     setPortalTarget(document.getElementById('header-actions-portal'));
   }, []);
@@ -211,29 +229,23 @@ export function DashboardModule() {
 
   // Save User Preferences Function
   const handleSavePreferences = async () => {
-    // React state asenkronluğunu ve Portal Stale Closure hatasını önlemek için doğrudan auth objesine bakıyoruz
-    const currentUserId = auth.currentUser?.uid;
-    
-    if (!currentUserId) {
-      alert("Kullanıcı oturumu bulunamadı! (Lütfen sayfayı yenileyip tekrar deneyin)");
+    // Stale Closure'u önlemek için doğrudan güncel Ref'i (Kara Kutuyu) okuyoruz
+    const prefs = currentPrefsRef.current;
+
+    if (!prefs || !prefs.userId) {
+      alert("Sistem oturumunuzu senkronize ediyor, lütfen 1 saniye bekleyip tekrar deneyin.");
       return;
     }
 
     setIsSaving(true);
     setSaveStatus('saving');
-    
+
     try {
-      await setDoc(doc(db, 'user_preferences', currentUserId), {
-        modulesOrder: modulesOrder.map(m => m.id),
-        activeModules,
-        globalViewMode,
-        dateFilter,
-        customStartDate,
-        customEndDate,
-        selectedMainCategory,
-        selectedSubCategory,
-        selectedNationalities,
-        selectedSources,
+      // userId'yi kayıttan ayır, kalanı veritabanına gönder
+      const { userId: uid, ...dataToSave } = prefs;
+
+      await setDoc(doc(db, 'user_preferences', uid), {
+        ...dataToSave,
         updatedAt: new Date().toISOString()
       }, { merge: true });
       
