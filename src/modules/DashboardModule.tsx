@@ -22,8 +22,6 @@ import {
   LineChart, Line, PieChart, Pie, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
 } from 'recharts';
 import { getDashboardData } from '../utils/biEngine';
-import { toPng } from 'html-to-image';
-import { jsPDF } from 'jspdf';
 
 enum OperationType {
   CREATE = 'create',
@@ -87,6 +85,19 @@ const AVAILABLE_MODULES = [
   { id: 'hotel_agenda', label: 'Otel Gündemi & Alt Konular', icon: List },
 ];
 
+const getGuaranteedUserId = () => {
+  // 1. Firebase'de oturum varsa onu kullan
+  if (auth.currentUser?.uid) return auth.currentUser.uid;
+  
+  // 2. Yoksa tarayıcıya özel kalıcı bir cihaz kimliği üret/kullan
+  let localUid = localStorage.getItem('crm_device_uid');
+  if (!localUid) {
+    localUid = 'device_' + Math.random().toString(36).substr(2, 11);
+    localStorage.setItem('crm_device_uid', localUid);
+  }
+  return localUid;
+};
+
 export function DashboardModule() {
   const [analytics, setAnalytics] = useState<CommentAnalytics[]>([]);
   const [taxonomy, setTaxonomy] = useState<HotelTaxonomy | null>(null);
@@ -94,13 +105,15 @@ export function DashboardModule() {
   const dashboardRef = useRef<HTMLDivElement>(null);
   
   // Filters
-  const [dateFilter, setDateFilter] = useState<'7days' | '30days' | 'thisYear' | 'custom'>('30days');
+  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | '7days' | '30days' | 'thisYear' | 'custom'>('30days');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [selectedMainCategory, setSelectedMainCategory] = useState<string>('all');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('all');
   const [selectedNationalities, setSelectedNationalities] = useState<string[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
+  const [isSourceExpanded, setIsSourceExpanded] = useState(false);
+  const [isNationalityExpanded, setIsNationalityExpanded] = useState(false);
   const [globalViewMode, setGlobalViewMode] = useState<'chart' | 'table'>('chart');
   const [showSubCategories, setShowSubCategories] = useState(false);
   const [activeModules, setActiveModules] = useState<string[]>(['kpi_cards', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda']);
@@ -112,23 +125,6 @@ export function DashboardModule() {
   const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string }>({ type: 'all', value: 'all' });
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
-
-  const prefsRef = useRef<any>({});
-
-  // Her render'da (filtre değiştiğinde) anında güncellenen mutlak hafıza
-  prefsRef.current = {
-    userId,
-    modulesOrder: modulesOrder.map(m => m.id),
-    activeModules,
-    globalViewMode,
-    dateFilter,
-    customStartDate,
-    customEndDate,
-    selectedMainCategory,
-    selectedSubCategory,
-    selectedNationalities,
-    selectedSources,
-  };
 
   useEffect(() => {
     setPortalTarget(document.getElementById('header-actions-portal'));
@@ -146,107 +142,98 @@ export function DashboardModule() {
 
   // Load User Preferences
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setUserId(user.uid);
-        const defaultState = {
-          modulesOrder: AVAILABLE_MODULES.map(m => m.id),
-          activeModules: ['kpi_cards', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda'],
-          globalViewMode: 'chart',
-          dateFilter: '30days',
-          customStartDate: '',
-          customEndDate: '',
-          selectedMainCategory: 'all',
-          selectedSubCategory: 'all',
-          selectedNationalities: [],
-          selectedSources: [],
-        };
+    const initPreferences = async () => {
+      const uid = getGuaranteedUserId();
+      setUserId(uid);
+      
+      const defaultState = {
+        modulesOrder: AVAILABLE_MODULES.map(m => m.id),
+        activeModules: ['kpi_cards', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda'],
+        globalViewMode: 'chart',
+        dateFilter: '30days',
+        customStartDate: '',
+        customEndDate: '',
+        selectedMainCategory: 'all',
+        selectedSubCategory: 'all',
+        selectedNationalities: [],
+        selectedSources: [],
+        isSourceExpanded: false,
+        isNationalityExpanded: false,
+      };
 
-        try {
-          const docRef = doc(db, 'user_preferences', user.uid);
-          const docSnap = await getDoc(docRef);
+      try {
+        const docRef = doc(db, 'user_preferences', uid);
+        const docSnap = await getDoc(docRef);
+        
+        if (docSnap.exists()) {
+          const data = docSnap.data();
           
-          let resolvedState = { ...defaultState };
           let resolvedModulesOrder = AVAILABLE_MODULES;
-
-          if (docSnap.exists()) {
-            const data = docSnap.data();
-            
-            // Resolve modules order safely
-            let resolvedModulesOrderIds = defaultState.modulesOrder;
-            
-            if (data.modulesOrder && Array.isArray(data.modulesOrder)) {
-              const ordered = data.modulesOrder.map((id: string) => 
-                AVAILABLE_MODULES.find(m => m.id === id)
-              ).filter(Boolean) as typeof AVAILABLE_MODULES;
-              const missing = AVAILABLE_MODULES.filter(m => !data.modulesOrder.includes(m.id));
-              resolvedModulesOrder = [...ordered, ...missing];
-              resolvedModulesOrderIds = resolvedModulesOrder.map(m => m.id);
-            }
-
-            resolvedState = {
-              modulesOrder: resolvedModulesOrderIds,
-              activeModules: data.activeModules || defaultState.activeModules,
-              globalViewMode: data.globalViewMode || defaultState.globalViewMode,
-              dateFilter: data.dateFilter || defaultState.dateFilter,
-              customStartDate: data.customStartDate || defaultState.customStartDate,
-              customEndDate: data.customEndDate || defaultState.customEndDate,
-              selectedMainCategory: data.selectedMainCategory || defaultState.selectedMainCategory,
-              selectedSubCategory: data.selectedSubCategory || defaultState.selectedSubCategory,
-              selectedNationalities: data.selectedNationalities || defaultState.selectedNationalities,
-              selectedSources: data.selectedSources || defaultState.selectedSources,
-            };
+          if (data.modulesOrder && Array.isArray(data.modulesOrder)) {
+            const ordered = data.modulesOrder.map((id: string) => AVAILABLE_MODULES.find(m => m.id === id)).filter(Boolean) as typeof AVAILABLE_MODULES;
+            const missing = AVAILABLE_MODULES.filter(m => !data.modulesOrder.includes(m.id));
+            resolvedModulesOrder = [...ordered, ...missing];
           }
 
-          // Apply to React States
           setModulesOrder(resolvedModulesOrder);
-          setActiveModules(resolvedState.activeModules);
-          setGlobalViewMode(resolvedState.globalViewMode as any);
-          setDateFilter(resolvedState.dateFilter as any);
-          setCustomStartDate(resolvedState.customStartDate);
-          setCustomEndDate(resolvedState.customEndDate);
-          setSelectedMainCategory(resolvedState.selectedMainCategory);
-          setSelectedSubCategory(resolvedState.selectedSubCategory);
-          setSelectedNationalities(resolvedState.selectedNationalities);
-          setSelectedSources(resolvedState.selectedSources);
-
-        } catch (error) {
-          console.error("Tercihler yüklenirken hata:", error);
-          try {
-            handleFirestoreError(error, OperationType.GET, `user_preferences/${user.uid}`);
-          } catch (e) { /* Logged */ }
-        } finally {
-          setIsInitialLoad(false);
+          if (data.activeModules) setActiveModules(data.activeModules);
+          if (data.globalViewMode) setGlobalViewMode(data.globalViewMode as any);
+          if (data.dateFilter) setDateFilter(data.dateFilter as any);
+          if (data.customStartDate) setCustomStartDate(data.customStartDate);
+          if (data.customEndDate) setCustomEndDate(data.customEndDate);
+          if (data.selectedMainCategory) setSelectedMainCategory(data.selectedMainCategory);
+          if (data.selectedSubCategory) setSelectedSubCategory(data.selectedSubCategory);
+          if (data.selectedNationalities) setSelectedNationalities(data.selectedNationalities);
+          if (data.selectedSources) setSelectedSources(data.selectedSources);
+          if (data.isSourceExpanded !== undefined) setIsSourceExpanded(data.isSourceExpanded);
+          if (data.isNationalityExpanded !== undefined) setIsNationalityExpanded(data.isNationalityExpanded);
         }
-      } else {
-        setUserId(null);
+      } catch (error) {
+        console.error("Tercihler yüklenirken hata:", error);
+      } finally {
         setIsInitialLoad(false);
       }
+    };
+
+    // Firebase Auth tetiklense de tetiklenmese de bizim init fonksiyonumuz çalışacak
+    const unsubscribe = onAuthStateChanged(auth, () => {
+      initPreferences();
     });
-    return () => unsubscribe();
+    
+    // Auth state'in çok yavaş olması ihtimaline karşı bir sigorta:
+    const timeoutId = setTimeout(initPreferences, 1000);
+
+    return () => {
+      unsubscribe();
+      clearTimeout(timeoutId);
+    };
   }, []);
 
   // Save User Preferences Function
   const handleSavePreferences = async () => {
-    // Buton ne zaman tıklanırsa tıklansın, kutunun içindeki en taze veriyi alır
-    const currentData = prefsRef.current;
-
-    if (!currentData || !currentData.userId) {
-      alert("Oturumunuz senkronize ediliyor... Lütfen 1-2 saniye bekleyip tekrar tıklayın.");
-      return;
-    }
-
+    const uid = getGuaranteedUserId(); // %100 bir ID dönecek
+    
     setIsSaving(true);
     setSaveStatus('saving');
 
     try {
-      // userId'yi ayırıyoruz, kalanı kaydedilecek veri yapıyoruz
-      const { userId: uid, ...dataToSave } = currentData;
-
-      await setDoc(doc(db, 'user_preferences', uid), {
-        ...dataToSave,
+      const dataToSave = {
+        modulesOrder: modulesOrder.map(m => m.id),
+        activeModules,
+        globalViewMode,
+        dateFilter,
+        customStartDate,
+        customEndDate,
+        selectedMainCategory,
+        selectedSubCategory,
+        selectedNationalities,
+        selectedSources,
+        isSourceExpanded,
+        isNationalityExpanded,
         updatedAt: new Date().toISOString()
-      }, { merge: true });
+      };
+
+      await setDoc(doc(db, 'user_preferences', uid), dataToSave, { merge: true });
       
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
@@ -398,7 +385,17 @@ export function DashboardModule() {
       
       // Date Filter
       let dateMatch = true;
-      if (dateFilter === '7days') {
+      if (dateFilter === 'today') {
+        dateMatch = itemDate.getFullYear() === now.getFullYear() && 
+                    itemDate.getMonth() === now.getMonth() && 
+                    itemDate.getDate() === now.getDate();
+      } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        dateMatch = itemDate.getFullYear() === yesterday.getFullYear() && 
+                    itemDate.getMonth() === yesterday.getMonth() && 
+                    itemDate.getDate() === yesterday.getDate();
+      } else if (dateFilter === '7days') {
         const diffTime = now.getTime() - itemDate.getTime();
         dateMatch = diffTime >= 0 && diffTime <= 7 * 24 * 60 * 60 * 1000;
       } else if (dateFilter === '30days') {
@@ -514,37 +511,91 @@ export function DashboardModule() {
     return Array.from(sources).sort();
   }, [analytics]);
 
-  const handleExportPdf = async () => {
+  const handleExportHtml = () => {
     if (!dashboardRef.current) return;
+
+    const clone = dashboardRef.current.cloneNode(true) as HTMLElement;
     
-    try {
-      const element = dashboardRef.current;
-      const dataUrl = await toPng(element, {
-        quality: 0.95,
-        pixelRatio: 2,
-        backgroundColor: '#ffffff',
-        style: {
-          transform: 'scale(1)',
-          transformOrigin: 'top left'
+    // Remove scrollbars and extra padding for export
+    clone.classList.remove('overflow-y-auto', 'pr-4', 'custom-scrollbar', 'pb-20');
+    clone.classList.add('flex', 'flex-col', 'gap-6');
+    
+    // Remove any elements that shouldn't be exported
+    const noExportElements = clone.querySelectorAll('.no-export');
+    noExportElements.forEach(el => el.remove());
+
+    const content = clone.innerHTML;
+    
+    const html = `
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Otel CRM Kokpit Raporu - ${new Date().toLocaleDateString('tr-TR')}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            font-family: 'Inter', sans-serif; 
+            background-color: #f1f5f9; 
+            margin: 0; 
+            padding: 40px 0; 
+            display: flex; 
+            justify-content: center; 
         }
-      });
+        .report-container { 
+            width: 210mm; 
+            background: white; 
+            min-height: 297mm; 
+            padding: 25mm; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1); 
+            border-radius: 4px;
+        }
+        /* Recharts SVG responsiveness in static HTML */
+        svg { width: 100% !important; height: auto !important; }
+        /* Ensure grid layout works */
+        .grid { display: grid !important; }
+        /* Custom scrollbar hide */
+        .custom-scrollbar::-webkit-scrollbar { display: none; }
+        .custom-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        /* Fix for some tailwind classes that might need explicit display */
+        .flex { display: flex !important; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="report-container">
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 40px; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px;">
+            <div>
+                <h1 style="font-size: 24px; font-weight: 900; color: #0f172a; text-transform: uppercase; letter-spacing: -0.025em; margin: 0;">Otel CRM Kokpit Raporu</h1>
+                <p style="font-size: 14px; color: #64748b; font-weight: 500; margin: 4px 0 0;">Yönetim Faaliyet ve Analiz Özeti</p>
+            </div>
+            <div style="text-align: right;">
+                <p style="font-size: 11px; color: #94a3b8; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin: 0;">Rapor Tarihi</p>
+                <p style="font-size: 16px; color: #4f46e5; font-weight: 800; margin: 0;">${new Date().toLocaleDateString('tr-TR')}</p>
+            </div>
+        </div>
+        <div class="flex flex-col gap-6">
+            ${content}
+        </div>
+        <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid #f1f5f9; text-align: center;">
+            <p style="font-size: 10px; color: #94a3b8; font-weight: 500;">Bu rapor sistem tarafından otomatik olarak oluşturulmuştur. &copy; ${new Date().getFullYear()} Otel CRM İş Zekası Modülü</p>
+        </div>
+    </div>
+</body>
+</html>
+    `;
 
-      const pdf = new jsPDF({
-        orientation: 'landscape',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      const imgProps = pdf.getImageProperties(dataUrl);
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-
-      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Otel_CRM_Kokpit_Raporu_${new Date().toISOString().split('T')[0]}.pdf`);
-    } catch (error) {
-      console.error('PDF export error:', error);
-      alert('PDF oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.');
-    }
+    const blob = new Blob([html], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Otel_CRM_Kokpit_Raporu_${new Date().toISOString().split('T')[0]}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const handleGenerateDashboardReport = async () => {
@@ -573,7 +624,7 @@ export function DashboardModule() {
       3. Öne Çıkan Gündem Konuları (Trending Sub-Categories)
       4. Aksiyon Önerileri (Kaliteyi artırmak için 3 somut öneri)
       
-      Veriler (${dateFilter === '7days' ? 'Son 7 Gün' : dateFilter === '30days' ? 'Son 30 Gün' : dateFilter === 'thisYear' ? 'Bu Yıl' : 'Özel Tarih Aralığı'}):
+      Veriler (${dateFilter === 'today' ? 'Bugün' : dateFilter === 'yesterday' ? 'Dün' : dateFilter === '7days' ? 'Son 7 Gün' : dateFilter === '30days' ? 'Son 30 Gün' : dateFilter === 'thisYear' ? 'Bu Yıl' : 'Özel Tarih Aralığı'}):
       - Toplam Yorum Sayısı: ${dashboardData.kpis.totalComments}
       - Ortalama Memnuniyet: %${dashboardData.kpis.avgScore}
       - En Başarılı Kategori: ${dashboardData.kpis.bestCategory}
@@ -809,6 +860,8 @@ export function DashboardModule() {
               <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Dönem</label>
               <div className="grid grid-cols-2 gap-1">
                 {[
+                  { id: 'today', label: 'Bugün' },
+                  { id: 'yesterday', label: 'Dün' },
                   { id: '7days', label: '7 Gün' },
                   { id: '30days', label: '30 Gün' },
                   { id: 'thisYear', label: 'Bu Yıl' },
@@ -855,31 +908,67 @@ export function DashboardModule() {
             {/* Multi-selects for Source & Nationality */}
             <div className="space-y-3">
               <div className="space-y-1">
-                <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Kaynak</label>
-                <select
-                  multiple
-                  value={selectedSources}
-                  onChange={(e) => setSelectedSources(Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => option.value))}
-                  className="w-full border border-slate-200 rounded-lg px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 h-20 custom-scrollbar"
+                <div 
+                  className="flex items-center justify-between cursor-pointer group"
+                  onClick={() => setIsSourceExpanded(!isSourceExpanded)}
                 >
-                  {allSources.map(source => (
-                    <option key={source} value={source} className="py-0.5 px-1 rounded mb-0.5">{source}</option>
-                  ))}
-                </select>
+                  <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer group-hover:text-slate-600 transition-colors">
+                    Kaynak {selectedSources.length > 0 && <span className="text-indigo-500">({selectedSources.length})</span>}
+                  </label>
+                  <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${isSourceExpanded ? 'rotate-180' : ''}`} />
+                </div>
+                <div 
+                  className={`overflow-hidden transition-all duration-300 ease-in-out ${isSourceExpanded ? 'max-h-64 opacity-100' : 'max-h-0 opacity-0'}`}
+                >
+                  <div className="flex flex-col gap-1 max-h-64 overflow-y-auto custom-scrollbar pr-1 py-1">
+                    {allSources.map(source => (
+                      <label key={source} className="flex items-center gap-2 text-[10px] text-slate-700 cursor-pointer hover:bg-slate-50 p-1 rounded transition-colors">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedSources.includes(source)}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedSources([...selectedSources, source]);
+                            else setSelectedSources(selectedSources.filter(s => s !== source));
+                          }}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3 h-3"
+                        />
+                        <span className="truncate">{source}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-1">
-                <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Uyruk</label>
-                <select
-                  multiple
-                  value={selectedNationalities}
-                  onChange={(e) => setSelectedNationalities(Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => option.value))}
-                  className="w-full border border-slate-200 rounded-lg px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 h-20 custom-scrollbar"
+                <div 
+                  className="flex items-center justify-between cursor-pointer group"
+                  onClick={() => setIsNationalityExpanded(!isNationalityExpanded)}
                 >
-                  {allNationalities.map(nat => (
-                    <option key={nat} value={nat} className="py-0.5 px-1 rounded mb-0.5">{nat}</option>
-                  ))}
-                </select>
+                  <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer group-hover:text-slate-600 transition-colors">
+                    Uyruk {selectedNationalities.length > 0 && <span className="text-indigo-500">({selectedNationalities.length})</span>}
+                  </label>
+                  <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${isNationalityExpanded ? 'rotate-180' : ''}`} />
+                </div>
+                <div 
+                  className={`overflow-hidden transition-all duration-300 ease-in-out ${isNationalityExpanded ? 'max-h-64 opacity-100' : 'max-h-0 opacity-0'}`}
+                >
+                  <div className="flex flex-col gap-1 max-h-64 overflow-y-auto custom-scrollbar pr-1 py-1">
+                    {allNationalities.map(nat => (
+                      <label key={nat} className="flex items-center gap-2 text-[10px] text-slate-700 cursor-pointer hover:bg-slate-50 p-1 rounded transition-colors">
+                        <input 
+                          type="checkbox" 
+                          checked={selectedNationalities.includes(nat)}
+                          onChange={(e) => {
+                            if (e.target.checked) setSelectedNationalities([...selectedNationalities, nat]);
+                            else setSelectedNationalities(selectedNationalities.filter(n => n !== nat));
+                          }}
+                          className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-3 h-3"
+                        />
+                        <span className="truncate">{nat}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -895,11 +984,11 @@ export function DashboardModule() {
             </button>
             <div className="grid grid-cols-2 gap-1.5">
               <button
-                onClick={handleExportPdf}
+                onClick={handleExportHtml}
                 className="bg-white text-slate-700 border border-slate-200 p-2 rounded-lg font-bold text-[9px] flex flex-col items-center justify-center gap-1 hover:bg-slate-50 transition-all shadow-sm"
               >
-                <Printer size={14} className="text-slate-400" />
-                PDF
+                <FileText size={14} className="text-slate-400" />
+                HTML Rapor
               </button>
               <button
                 onClick={() => setIsSavedReportsModalOpen(true)}
