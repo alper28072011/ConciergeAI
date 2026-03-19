@@ -113,23 +113,21 @@ export function DashboardModule() {
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
-  const currentPrefsRef = useRef<any>(null);
+  const currentPrefsRef = useRef<any>({});
 
-  useEffect(() => {
-    currentPrefsRef.current = {
-      userId,
-      modulesOrder: modulesOrder.map(m => m.id),
-      activeModules,
-      globalViewMode,
-      dateFilter,
-      customStartDate,
-      customEndDate,
-      selectedMainCategory,
-      selectedSubCategory,
-      selectedNationalities,
-      selectedSources,
-    };
-  }, [userId, modulesOrder, activeModules, globalViewMode, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources]);
+  // Herhangi bir asenkron gecikme olmadan, her render'da anlık olarak güncellenen zırhlı yapı:
+  currentPrefsRef.current = {
+    modulesOrder: modulesOrder.map(m => m.id),
+    activeModules,
+    globalViewMode,
+    dateFilter,
+    customStartDate,
+    customEndDate,
+    selectedMainCategory,
+    selectedSubCategory,
+    selectedNationalities,
+    selectedSources,
+  };
 
   useEffect(() => {
     setPortalTarget(document.getElementById('header-actions-portal'));
@@ -229,11 +227,11 @@ export function DashboardModule() {
 
   // Save User Preferences Function
   const handleSavePreferences = async () => {
-    // Stale Closure'u önlemek için doğrudan güncel Ref'i (Kara Kutuyu) okuyoruz
-    const prefs = currentPrefsRef.current;
+    // 1. Kimlik bilgisini React state'inden değil, DOĞRUDAN Firebase'den okuyoruz!
+    const currentUserId = auth.currentUser?.uid;
 
-    if (!prefs || !prefs.userId) {
-      alert("Sistem oturumunuzu senkronize ediyor, lütfen 1 saniye bekleyip tekrar deneyin.");
+    if (!currentUserId) {
+      alert("Oturum doğrulanamadı. Lütfen sayfayı yenileyip tekrar deneyin.");
       return;
     }
 
@@ -241,14 +239,14 @@ export function DashboardModule() {
     setSaveStatus('saving');
 
     try {
-      // userId'yi kayıttan ayır, kalanı veritabanına gönder
-      const { userId: uid, ...dataToSave } = prefs;
+      // 2. Verileri o anki taptaze kara kutudan (ref) alıyoruz!
+      const dataToSave = currentPrefsRef.current;
 
-      await setDoc(doc(db, 'user_preferences', uid), {
+      await setDoc(doc(db, 'user_preferences', currentUserId), {
         ...dataToSave,
         updatedAt: new Date().toISOString()
       }, { merge: true });
-      
+
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (error) {
