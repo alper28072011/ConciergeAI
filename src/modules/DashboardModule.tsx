@@ -211,14 +211,19 @@ export function DashboardModule() {
 
   // Save User Preferences Function
   const handleSavePreferences = async () => {
-    if (!userId) {
-      alert("Kullanıcı oturumu bulunamadı!");
+    // React state asenkronluğunu ve Portal Stale Closure hatasını önlemek için doğrudan auth objesine bakıyoruz
+    const currentUserId = auth.currentUser?.uid;
+    
+    if (!currentUserId) {
+      alert("Kullanıcı oturumu bulunamadı! (Lütfen sayfayı yenileyip tekrar deneyin)");
       return;
     }
+
     setIsSaving(true);
     setSaveStatus('saving');
+    
     try {
-      await setDoc(doc(db, 'user_preferences', userId), {
+      await setDoc(doc(db, 'user_preferences', currentUserId), {
         modulesOrder: modulesOrder.map(m => m.id),
         activeModules,
         globalViewMode,
