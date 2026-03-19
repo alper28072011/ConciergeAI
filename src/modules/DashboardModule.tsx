@@ -107,7 +107,6 @@ export function DashboardModule() {
   const [modulesOrder, setModulesOrder] = useState(AVAILABLE_MODULES);
   const [userId, setUserId] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
-  const [savedPrefs, setSavedPrefs] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string }>({ type: 'all', value: 'all' });
@@ -194,12 +193,8 @@ export function DashboardModule() {
           setSelectedNationalities(resolvedState.selectedNationalities);
           setSelectedSources(resolvedState.selectedSources);
 
-          // Set savedPrefs to exactly match the resolved state structure
-          setSavedPrefs(resolvedState);
-
         } catch (error) {
           console.error("Tercihler yüklenirken hata:", error);
-          setSavedPrefs(defaultState);
           try {
             handleFirestoreError(error, OperationType.GET, `user_preferences/${user.uid}`);
           } catch (e) { /* Logged */ }
@@ -209,33 +204,10 @@ export function DashboardModule() {
       } else {
         setUserId(null);
         setIsInitialLoad(false);
-        setSavedPrefs({});
       }
     });
     return () => unsubscribe();
   }, []);
-
-  // Change Detection
-  const hasUnsavedChanges = useMemo(() => {
-    if (!userId || !savedPrefs || isInitialLoad) return false;
-    
-    const currentModulesOrderIds = modulesOrder.map(m => m.id);
-
-    const sortArray = (arr: string[]) => [...(arr || [])].sort();
-
-    return (
-      JSON.stringify(currentModulesOrderIds) !== JSON.stringify(savedPrefs.modulesOrder) ||
-      JSON.stringify(sortArray(activeModules)) !== JSON.stringify(sortArray(savedPrefs.activeModules)) ||
-      globalViewMode !== savedPrefs.globalViewMode ||
-      dateFilter !== savedPrefs.dateFilter ||
-      customStartDate !== savedPrefs.customStartDate ||
-      customEndDate !== savedPrefs.customEndDate ||
-      selectedMainCategory !== savedPrefs.selectedMainCategory ||
-      selectedSubCategory !== savedPrefs.selectedSubCategory ||
-      JSON.stringify(sortArray(selectedNationalities)) !== JSON.stringify(sortArray(savedPrefs.selectedNationalities)) ||
-      JSON.stringify(sortArray(selectedSources)) !== JSON.stringify(sortArray(savedPrefs.selectedSources))
-    );
-  }, [userId, modulesOrder, activeModules, globalViewMode, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources, savedPrefs, isInitialLoad]);
 
   // Save User Preferences Function
   const handleSavePreferences = React.useCallback(async () => {
@@ -262,7 +234,6 @@ export function DashboardModule() {
         updatedAt: new Date().toISOString()
       }, { merge: true });
       
-      setSavedPrefs(stateToSave);
       setSaveStatus('success');
       setTimeout(() => setSaveStatus('idle'), 3000);
     } catch (error) {
@@ -674,36 +645,22 @@ export function DashboardModule() {
     <div className="h-full w-full bg-[#f8fafc] overflow-hidden flex flex-col">
       {/* Portal for Header Actions */}
       {portalTarget && createPortal(
-        <AnimatePresence>
-          {hasUnsavedChanges && (
-            <motion.div
-              key="save-button"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="flex items-center gap-3"
-            >
-              <span className={`text-xs font-medium flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${saveStatus === 'success' ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : 'text-amber-600 bg-amber-50 border-amber-200'}`}>
-                {saveStatus !== 'success' && <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />}
-                {saveStatus === 'success' ? 'Değişiklikler Kaydedildi' : 'Kaydedilmemiş Değişiklikler'}
-              </span>
-              <button
-                onClick={handleSavePreferences}
-                disabled={isSaving}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm ${
-                  saveStatus === 'success' 
-                    ? 'bg-emerald-500 text-white hover:bg-emerald-600' 
-                    : saveStatus === 'error'
-                    ? 'bg-rose-500 text-white hover:bg-rose-600'
-                    : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                }`}
-              >
-                {saveStatus === 'success' ? <CheckCircle2 size={14} /> : <Save size={14} />}
-                {isSaving ? 'Kaydediliyor...' : saveStatus === 'success' ? 'Kaydedildi' : saveStatus === 'error' ? 'Hata!' : 'Görünümü Kaydet'}
-              </button>
-            </motion.div>
-          )}
-        </AnimatePresence>,
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleSavePreferences}
+            disabled={isSaving}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm ${
+              saveStatus === 'success' 
+                ? 'bg-emerald-500 text-white hover:bg-emerald-600' 
+                : saveStatus === 'error'
+                ? 'bg-rose-500 text-white hover:bg-rose-600'
+                : 'bg-indigo-600 text-white hover:bg-indigo-700'
+            }`}
+          >
+            {saveStatus === 'success' ? <CheckCircle2 size={14} /> : <Save size={14} />}
+            {isSaving ? 'Kaydediliyor...' : saveStatus === 'success' ? 'Kaydedildi' : saveStatus === 'error' ? 'Hata!' : 'Görünümü Kaydet'}
+          </button>
+        </div>,
         portalTarget
       )}
 
