@@ -210,13 +210,15 @@ export function DashboardModule() {
   }, []);
 
   // Save User Preferences Function
-  const handleSavePreferences = React.useCallback(async () => {
-    if (!userId || isInitialLoad) return;
-    
+  const handleSavePreferences = async () => {
+    if (!userId) {
+      alert("Kullanıcı oturumu bulunamadı!");
+      return;
+    }
     setIsSaving(true);
     setSaveStatus('saving');
     try {
-      const stateToSave = {
+      await setDoc(doc(db, 'user_preferences', userId), {
         modulesOrder: modulesOrder.map(m => m.id),
         activeModules,
         globalViewMode,
@@ -227,10 +229,6 @@ export function DashboardModule() {
         selectedSubCategory,
         selectedNationalities,
         selectedSources,
-      };
-
-      await setDoc(doc(db, 'user_preferences', userId), {
-        ...stateToSave,
         updatedAt: new Date().toISOString()
       }, { merge: true });
       
@@ -240,13 +238,11 @@ export function DashboardModule() {
       console.error("Tercihler kaydedilirken hata:", error);
       setSaveStatus('error');
       setTimeout(() => setSaveStatus('idle'), 3000);
-      try {
-        handleFirestoreError(error, OperationType.WRITE, `user_preferences/${userId}`);
-      } catch (e) { /* Logged */ }
+      alert("Kaydetme işlemi başarısız oldu.");
     } finally {
       setIsSaving(false);
     }
-  }, [userId, modulesOrder, activeModules, globalViewMode, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources, isInitialLoad]);
+  };
 
   const moveModule = (id: string, direction: 'up' | 'down') => {
     const index = modulesOrder.findIndex(m => m.id === id);
@@ -645,20 +641,28 @@ export function DashboardModule() {
     <div className="h-full w-full bg-[#f8fafc] overflow-hidden flex flex-col">
       {/* Portal for Header Actions */}
       {portalTarget && createPortal(
-        <div className="flex items-center gap-3">
-          <button
+        <div className="flex items-center gap-4 h-10">
+          <button 
             onClick={handleSavePreferences}
             disabled={isSaving}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm ${
+            className={`px-5 py-2 rounded-xl font-bold text-sm shadow-md flex items-center gap-2 transition-all disabled:opacity-70 ${
               saveStatus === 'success' 
-                ? 'bg-emerald-500 text-white hover:bg-emerald-600' 
+                ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-200' 
                 : saveStatus === 'error'
-                ? 'bg-rose-500 text-white hover:bg-rose-600'
-                : 'bg-indigo-600 text-white hover:bg-indigo-700'
+                ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-200'
+                : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-200'
             }`}
           >
-            {saveStatus === 'success' ? <CheckCircle2 size={14} /> : <Save size={14} />}
-            {isSaving ? 'Kaydediliyor...' : saveStatus === 'success' ? 'Kaydedildi' : saveStatus === 'error' ? 'Hata!' : 'Görünümü Kaydet'}
+            {isSaving ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : saveStatus === 'success' ? (
+              <CheckCircle2 size={16} />
+            ) : saveStatus === 'error' ? (
+              <AlertCircle size={16} />
+            ) : (
+              <Save size={16} />
+            )}
+            {isSaving ? 'Kaydediliyor...' : saveStatus === 'success' ? 'Kaydedildi' : 'Görünümü Kaydet'}
           </button>
         </div>,
         portalTarget
