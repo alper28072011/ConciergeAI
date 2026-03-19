@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
-import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query, orderBy, getDoc } from 'firebase/firestore';
-import { db } from '../firebase';
+import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import { db, auth } from '../firebase';
 import { executeElektraQuery } from '../services/api';
 import { CommentAnalytics, HotelTaxonomy } from '../types';
 import { HOTEL_MAIN_CATEGORIES } from '../utils/constants';
@@ -11,8 +12,9 @@ import {
   Award, AlertTriangle, FileText, Download, X, Save, Edit3, Trash2, Clock, 
   Filter, Brain, Globe, Database, CheckCircle2, PieChart as PieChartIcon,
   ChevronRight, ArrowUpRight, ArrowDownRight, Printer, Sparkles, Layout,
-  Settings, Eye, EyeOff, LayoutGrid, List
+  Settings, Eye, EyeOff, LayoutGrid, List, ChevronDown, ChevronUp, Layers
 } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { generateAIContent } from '../services/aiService';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -21,6 +23,57 @@ import {
 import { getDashboardData } from '../utils/biEngine';
 import { toPng } from 'html-to-image';
 import { jsPDF } from 'jspdf';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#71717a'];
 const RADAR_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
@@ -48,7 +101,14 @@ export function DashboardModule() {
   const [selectedNationalities, setSelectedNationalities] = useState<string[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [globalViewMode, setGlobalViewMode] = useState<'chart' | 'table'>('chart');
+  const [showSubCategories, setShowSubCategories] = useState(false);
   const [activeModules, setActiveModules] = useState<string[]>(['kpi_cards', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda']);
+  const [modulesOrder, setModulesOrder] = useState(AVAILABLE_MODULES);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [lastSavedState, setLastSavedState] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string }>({ type: 'all', value: 'all' });
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   
@@ -61,6 +121,173 @@ export function DashboardModule() {
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
   const [editingReportType, setEditingReportType] = useState<string>('dashboard_summary');
   const [isSavingReport, setIsSavingReport] = useState(false);
+
+  // Load User Preferences
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        setUserId(user.uid);
+        const defaultState = {
+          modulesOrder: AVAILABLE_MODULES.map(m => m.id),
+          activeModules: ['kpi_cards', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda'],
+          globalViewMode: 'chart',
+          dateFilter: '30days',
+          customStartDate: '',
+          customEndDate: '',
+          selectedMainCategory: 'all',
+          selectedSubCategory: 'all',
+          selectedNationalities: [],
+          selectedSources: [],
+        };
+
+        try {
+          const docRef = doc(db, 'user_preferences', user.uid);
+          const docSnap = await getDoc(docRef);
+          
+          let resolvedState = { ...defaultState };
+          let resolvedModulesOrder = AVAILABLE_MODULES;
+
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            
+            // Resolve modules order safely
+            let resolvedModulesOrderIds = defaultState.modulesOrder;
+            
+            if (data.modulesOrder && Array.isArray(data.modulesOrder)) {
+              const ordered = data.modulesOrder.map((id: string) => 
+                AVAILABLE_MODULES.find(m => m.id === id)
+              ).filter(Boolean) as typeof AVAILABLE_MODULES;
+              const missing = AVAILABLE_MODULES.filter(m => !data.modulesOrder.includes(m.id));
+              resolvedModulesOrder = [...ordered, ...missing];
+              resolvedModulesOrderIds = resolvedModulesOrder.map(m => m.id);
+            }
+
+            resolvedState = {
+              modulesOrder: resolvedModulesOrderIds,
+              activeModules: data.activeModules || defaultState.activeModules,
+              globalViewMode: data.globalViewMode || defaultState.globalViewMode,
+              dateFilter: data.dateFilter || defaultState.dateFilter,
+              customStartDate: data.customStartDate || defaultState.customStartDate,
+              customEndDate: data.customEndDate || defaultState.customEndDate,
+              selectedMainCategory: data.selectedMainCategory || defaultState.selectedMainCategory,
+              selectedSubCategory: data.selectedSubCategory || defaultState.selectedSubCategory,
+              selectedNationalities: data.selectedNationalities || defaultState.selectedNationalities,
+              selectedSources: data.selectedSources || defaultState.selectedSources,
+            };
+          }
+
+          // Apply to React States
+          setModulesOrder(resolvedModulesOrder);
+          setActiveModules(resolvedState.activeModules);
+          setGlobalViewMode(resolvedState.globalViewMode as any);
+          setDateFilter(resolvedState.dateFilter as any);
+          setCustomStartDate(resolvedState.customStartDate);
+          setCustomEndDate(resolvedState.customEndDate);
+          setSelectedMainCategory(resolvedState.selectedMainCategory);
+          setSelectedSubCategory(resolvedState.selectedSubCategory);
+          setSelectedNationalities(resolvedState.selectedNationalities);
+          setSelectedSources(resolvedState.selectedSources);
+
+          // Set lastSavedState to exactly match the resolved state structure
+          setLastSavedState(resolvedState);
+
+        } catch (error) {
+          console.error("Tercihler yüklenirken hata:", error);
+          setLastSavedState(defaultState);
+          try {
+            handleFirestoreError(error, OperationType.GET, `user_preferences/${user.uid}`);
+          } catch (e) { /* Logged */ }
+        } finally {
+          setIsInitialLoad(false);
+        }
+      } else {
+        setUserId(null);
+        setIsInitialLoad(false);
+        setLastSavedState({});
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Change Detection
+  const hasUnsavedChanges = useMemo(() => {
+    if (!lastSavedState || isInitialLoad) return false;
+    
+    const currentState = {
+      modulesOrder: modulesOrder.map(m => m.id),
+      activeModules,
+      globalViewMode,
+      dateFilter,
+      customStartDate,
+      customEndDate,
+      selectedMainCategory,
+      selectedSubCategory,
+      selectedNationalities,
+      selectedSources,
+    };
+
+    return JSON.stringify(currentState) !== JSON.stringify(lastSavedState);
+  }, [modulesOrder, activeModules, globalViewMode, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources, lastSavedState, isInitialLoad]);
+
+  // Save User Preferences Function
+  const savePrefs = React.useCallback(async () => {
+    if (!userId || isInitialLoad) return;
+    
+    setIsSaving(true);
+    setSaveStatus('saving');
+    try {
+      const stateToSave = {
+        modulesOrder: modulesOrder.map(m => m.id),
+        activeModules,
+        globalViewMode,
+        dateFilter,
+        customStartDate,
+        customEndDate,
+        selectedMainCategory,
+        selectedSubCategory,
+        selectedNationalities,
+        selectedSources,
+      };
+
+      await setDoc(doc(db, 'user_preferences', userId), {
+        ...stateToSave,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      
+      setLastSavedState(stateToSave);
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    } catch (error) {
+      console.error("Tercihler kaydedilirken hata:", error);
+      setSaveStatus('error');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+      try {
+        handleFirestoreError(error, OperationType.WRITE, `user_preferences/${userId}`);
+      } catch (e) { /* Logged */ }
+    } finally {
+      setIsSaving(false);
+    }
+  }, [userId, modulesOrder, activeModules, globalViewMode, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources, isInitialLoad]);
+
+  // Auto-save effect
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    
+    const timeout = setTimeout(savePrefs, 2000); // Increased debounce to 2s
+    return () => clearTimeout(timeout);
+  }, [hasUnsavedChanges, savePrefs]);
+
+  const moveModule = (id: string, direction: 'up' | 'down') => {
+    const index = modulesOrder.findIndex(m => m.id === id);
+    if (index === -1) return;
+    const newOrder = [...modulesOrder];
+    if (direction === 'up' && index > 0) {
+      [newOrder[index], newOrder[index - 1]] = [newOrder[index - 1], newOrder[index]];
+    } else if (direction === 'down' && index < newOrder.length - 1) {
+      [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
+    }
+    setModulesOrder(newOrder);
+  };
 
   // Otonom Yorum Senkronizasyonu (Silent Background Sync)
   useEffect(() => {
@@ -144,6 +371,7 @@ export function DashboardModule() {
     }, (error) => {
       console.error("Error fetching analytics:", error);
       setIsLoading(false);
+      handleFirestoreError(error, OperationType.GET, 'comment_analytics');
     });
 
     return () => unsubscribe();
@@ -159,6 +387,7 @@ export function DashboardModule() {
       setSavedReports(reports);
     }, (error) => {
       console.error("Error fetching saved reports:", error);
+      handleFirestoreError(error, OperationType.GET, 'executive_reports');
     });
 
     return () => unsubscribe();
@@ -242,6 +471,53 @@ export function DashboardModule() {
   }, [filteredAnalytics, drillDownFilter]);
 
   const dashboardData = useMemo(() => getDashboardData(filteredAnalytics), [filteredAnalytics]);
+
+  const hierarchicalCategoryData = useMemo(() => {
+    const groups: { [key: string]: { name: string, count: number, totalScore: number, subCategories: any[] } } = {};
+    
+    dashboardData.mostMentioned.forEach(item => {
+      if (!groups[item.mainCategory]) {
+        groups[item.mainCategory] = { name: item.mainCategory, count: 0, totalScore: 0, subCategories: [] };
+      }
+      groups[item.mainCategory].count += item.count;
+      groups[item.mainCategory].totalScore += (item.avgScore * item.count);
+      groups[item.mainCategory].subCategories.push(item);
+    });
+
+    return Object.values(groups).map(group => ({
+      ...group,
+      avgScore: Math.round(group.totalScore / group.count)
+    })).sort((a, b) => b.count - a.count);
+  }, [dashboardData.mostMentioned]);
+
+  const categoryChartData = useMemo(() => {
+    if (!showSubCategories) {
+      return dashboardData.categoryPerformance.map(item => ({
+        ...item,
+        isSub: false
+      }));
+    }
+
+    const flatData: any[] = [];
+    hierarchicalCategoryData.forEach(group => {
+      flatData.push({
+        name: group.name,
+        score: group.avgScore,
+        count: group.count,
+        isSub: false
+      });
+      group.subCategories.forEach(sub => {
+        flatData.push({
+          name: sub.subCategory,
+          score: sub.avgScore,
+          count: sub.count,
+          isSub: true,
+          parent: group.name
+        });
+      });
+    });
+    return flatData;
+  }, [hierarchicalCategoryData, dashboardData.categoryPerformance, showSubCategories]);
 
   const allNationalities = useMemo(() => {
     const nats = new Set<string>();
@@ -367,6 +643,7 @@ export function DashboardModule() {
       setIsReportModalOpen(false);
     } catch (error) {
       console.error("Rapor kaydedilirken hata:", error);
+      handleFirestoreError(error, OperationType.WRITE, `executive_reports/${editingReportId || 'new'}`);
       alert("Rapor kaydedilirken bir hata oluştu.");
     } finally {
       setIsSavingReport(false);
@@ -379,6 +656,7 @@ export function DashboardModule() {
         await deleteDoc(doc(db, 'executive_reports', id));
       } catch (error) {
         console.error("Rapor silinirken hata:", error);
+        handleFirestoreError(error, OperationType.DELETE, `executive_reports/${id}`);
         alert("Rapor silinirken bir hata oluştu.");
       }
     }
@@ -398,110 +676,130 @@ export function DashboardModule() {
       <div className="w-full max-w-[1850px] mx-auto h-full flex justify-between gap-8 py-6 overflow-hidden px-6">
         
         {/* Left Column: Control Panel (Sticky) */}
-        <aside className="w-80 shrink-0 flex flex-col gap-6 sticky top-0 h-[calc(100vh-3rem)] overflow-y-auto pr-2 custom-scrollbar pb-6">
-          {/* Brand & AI Status */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full -mr-16 -mt-16 opacity-50" />
-            <div className="relative z-10">
-              <div className="flex items-center gap-4 mb-4">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center shadow-xl shadow-indigo-200">
-                  <Brain className="text-white" size={28} />
-                </div>
-                <div>
-                  <h2 className="text-xl font-black text-slate-900 tracking-tight leading-none">Yönetim Kokpiti</h2>
-                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-600 uppercase tracking-widest mt-1">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    AI Analiz Aktif
-                  </div>
-                </div>
-              </div>
-              <p className="text-xs text-slate-500 leading-relaxed font-medium">
-                Veri odaklı karar destek sistemi. Tüm kanallardan gelen misafir geri bildirimleri anlık olarak işlenmektedir.
-              </p>
-            </div>
-          </div>
-
+        <aside className="w-64 shrink-0 flex flex-col gap-3 sticky top-0 h-[calc(100vh-3rem)] overflow-y-auto pr-2 custom-scrollbar pb-6">
           {/* View Mode Toggle (Modernized) */}
-          <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-sm">
-            <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
-              <Layout size={14} className="text-indigo-500" />
-              Görünüm Tercihi
+          <div className="bg-white rounded-lg p-2.5 border border-slate-200 shadow-sm">
+            <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] mb-2 flex items-center gap-2">
+              <Layout size={10} className="text-indigo-500" />
+              Görünüm
             </h3>
-            <div className="flex p-1 bg-slate-100 rounded-2xl">
+            <div className="flex p-0.5 bg-slate-100 rounded-md">
               <button
                 onClick={() => setGlobalViewMode('chart')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded text-[10px] font-bold transition-all ${
                   globalViewMode === 'chart' 
-                    ? 'bg-white text-indigo-600 shadow-md' 
+                    ? 'bg-white text-indigo-600 shadow-sm' 
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
-                <BarChart3 size={16} />
+                <BarChart3 size={12} />
                 Grafik
               </button>
               <button
                 onClick={() => setGlobalViewMode('table')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded text-[10px] font-bold transition-all ${
                   globalViewMode === 'table' 
-                    ? 'bg-white text-indigo-600 shadow-md' 
+                    ? 'bg-white text-indigo-600 shadow-sm' 
                     : 'text-slate-500 hover:text-slate-700'
                 }`}
               >
-                <Database size={16} />
+                <Database size={12} />
                 Tablo
               </button>
             </div>
           </div>
 
           {/* Report Structure (Modular Configuration) */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-5">
-              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                <Settings size={14} className="text-indigo-500" />
-                Rapor Yapılandırması
+          <div className="bg-white rounded-lg p-3 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                <Settings size={10} className="text-indigo-500" />
+                Yapılandırma
               </h3>
-              <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                {activeModules.length}/{AVAILABLE_MODULES.length}
-              </span>
+              <div className="flex items-center gap-2">
+                {hasUnsavedChanges && (
+                  <button 
+                    onClick={savePrefs}
+                    disabled={isSaving}
+                    className={`flex items-center gap-1 px-2 py-1 rounded text-[8px] font-bold transition-all shadow-sm ${
+                      saveStatus === 'success' 
+                        ? 'bg-emerald-500 text-white' 
+                        : saveStatus === 'error'
+                        ? 'bg-rose-500 text-white'
+                        : 'bg-indigo-600 text-white hover:bg-indigo-700 animate-pulse'
+                    }`}
+                    title="Değişiklikleri Kaydet"
+                  >
+                    {saveStatus === 'success' ? <CheckCircle2 size={10} /> : <Save size={10} />}
+                    {isSaving ? '...' : saveStatus === 'success' ? 'Kaydedildi' : saveStatus === 'error' ? 'Hata!' : 'Kaydet'}
+                  </button>
+                )}
+                <span className="text-[8px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded-full">
+                  {activeModules.length}/{AVAILABLE_MODULES.length}
+                </span>
+              </div>
             </div>
-            <div className="space-y-2">
-              {AVAILABLE_MODULES.map(module => {
+            {hasUnsavedChanges && (
+              <div className="mb-2 px-2 py-1 bg-amber-50 border border-amber-100 rounded flex items-center gap-1.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" />
+                <span className="text-[8px] font-medium text-amber-700">Kaydedilmemiş değişiklikler var</span>
+              </div>
+            )}
+            <div className="space-y-1">
+              {modulesOrder.map((module, index) => {
                 const isActive = activeModules.includes(module.id);
                 return (
-                  <button
-                    key={module.id}
-                    onClick={() => {
-                      if (isActive) {
-                        setActiveModules(prev => prev.filter(id => id !== module.id));
-                      } else {
-                        setActiveModules(prev => [...prev, module.id]);
-                      }
-                    }}
-                    className={`w-full flex items-center justify-between p-3 rounded-2xl transition-all border ${
-                      isActive 
-                        ? 'bg-indigo-50/50 border-indigo-100 text-indigo-700' 
-                        : 'bg-white border-slate-50 text-slate-500 hover:border-slate-200'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-xl ${isActive ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}>
-                        <module.icon size={16} />
-                      </div>
-                      <span className="text-xs font-bold">{module.label}</span>
+                  <div key={module.id} className="group relative flex items-center gap-1">
+                    <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        disabled={index === 0}
+                        onClick={() => moveModule(module.id, 'up')}
+                        className="p-0.5 hover:bg-slate-100 rounded disabled:opacity-20 text-slate-400"
+                      >
+                        <ChevronUp size={10} />
+                      </button>
+                      <button 
+                        disabled={index === modulesOrder.length - 1}
+                        onClick={() => moveModule(module.id, 'down')}
+                        className="p-0.5 hover:bg-slate-100 rounded disabled:opacity-20 text-slate-400"
+                      >
+                        <ChevronDown size={10} />
+                      </button>
                     </div>
-                    {isActive ? <Eye size={14} /> : <EyeOff size={14} className="opacity-30" />}
-                  </button>
+                    <button
+                      onClick={() => {
+                        if (isActive) {
+                          setActiveModules(prev => prev.filter(id => id !== module.id));
+                        } else {
+                          setActiveModules(prev => [...prev, module.id]);
+                        }
+                      }}
+                      className={`flex-1 flex items-center justify-between p-1.5 rounded-md transition-all border ${
+                        isActive 
+                          ? 'bg-indigo-50/50 border-indigo-100 text-indigo-700' 
+                          : 'bg-white border-slate-50 text-slate-500 hover:border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <div className={`p-1 rounded-md ${isActive ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-50 text-slate-400'}`}>
+                          <module.icon size={12} />
+                        </div>
+                        <span className="text-[10px] font-bold">{module.label}</span>
+                      </div>
+                      {isActive ? <Eye size={10} /> : <EyeOff size={10} className="opacity-30" />}
+                    </button>
+                  </div>
                 );
               })}
             </div>
           </div>
 
           {/* Filters Section */}
-          <div className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm flex flex-col gap-6">
+          <div className="bg-white rounded-lg p-3 border border-slate-200 shadow-sm flex flex-col gap-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
-                <Filter size={14} className="text-indigo-500" />
-                Denetim Filtreleri
+              <h3 className="text-[9px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+                <Filter size={10} className="text-indigo-500" />
+                Filtreler
               </h3>
               <button 
                 onClick={() => {
@@ -511,28 +809,28 @@ export function DashboardModule() {
                   setSelectedNationalities([]);
                   setSelectedSources([]);
                 }}
-                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 uppercase tracking-widest"
+                className="text-[8px] font-bold text-indigo-600 hover:text-indigo-800 uppercase tracking-widest"
               >
                 Sıfırla
               </button>
             </div>
 
             {/* Date Presets */}
-            <div className="space-y-3">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Rapor Dönemi</label>
-              <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-2">
+              <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Dönem</label>
+              <div className="grid grid-cols-2 gap-1">
                 {[
-                  { id: '7days', label: 'Son 7 Gün' },
-                  { id: '30days', label: 'Son 30 Gün' },
+                  { id: '7days', label: '7 Gün' },
+                  { id: '30days', label: '30 Gün' },
                   { id: 'thisYear', label: 'Bu Yıl' },
-                  { id: 'custom', label: 'Özel Aralık' }
+                  { id: 'custom', label: 'Özel' }
                 ].map(preset => (
                   <button
                     key={preset.id}
                     onClick={() => setDateFilter(preset.id as any)}
-                    className={`px-3 py-2.5 text-[11px] font-bold rounded-xl border transition-all ${
+                    className={`px-1.5 py-1.5 text-[9px] font-bold rounded-md border transition-all ${
                       dateFilter === preset.id 
-                        ? 'bg-slate-900 border-slate-900 text-white shadow-lg shadow-slate-200' 
+                        ? 'bg-slate-900 border-slate-900 text-white shadow-sm' 
                         : 'bg-white border-slate-100 text-slate-600 hover:border-slate-300'
                     }`}
                   >
@@ -543,55 +841,54 @@ export function DashboardModule() {
             </div>
 
             {dateFilter === 'custom' && (
-              <div className="grid grid-cols-2 gap-2 animate-in fade-in slide-in-from-top-2">
-                <div className="space-y-1">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase ml-1">Başlangıç</span>
+              <div className="grid grid-cols-2 gap-1.5 animate-in fade-in slide-in-from-top-1">
+                <div className="space-y-0.5">
+                  <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Başlangıç</span>
                   <input 
                     type="date" 
                     value={customStartDate}
                     onChange={(e) => setCustomStartDate(e.target.value)}
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
                   />
                 </div>
-                <div className="space-y-1">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase ml-1">Bitiş</span>
+                <div className="space-y-0.5">
+                  <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Bitiş</span>
                   <input 
                     type="date" 
                     value={customEndDate}
                     onChange={(e) => setCustomEndDate(e.target.value)}
-                    className="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
                   />
                 </div>
               </div>
             )}
 
             {/* Multi-selects for Source & Nationality */}
-            <div className="space-y-5">
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Kanal Kaynağı</label>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Kaynak</label>
                 <select
                   multiple
                   value={selectedSources}
                   onChange={(e) => setSelectedSources(Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => option.value))}
-                  className="w-full border border-slate-200 rounded-2xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 h-28 custom-scrollbar"
+                  className="w-full border border-slate-200 rounded-lg px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 h-20 custom-scrollbar"
                 >
                   {allSources.map(source => (
-                    <option key={source} value={source} className="py-1 px-2 rounded-lg mb-1">{source}</option>
+                    <option key={source} value={source} className="py-0.5 px-1 rounded mb-0.5">{source}</option>
                   ))}
                 </select>
-                <p className="text-[9px] text-slate-400 italic">Birden fazla seçmek için Ctrl/Cmd tuşuna basın.</p>
               </div>
 
-              <div className="space-y-2">
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Misafir Uyruğu</label>
+              <div className="space-y-1">
+                <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Uyruk</label>
                 <select
                   multiple
                   value={selectedNationalities}
                   onChange={(e) => setSelectedNationalities(Array.from(e.target.selectedOptions, (option: HTMLOptionElement) => option.value))}
-                  className="w-full border border-slate-200 rounded-2xl px-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500/20 h-28 custom-scrollbar"
+                  className="w-full border border-slate-200 rounded-lg px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 h-20 custom-scrollbar"
                 >
                   {allNationalities.map(nat => (
-                    <option key={nat} value={nat} className="py-1 px-2 rounded-lg mb-1">{nat}</option>
+                    <option key={nat} value={nat} className="py-0.5 px-1 rounded mb-0.5">{nat}</option>
                   ))}
                 </select>
               </div>
@@ -599,500 +896,607 @@ export function DashboardModule() {
           </div>
 
           {/* Quick Actions */}
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-1.5">
             <button
               onClick={handleGenerateDashboardReport}
-              className="w-full bg-indigo-600 text-white p-4 rounded-3xl font-bold text-sm flex items-center justify-center gap-3 hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-100 group"
+              className="w-full bg-indigo-600 text-white p-2.5 rounded-lg font-bold text-[10px] flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100 group"
             >
-              <Sparkles size={18} className="text-amber-300 group-hover:scale-110 transition-transform" />
-              AI Yönetici Özeti Üret
+              <Sparkles size={14} className="text-amber-300 group-hover:scale-110 transition-transform" />
+              AI Özeti Üret
             </button>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-1.5">
               <button
                 onClick={handleExportPdf}
-                className="bg-white text-slate-700 border border-slate-200 p-4 rounded-3xl font-bold text-[11px] flex flex-col items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
+                className="bg-white text-slate-700 border border-slate-200 p-2 rounded-lg font-bold text-[9px] flex flex-col items-center justify-center gap-1 hover:bg-slate-50 transition-all shadow-sm"
               >
-                <Printer size={18} className="text-slate-400" />
-                PDF İndir
+                <Printer size={14} className="text-slate-400" />
+                PDF
               </button>
               <button
                 onClick={() => setIsSavedReportsModalOpen(true)}
-                className="bg-white text-slate-700 border border-slate-200 p-4 rounded-3xl font-bold text-[11px] flex flex-col items-center justify-center gap-2 hover:bg-slate-50 transition-all shadow-sm"
+                className="bg-white text-slate-700 border border-slate-200 p-2 rounded-lg font-bold text-[9px] flex flex-col items-center justify-center gap-1 hover:bg-slate-50 transition-all shadow-sm"
               >
-                <Database size={18} className="text-slate-400" />
+                <Database size={14} className="text-slate-400" />
                 Kayıtlı ({savedReports.length})
               </button>
             </div>
           </div>
         </aside>
-
         {/* Middle Column: Graphics Area (Scrollable) */}
         <main className="flex-1 min-w-0 flex flex-col gap-6 overflow-y-auto pr-4 custom-scrollbar pb-20" ref={dashboardRef}>
           
           {activeModules.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-3xl border-2 border-dashed border-slate-200 text-slate-400">
+            <div className="flex flex-col items-center justify-center py-20 bg-white rounded-xl border-2 border-dashed border-slate-200 text-slate-400">
               <LayoutGrid size={48} className="mb-4 opacity-20" />
               <p className="font-bold text-lg">Rapor İçeriği Boş</p>
               <p className="text-sm">Sol panelden görüntülemek istediğiniz rapor parçalarını seçebilirsiniz.</p>
             </div>
           )}
 
-          {/* Row 1: KPI Cards */}
-          {activeModules.includes('kpi_cards') && (
-            <div className="grid grid-cols-4 gap-4">
-              {[
-              { 
-                label: 'Ort. Memnuniyet', 
-                value: `%${dashboardData.kpis.avgScore}`, 
-                change: dashboardData.kpis.scoreChange, 
-                icon: Award, 
-                color: 'indigo' 
-              },
-              { 
-                label: 'Analiz Edilen Yorum', 
-                value: dashboardData.kpis.totalComments, 
-                change: dashboardData.kpis.commentChange, 
-                icon: MessageSquare, 
-                color: 'blue' 
-              },
-              { 
-                label: 'En Başarılı Kategori', 
-                value: dashboardData.kpis.bestCategory, 
-                icon: CheckCircle2, 
-                color: 'emerald' 
-              },
-              { 
-                label: 'Gelişim Alanı', 
-                value: dashboardData.kpis.worstCategory, 
-                icon: AlertTriangle, 
-                color: 'red' 
-              }
-            ].map((kpi, idx) => (
-              <div 
-                key={idx} 
-                className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden group cursor-pointer hover:border-indigo-300 transition-all"
-                onClick={() => {
-                  if (kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı') {
-                    setDrillDownFilter({ type: 'category', value: kpi.value });
-                  } else {
-                    setDrillDownFilter({ type: 'all', value: 'all' });
-                  }
-                }}
-              >
-                <div className={`absolute top-0 right-0 w-24 h-24 bg-${kpi.color}-50 rounded-full -mr-12 -mt-12 transition-transform group-hover:scale-110`} />
-                <div className="relative z-10">
-                  <div className="flex items-center justify-between mb-3">
-                    <div className={`p-2 rounded-xl bg-${kpi.color}-50 text-${kpi.color}-600`}>
-                      <kpi.icon size={20} />
-                    </div>
-                    {kpi.change !== undefined && (
-                      <div className={`flex items-center gap-0.5 text-[10px] font-bold ${kpi.change >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {kpi.change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                        {Math.abs(kpi.change)}%
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{kpi.label}</p>
-                  <h4 className="text-xl font-black text-slate-900 truncate">{kpi.value}</h4>
-                </div>
-              </div>
-            ))}
-          </div>
-          )}
+          {modulesOrder.map((module) => {
+            if (!activeModules.includes(module.id)) return null;
 
-          {/* Row 2: Category Performance (Horizontal Bar Chart or Table) */}
-          {activeModules.includes('category_satisfaction') && (
-          <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">Kategori Bazlı Memnuniyet</h3>
-                <p className="text-xs text-slate-500">Ana ve alt kategorilerdeki misafir deneyim puanları</p>
-              </div>
-            </div>
-
-            {globalViewMode === 'chart' ? (
-              <div className="h-[300px] w-full relative min-w-0 min-h-0">
-                <ResponsiveContainer width="100%" height={300}>
-                  <BarChart 
-                    layout="vertical" 
-                    data={dashboardData.categoryPerformance} 
-                    margin={{ left: 40, right: 40 }}
-                    onClick={(data: any) => {
-                      if (data && data.activeLabel) {
-                        setDrillDownFilter({ type: 'category', value: data.activeLabel });
-                      }
-                    }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
-                    <XAxis type="number" domain={[0, 100]} hide />
-                    <YAxis 
-                      dataKey="name" 
-                      type="category" 
-                      axisLine={false} 
-                      tickLine={false} 
-                      tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }}
-                      width={100}
-                    />
-                    <Tooltip 
-                      cursor={{ fill: '#f8fafc' }}
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                    />
-                    <Bar 
-                      dataKey="score" 
-                      fill="#4f46e5" 
-                      radius={[0, 4, 4, 0]} 
-                      barSize={20}
-                      label={{ position: 'right', fontSize: 11, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-100">
-                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Ana Kategori</th>
-                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Alt Kategori</th>
-                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
-                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {dashboardData.mostMentioned.map((item, idx) => (
-                      <tr 
-                        key={idx} 
-                        className="hover:bg-slate-50 transition-colors group cursor-pointer"
-                        onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
-                      >
-                        <td className="py-3 px-4">
-                          <span className="text-[10px] font-bold text-slate-400 uppercase bg-slate-100 px-2 py-0.5 rounded">
-                            {item.mainCategory}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-sm font-semibold text-slate-700">
-                          {item.subCategory}
-                        </td>
-                        <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">
-                          {item.count}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
-                              <div 
-                                className={`h-full rounded-full ${
-                                  item.avgScore >= 80 ? 'bg-emerald-500' :
-                                  item.avgScore >= 60 ? 'bg-blue-500' :
-                                  item.avgScore >= 40 ? 'bg-amber-500' :
-                                  'bg-red-500'
-                                }`}
-                                style={{ width: `${item.avgScore}%` }}
-                              />
-                            </div>
-                            <span className={`text-xs font-bold w-10 ${
-                              item.avgScore >= 80 ? 'text-emerald-600' :
-                              item.avgScore >= 60 ? 'text-blue-600' :
-                              item.avgScore >= 40 ? 'text-amber-600' :
-                              'text-red-600'
-                            }`}>
-                              %{item.avgScore}
-                            </span>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-          )}
-
-          {/* Row 3: Source Analysis */}
-          {activeModules.includes('source_analysis') && (
-          <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">Kanal Dağılımı</h3>
-                <p className="text-xs text-slate-500">Yorumların geldiği platformlar ve kanal bazlı performans</p>
-              </div>
-            </div>
-
-            {globalViewMode === 'chart' ? (
-              <div className="h-[300px] w-full relative min-w-0 min-h-0">
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart
-                    onClick={(data: any) => {
-                      if (data && data.activePayload && data.activePayload[0]) {
-                        setDrillDownFilter({ type: 'source', value: data.activePayload[0].name });
-                      }
-                    }}
-                  >
-                    <Pie
-                      data={dashboardData.sourceAnalysis}
-                      innerRadius={80}
-                      outerRadius={110}
-                      paddingAngle={8}
-                      dataKey="count"
-                      nameKey="name"
+            if (module.id === 'kpi_cards') {
+              return (
+                <div key="kpi_cards" className="grid grid-cols-4 gap-4">
+                  {[
+                    { 
+                      label: 'Ort. Memnuniyet', 
+                      value: `%${dashboardData.kpis.avgScore}`, 
+                      change: dashboardData.kpis.scoreChange, 
+                      icon: Award, 
+                      color: 'indigo' 
+                    },
+                    { 
+                      label: 'Analiz Edilen Yorum', 
+                      value: dashboardData.kpis.totalComments, 
+                      change: dashboardData.kpis.commentChange, 
+                      icon: MessageSquare, 
+                      color: 'blue' 
+                    },
+                    { 
+                      label: 'En Başarılı Kategori', 
+                      value: dashboardData.kpis.bestCategory, 
+                      icon: CheckCircle2, 
+                      color: 'emerald' 
+                    },
+                    { 
+                      label: 'Gelişim Alanı', 
+                      value: dashboardData.kpis.worstCategory, 
+                      icon: AlertTriangle, 
+                      color: 'red' 
+                    }
+                  ].map((kpi, idx) => (
+                    <div 
+                      key={idx} 
+                      className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden group cursor-pointer hover:border-indigo-300 transition-all"
+                      onClick={() => {
+                        if (kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı') {
+                          setDrillDownFilter({ type: 'category', value: kpi.value });
+                        } else {
+                          setDrillDownFilter({ type: 'all', value: 'all' });
+                        }
+                      }}
                     >
-                      {dashboardData.sourceAnalysis.map((_, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      <div className={`absolute top-0 right-0 w-24 h-24 bg-${kpi.color}-50 rounded-full -mr-12 -mt-12 transition-transform group-hover:scale-110`} />
+                      <div className="relative z-10">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className={`p-2 rounded-xl bg-${kpi.color}-50 text-${kpi.color}-600`}>
+                            <kpi.icon size={20} />
+                          </div>
+                          {kpi.change !== undefined && (
+                            <div className={`flex items-center gap-0.5 text-[10px] font-bold ${kpi.change >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                              {kpi.change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                              {Math.abs(kpi.change)}%
+                            </div>
+                          )}
+                        </div>
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{kpi.label}</p>
+                        <h4 className="text-xl font-black text-slate-900 truncate">{kpi.value}</h4>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              );
+            }
+
+            if (module.id === 'category_satisfaction') {
+              return (
+                <section key="category_satisfaction" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">Kategori Bazlı Memnuniyet</h3>
+                      <p className="text-xs text-slate-500">Ana ve alt kategorilerdeki misafir deneyim puanları</p>
+                    </div>
+                    <button
+                      onClick={() => setShowSubCategories(!showSubCategories)}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        showSubCategories 
+                          ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' 
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      <Layers size={14} />
+                      {showSubCategories ? 'Alt Konuları Gizle' : 'Alt Konuları Göster'}
+                    </button>
+                  </div>
+
+                  {globalViewMode === 'chart' ? (
+                    <div className={`w-full relative min-w-0 min-h-0 transition-all duration-500 ${showSubCategories ? 'h-[900px]' : 'h-[450px]'}`}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart 
+                          layout="vertical" 
+                          data={categoryChartData} 
+                          margin={{ left: 10, right: 60, top: 10, bottom: 10 }}
+                          onClick={(data: any) => {
+                            if (data && data.activeLabel) {
+                              setDrillDownFilter({ type: 'category', value: data.activeLabel });
+                            }
+                          }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                          <XAxis type="number" domain={[0, 100]} hide />
+                          <YAxis 
+                            dataKey="name" 
+                            type="category" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            interval={0}
+                            tick={(props) => {
+                              const { x, y, payload } = props;
+                              const item = categoryChartData.find(d => d.name === payload.value);
+                              return (
+                                <g transform={`translate(${x},${y})`}>
+                                  <text 
+                                    x={-15} 
+                                    y={0} 
+                                    dy={4} 
+                                    textAnchor="end" 
+                                    fill={item?.isSub ? '#94a3b8' : '#1e293b'}
+                                    fontSize={item?.isSub ? 10 : 11}
+                                    fontWeight={item?.isSub ? 500 : 800}
+                                    className="uppercase tracking-tighter"
+                                  >
+                                    {item?.isSub ? `↳ ${payload.value}` : payload.value}
+                                  </text>
+                                </g>
+                              );
+                            }}
+                            width={200}
+                          />
+                          <Tooltip 
+                            cursor={{ fill: '#f8fafc' }}
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Bar 
+                            dataKey="score" 
+                            radius={[0, 4, 4, 0]} 
+                            barSize={showSubCategories ? 12 : 20}
+                            label={{ position: 'right', fontSize: 10, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
+                          >
+                            {categoryChartData.map((entry, index) => (
+                              <Cell 
+                                key={`cell-${index}`} 
+                                fill={entry.isSub ? '#818cf8' : '#4f46e5'} 
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-100">
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kategori</th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {hierarchicalCategoryData.map((group, gIdx) => (
+                            <React.Fragment key={gIdx}>
+                              <tr 
+                                className="hover:bg-slate-50 transition-colors group cursor-pointer"
+                                onClick={() => setDrillDownFilter({ type: 'category', value: group.name })}
+                              >
+                                <td className="py-3 px-4">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                                    <span className="text-sm font-bold text-slate-800 uppercase tracking-tight">
+                                      {group.name}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono font-bold">
+                                  {group.count}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
+                                      <div 
+                                        className={`h-full rounded-full ${
+                                          group.avgScore >= 80 ? 'bg-emerald-500' :
+                                          group.avgScore >= 60 ? 'bg-blue-500' :
+                                          group.avgScore >= 40 ? 'bg-amber-500' :
+                                          'bg-red-500'
+                                        }`}
+                                        style={{ width: `${group.avgScore}%` }}
+                                      />
+                                    </div>
+                                    <span className={`text-xs font-black w-10 ${
+                                      group.avgScore >= 80 ? 'text-emerald-600' :
+                                      group.avgScore >= 60 ? 'text-blue-600' :
+                                      group.avgScore >= 40 ? 'text-amber-600' :
+                                      'text-red-600'
+                                    }`}>
+                                      %{group.avgScore}
+                                    </span>
+                                  </div>
+                                </td>
+                              </tr>
+                              <AnimatePresence>
+                                {showSubCategories && group.subCategories.map((sub, sIdx) => (
+                                  <motion.tr
+                                    key={`${gIdx}-${sIdx}`}
+                                    initial={{ opacity: 0, x: -10 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    exit={{ opacity: 0, x: -10 }}
+                                    transition={{ duration: 0.2, delay: sIdx * 0.03 }}
+                                    className="bg-slate-50/50 hover:bg-indigo-50 transition-colors cursor-pointer border-l-2 border-indigo-200"
+                                    onClick={() => setDrillDownFilter({ type: 'category', value: sub.subCategory })}
+                                  >
+                                    <td className="py-2 px-4 pl-8">
+                                      <span className="text-xs font-medium text-slate-600">
+                                        ↳ {sub.subCategory}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 px-4 text-xs text-slate-400 text-center font-mono">
+                                      {sub.count}
+                                    </td>
+                                    <td className="py-2 px-4">
+                                      <div className="flex items-center gap-3">
+                                        <div className="flex-1 h-1 bg-slate-200 rounded-full overflow-hidden min-w-[100px]">
+                                          <div 
+                                            className={`h-full rounded-full ${
+                                              sub.avgScore >= 80 ? 'bg-emerald-400' :
+                                              sub.avgScore >= 60 ? 'bg-blue-400' :
+                                              sub.avgScore >= 40 ? 'bg-amber-400' :
+                                              'bg-red-400'
+                                            }`}
+                                            style={{ width: `${sub.avgScore}%` }}
+                                          />
+                                        </div>
+                                        <span className="text-[10px] font-bold text-slate-500 w-10">
+                                          %{sub.avgScore}
+                                        </span>
+                                      </div>
+                                    </td>
+                                  </motion.tr>
+                                ))}
+                              </AnimatePresence>
+                            </React.Fragment>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              );
+            }
+
+            if (module.id === 'source_analysis') {
+              return (
+                <section key="source_analysis" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">Kanal Dağılımı</h3>
+                      <p className="text-xs text-slate-500">Yorumların geldiği platformlar ve kanal bazlı performans</p>
+                    </div>
+                  </div>
+
+                  {globalViewMode === 'chart' ? (
+                    <div className="h-[300px] w-full relative min-w-0 min-h-0">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <PieChart
+                          onClick={(data: any) => {
+                            if (data && data.activePayload && data.activePayload[0]) {
+                              setDrillDownFilter({ type: 'source', value: data.activePayload[0].name });
+                            }
+                          }}
+                        >
+                          <Pie
+                            data={dashboardData.sourceAnalysis}
+                            innerRadius={80}
+                            outerRadius={110}
+                            paddingAngle={8}
+                            dataKey="count"
+                            nameKey="name"
+                          >
+                            {dashboardData.sourceAnalysis.map((_, index) => (
+                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '11px', fontWeight: 600 }} />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-100">
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kanal Kaynağı</th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {dashboardData.sourceAnalysis.map((item, idx) => (
+                            <tr 
+                              key={idx} 
+                              className="hover:bg-slate-50 transition-colors cursor-pointer"
+                              onClick={() => setDrillDownFilter({ type: 'source', value: item.name })}
+                            >
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                                  <span className="text-sm font-semibold text-slate-700">{item.name}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">
+                                {item.count}
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
+                                    <div 
+                                      className={`h-full rounded-full ${
+                                        item.avgScore >= 80 ? 'bg-emerald-500' :
+                                        item.avgScore >= 60 ? 'bg-blue-500' :
+                                        item.avgScore >= 40 ? 'bg-amber-500' :
+                                        'bg-red-500'
+                                      }`}
+                                      style={{ width: `${item.avgScore}%` }}
+                                    />
+                                  </div>
+                                  <span className={`text-xs font-bold w-10 ${
+                                    item.avgScore >= 80 ? 'text-emerald-600' :
+                                    item.avgScore >= 60 ? 'text-blue-600' :
+                                    item.avgScore >= 40 ? 'text-amber-600' :
+                                    'text-red-600'
+                                  }`}>
+                                    %{item.avgScore}
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              );
+            }
+
+            if (module.id === 'nationality_analysis') {
+              return (
+                <section key="nationality_analysis" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">Uyruk Memnuniyet Endeksi</h3>
+                      <p className="text-xs text-slate-500">Pazar bazlı ortalama skorlar ve misafir dağılımı</p>
+                    </div>
+                  </div>
+
+                  {globalViewMode === 'chart' ? (
+                    <div 
+                      className="w-full relative min-w-0 min-h-0 overflow-hidden" 
+                      style={{ height: `${Math.max(400, dashboardData.nationalityAnalysis.length * 40)}px` }}
+                    >
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart 
+                          layout="vertical" 
+                          data={dashboardData.nationalityAnalysis} 
+                          margin={{ left: 20, right: 60, top: 10, bottom: 10 }}
+                          onClick={(data: any) => {
+                            if (data && data.activeLabel) {
+                              setDrillDownFilter({ type: 'nationality', value: data.activeLabel });
+                            }
+                          }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                          <XAxis type="number" domain={[0, 100]} hide />
+                          <YAxis 
+                            dataKey="name" 
+                            type="category" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            interval={0}
+                            tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }}
+                            width={120}
+                          />
+                          <Tooltip 
+                            cursor={{ fill: '#f8fafc' }}
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                          />
+                          <Bar 
+                            dataKey="avgScore" 
+                            radius={[0, 4, 4, 0]} 
+                            barSize={20}
+                            label={{ position: 'right', fontSize: 10, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
+                          >
+                            {dashboardData.nationalityAnalysis.map((entry, index) => (
+                              <Cell 
+                                key={`cell-${index}`} 
+                                fill={entry.avgScore >= 80 ? '#10b981' : entry.avgScore >= 60 ? '#4f46e5' : entry.avgScore >= 40 ? '#f59e0b' : '#ef4444'} 
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-100">
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Uyruk / Pazar</th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {dashboardData.nationalityAnalysis.map((item, idx) => (
+                            <tr 
+                              key={idx} 
+                              className="hover:bg-slate-50 transition-colors cursor-pointer group"
+                              onClick={() => setDrillDownFilter({ type: 'nationality', value: item.name })}
+                            >
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                  <span className="text-sm font-bold text-slate-800 tracking-tight">{item.name}</span>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono font-bold">
+                                {item.count}
+                              </td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
+                                    <div 
+                                      className={`h-full rounded-full ${
+                                        item.avgScore >= 80 ? 'bg-emerald-500' :
+                                        item.avgScore >= 60 ? 'bg-blue-500' :
+                                        item.avgScore >= 40 ? 'bg-amber-500' :
+                                        'bg-red-500'
+                                      }`}
+                                      style={{ width: `${item.avgScore}%` }}
+                                    />
+                                  </div>
+                                  <span className={`text-xs font-black w-10 ${
+                                    item.avgScore >= 80 ? 'text-emerald-600' :
+                                    item.avgScore >= 60 ? 'text-blue-600' :
+                                    item.avgScore >= 40 ? 'text-amber-600' :
+                                    'text-red-600'
+                                  }`}>
+                                    %{item.avgScore}
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              );
+            }
+
+            if (module.id === 'hotel_agenda') {
+              return (
+                <div key="hotel_agenda" className="grid grid-cols-3 gap-6">
+                  {/* Most Mentioned */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="p-4 border-b border-slate-100 bg-slate-50/50">
+                      <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
+                        <TrendingUp size={14} className="text-indigo-500" />
+                        En Çok Konuşulanlar
+                      </h4>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {dashboardData.mostMentioned.slice(0, 6).map((item, idx) => (
+                        <div 
+                          key={idx} 
+                          className="p-3 hover:bg-slate-50 transition-colors flex items-center justify-between group cursor-pointer"
+                          onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                        >
+                          <div>
+                            <p className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{item.subCategory}</p>
+                            <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs font-black text-slate-700">{item.count}</p>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase">Yorum</p>
+                          </div>
+                        </div>
                       ))}
-                    </Pie>
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                    />
-                    <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '11px', fontWeight: 600 }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-100">
-                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kanal Kaynağı</th>
-                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
-                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {dashboardData.sourceAnalysis.map((item, idx) => (
-                      <tr 
-                        key={idx} 
-                        className="hover:bg-slate-50 transition-colors cursor-pointer"
-                        onClick={() => setDrillDownFilter({ type: 'source', value: item.name })}
-                      >
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-3">
-                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
-                            <span className="text-sm font-semibold text-slate-700">{item.name}</span>
+                    </div>
+                  </div>
+
+                  {/* Top Positive */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="p-4 border-b border-slate-100 bg-emerald-50/30">
+                      <h4 className="text-xs font-black text-emerald-900 uppercase tracking-widest flex items-center gap-2">
+                        <Award size={14} className="text-emerald-500" />
+                        En Çok Övülenler
+                      </h4>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {dashboardData.topPositive.slice(0, 6).map((item, idx) => (
+                        <div 
+                          key={idx} 
+                          className="p-3 hover:bg-emerald-50/20 transition-colors flex items-center justify-between cursor-pointer"
+                          onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                        >
+                          <div>
+                            <p className="text-xs font-bold text-slate-800">{item.subCategory}</p>
+                            <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
                           </div>
-                        </td>
-                        <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">
-                          {item.count}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
-                              <div 
-                                className={`h-full rounded-full ${
-                                  item.avgScore >= 80 ? 'bg-emerald-500' :
-                                  item.avgScore >= 60 ? 'bg-blue-500' :
-                                  item.avgScore >= 40 ? 'bg-amber-500' :
-                                  'bg-red-500'
-                                }`}
-                                style={{ width: `${item.avgScore}%` }}
-                              />
+                          <div className="flex items-center gap-2">
+                            <div className="text-right">
+                              <p className="text-xs font-black text-emerald-600">%{item.avgScore}</p>
                             </div>
-                            <span className={`text-xs font-bold w-10 ${
-                              item.avgScore >= 80 ? 'text-emerald-600' :
-                              item.avgScore >= 60 ? 'text-blue-600' :
-                              item.avgScore >= 40 ? 'text-amber-600' :
-                              'text-red-600'
-                            }`}>
-                              %{item.avgScore}
-                            </span>
+                            <ChevronRight size={12} className="text-slate-300" />
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
-          {/* Row 4: Nationality Analysis */}
-          {activeModules.includes('nationality_analysis') && (
-          <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-            <div className="flex items-center justify-between mb-6">
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">Uyruk Memnuniyet Endeksi</h3>
-                <p className="text-xs text-slate-500">Pazar bazlı ortalama skorlar ve misafir dağılımı</p>
-              </div>
-            </div>
-
-            {globalViewMode === 'chart' ? (
-              <div className="h-[350px] w-full relative min-w-0 min-h-0">
-                <ResponsiveContainer width="100%" height={350}>
-                  <RadarChart 
-                    cx="50%" 
-                    cy="50%" 
-                    outerRadius="80%" 
-                    data={dashboardData.nationalityAnalysis.slice(0, 8)}
-                    onClick={(data: any) => {
-                      if (data && data.activeLabel) {
-                        setDrillDownFilter({ type: 'nationality', value: data.activeLabel });
-                      }
-                    }}
-                  >
-                    <PolarGrid stroke="#e2e8f0" />
-                    <PolarAngleAxis dataKey="name" tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }} />
-                    <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 9 }} />
-                    <Radar
-                      name="Memnuniyet Skoru"
-                      dataKey="avgScore"
-                      stroke="#4f46e5"
-                      fill="#4f46e5"
-                      fillOpacity={0.5}
-                    />
-                    <Tooltip 
-                      contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                    />
-                  </RadarChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-100">
-                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Uyruk / Pazar</th>
-                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
-                      <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-50">
-                    {dashboardData.nationalityAnalysis.map((item, idx) => (
-                      <tr 
-                        key={idx} 
-                        className="hover:bg-slate-50 transition-colors cursor-pointer"
-                        onClick={() => setDrillDownFilter({ type: 'nationality', value: item.name })}
-                      >
-                        <td className="py-3 px-4">
-                          <span className="text-sm font-semibold text-slate-700">{item.name}</span>
-                        </td>
-                        <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">
-                          {item.count}
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex items-center gap-3">
-                            <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
-                              <div 
-                                className={`h-full rounded-full ${
-                                  item.avgScore >= 80 ? 'bg-emerald-500' :
-                                  item.avgScore >= 60 ? 'bg-blue-500' :
-                                  item.avgScore >= 40 ? 'bg-amber-500' :
-                                  'bg-red-500'
-                                }`}
-                                style={{ width: `${item.avgScore}%` }}
-                              />
+                  {/* Top Negative (Urgency) */}
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="p-4 border-b border-slate-100 bg-red-50/30">
+                      <h4 className="text-xs font-black text-red-900 uppercase tracking-widest flex items-center gap-2">
+                        <AlertTriangle size={14} className="text-red-500" />
+                        Acil Müdahale Gerekenler
+                      </h4>
+                    </div>
+                    <div className="divide-y divide-slate-100">
+                      {dashboardData.topNegative.slice(0, 6).map((item, idx) => (
+                        <div 
+                          key={idx} 
+                          className="p-3 hover:bg-red-50/20 transition-colors flex items-center justify-between cursor-pointer"
+                          onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                        >
+                          <div>
+                            <p className="text-xs font-bold text-slate-800">{item.subCategory}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
+                              <span className="text-[8px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded uppercase tracking-tighter">Kritik</span>
                             </div>
-                            <span className={`text-xs font-bold w-10 ${
-                              item.avgScore >= 80 ? 'text-emerald-600' :
-                              item.avgScore >= 60 ? 'text-blue-600' :
-                              item.avgScore >= 40 ? 'text-amber-600' :
-                              'text-red-600'
-                            }`}>
-                              %{item.avgScore}
-                            </span>
                           </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </section>
-          )}
-
-          {/* Row 4: Hotel Agenda & Sub-Topics (Tables) */}
-          {activeModules.includes('hotel_agenda') && (
-          <div className="grid grid-cols-3 gap-6">
-            {/* Most Mentioned */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-                <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
-                  <TrendingUp size={14} className="text-indigo-500" />
-                  En Çok Konuşulanlar
-                </h4>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {dashboardData.mostMentioned.slice(0, 6).map((item, idx) => (
-                  <div 
-                    key={idx} 
-                    className="p-3 hover:bg-slate-50 transition-colors flex items-center justify-between group cursor-pointer"
-                    onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
-                  >
-                    <div>
-                      <p className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{item.subCategory}</p>
-                      <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs font-black text-slate-700">{item.count}</p>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase">Yorum</p>
+                          <div className="text-right">
+                            <p className="text-xs font-black text-red-600">%{item.avgScore}</p>
+                            <p className="text-[9px] font-bold text-slate-400 uppercase">Skor</p>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
+                </div>
+              );
+            }
 
-            {/* Top Positive */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-slate-100 bg-emerald-50/30">
-                <h4 className="text-xs font-black text-emerald-900 uppercase tracking-widest flex items-center gap-2">
-                  <Award size={14} className="text-emerald-500" />
-                  En Çok Övülenler
-                </h4>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {dashboardData.topPositive.slice(0, 6).map((item, idx) => (
-                  <div 
-                    key={idx} 
-                    className="p-3 hover:bg-emerald-50/20 transition-colors flex items-center justify-between cursor-pointer"
-                    onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
-                  >
-                    <div>
-                      <p className="text-xs font-bold text-slate-800">{item.subCategory}</p>
-                      <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-right">
-                        <p className="text-xs font-black text-emerald-600">%{item.avgScore}</p>
-                      </div>
-                      <ChevronRight size={12} className="text-slate-300" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Top Negative (Urgency) */}
-            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-              <div className="p-4 border-b border-slate-100 bg-red-50/30">
-                <h4 className="text-xs font-black text-red-900 uppercase tracking-widest flex items-center gap-2">
-                  <AlertTriangle size={14} className="text-red-500" />
-                  Acil Müdahale Gerekenler
-                </h4>
-              </div>
-              <div className="divide-y divide-slate-100">
-                {dashboardData.topNegative.slice(0, 6).map((item, idx) => (
-                  <div 
-                    key={idx} 
-                    className="p-3 hover:bg-red-50/20 transition-colors flex items-center justify-between cursor-pointer"
-                    onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
-                  >
-                    <div>
-                      <p className="text-xs font-bold text-slate-800">{item.subCategory}</p>
-                      <div className="flex items-center gap-2">
-                        <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
-                        <span className="text-[8px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded uppercase tracking-tighter">Kritik</span>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs font-black text-red-600">%{item.avgScore}</p>
-                      <p className="text-[9px] font-bold text-slate-400 uppercase">Skor</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-          )}
+            return null;
+          })}
 
           {/* Bottom Spacing */}
           <div className="h-12 shrink-0" />
@@ -1100,7 +1504,7 @@ export function DashboardModule() {
 
         {/* Right Column: Live Comments (Drill-down) */}
         <section className="w-[420px] shrink-0 flex flex-col gap-4 sticky top-0 h-[calc(100vh-3rem)] overflow-hidden">
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col h-full overflow-hidden">
             <div className="p-5 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">

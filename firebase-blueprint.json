@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "user_preferences": {
+      "title": "User Preferences",
+      "description": "Stores user-specific dashboard configuration and filters.",
+      "type": "object",
+      "properties": {
+        "modulesOrder": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Ordered list of module IDs."
+        },
+        "activeModules": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of currently active module IDs."
+        },
+        "globalViewMode": {
+          "type": "string",
+          "enum": ["chart", "table"],
+          "description": "Current view mode (chart or table)."
+        },
+        "dateFilter": {
+          "type": "string",
+          "description": "Active date filter preset."
+        },
+        "customStartDate": {
+          "type": "string",
+          "description": "Custom start date for date filter."
+        },
+        "customEndDate": {
+          "type": "string",
+          "description": "Custom end date for date filter."
+        },
+        "selectedMainCategory": {
+          "type": "string",
+          "description": "Selected main category filter."
+        },
+        "selectedSubCategory": {
+          "type": "string",
+          "description": "Selected sub-category filter."
+        },
+        "selectedNationalities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of selected nationalities."
+        },
+        "selectedSources": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "List of selected sources."
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Last update timestamp."
+        }
+      },
+      "required": ["modulesOrder", "activeModules", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/user_preferences/{userId}": {
+      "schema": "user_preferences",
+      "description": "User-specific configuration settings."
+    }
+  }
+}
