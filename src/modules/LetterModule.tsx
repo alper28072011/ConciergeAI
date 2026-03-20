@@ -24,6 +24,7 @@ export function LetterModule() {
   const [isLoadingMore, setIsLoadingMore] = useState<boolean>(false);
 
   const [agendaNotes, setAgendaNotes] = useState<Record<string, any>>({});
+  const [commentAnalytics, setCommentAnalytics] = useState<Record<string, any>>({});
 
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [bulkType, setBulkType] = useState<'deep' | 'sentiment'>('deep');
@@ -46,7 +47,7 @@ export function LetterModule() {
     };
     loadPrefs();
 
-    const unsubscribe = onSnapshot(collection(db, 'agenda_notes'), (snapshot) => {
+    const unsubAgenda = onSnapshot(collection(db, 'agenda_notes'), (snapshot) => {
       const notes: Record<string, any> = {};
       snapshot.forEach((doc) => {
         notes[doc.id] = doc.data();
@@ -54,7 +55,18 @@ export function LetterModule() {
       setAgendaNotes(notes);
     });
 
-    return () => unsubscribe();
+    const unsubAnalytics = onSnapshot(collection(db, 'comment_analytics'), (snapshot) => {
+      const analytics: Record<string, any> = {};
+      snapshot.forEach((doc) => {
+        analytics[doc.id] = doc.data();
+      });
+      setCommentAnalytics(analytics);
+    });
+
+    return () => {
+      unsubAgenda();
+      unsubAnalytics();
+    };
   }, []);
 
   useEffect(() => {
@@ -242,6 +254,11 @@ export function LetterModule() {
 
   const selectedCommentsForBulk = comments.filter(c => selectedCommentIds.includes(c.ID));
 
+  const combinedAnalysisData = { ...agendaNotes };
+  Object.keys(commentAnalytics).forEach(id => {
+    combinedAnalysisData[id] = { ...combinedAnalysisData[id], ...commentAnalytics[id] };
+  });
+
   return (
     <div className="flex-1 flex flex-col overflow-hidden h-full w-full relative">
       {selectedCommentIds.length > 0 && (
@@ -297,7 +314,7 @@ export function LetterModule() {
           setFetchLimit={setFetchLimit}
           hasMoreData={hasMoreData}
           isLoadingMore={isLoadingMore}
-          agendaNotes={agendaNotes}
+          agendaNotes={combinedAnalysisData}
           viewMode={viewMode}
           onViewModeChange={handleViewModeChange}
         />
@@ -309,6 +326,7 @@ export function LetterModule() {
           isOpen={isBulkModalOpen}
           onClose={() => setIsBulkModalOpen(false)}
           comments={selectedCommentsForBulk}
+          agendaNotes={combinedAnalysisData}
           type={bulkType}
           onComplete={() => {
             // Optional: clear selection or refresh data

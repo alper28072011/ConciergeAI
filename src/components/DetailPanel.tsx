@@ -302,6 +302,12 @@ ${comment.COMMENT}`;
       return;
     }
 
+    // Check if already analyzed
+    if (deepAnalytics !== null || sentimentScore !== null) {
+      alert("Bu yorum zaten analiz edilmiş. Tekrar analiz etmek için lütfen önce mevcut analizi sıfırlayın.");
+      return;
+    }
+
     setIsDeepAnalyzing(true);
     try {
       const analyticsData = await analyzeCommentComprehensive(comment);

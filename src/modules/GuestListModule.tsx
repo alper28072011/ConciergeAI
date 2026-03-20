@@ -41,11 +41,13 @@ export function GuestListModule() {
     surveys: any[];
     interactions: Record<string, any>;
     agenda: Record<string, any>;
+    commentAnalytics: Record<string, any>;
     commentActions: any[];
   }>({
     surveys: [],
     interactions: {},
     agenda: {},
+    commentAnalytics: {},
     commentActions: []
   });
 
@@ -286,6 +288,14 @@ The letter should be empathetic, professional, and address the guest. Do not inc
       setFirebaseCache(prev => ({ ...prev, agenda }));
     });
 
+    const unsubCommentAnalytics = onSnapshot(collection(db, 'comment_analytics'), (snapshot) => {
+      const analytics: Record<string, any> = {};
+      snapshot.forEach(doc => {
+        analytics[doc.id] = doc.data();
+      });
+      setFirebaseCache(prev => ({ ...prev, commentAnalytics: analytics }));
+    });
+
     const unsubCommentActions = onSnapshot(collection(db, 'comment_actions'), (snapshot) => {
       const commentActions: any[] = [];
       snapshot.forEach(doc => {
@@ -298,6 +308,7 @@ The letter should be empathetic, professional, and address the guest. Do not inc
       unsubSurveys();
       unsubInteractions();
       unsubAgenda();
+      unsubCommentAnalytics();
       unsubCommentActions();
     };
   }, []);
@@ -1076,6 +1087,11 @@ ${JSON.stringify(selectedGuests.map(g => ({
     }
   };
 
+  const combinedAnalysisData = { ...firebaseCache.agenda };
+  Object.keys(firebaseCache.commentAnalytics).forEach(id => {
+    combinedAnalysisData[id] = { ...combinedAnalysisData[id], ...firebaseCache.commentAnalytics[id] };
+  });
+
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden">
       {/* Tab Navigation & Top Bar */}
@@ -1800,6 +1816,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
           isOpen={isBulkAnalysisModalOpen}
           onClose={() => setIsBulkAnalysisModalOpen(false)}
           comments={commentsForBulkAnalysis}
+          agendaNotes={combinedAnalysisData}
           type={bulkAnalysisType}
           onComplete={() => {
             // Optional: refresh data

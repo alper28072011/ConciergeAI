@@ -10,14 +10,15 @@ interface BulkAnalysisModalProps {
   isOpen: boolean;
   onClose: () => void;
   comments: CommentData[];
+  agendaNotes: Record<string, any>;
   type?: 'deep' | 'sentiment'; // Kept for compatibility but ignored
   onComplete: () => void;
 }
 
-export function BulkAnalysisModal({ isOpen, onClose, comments, type, onComplete }: BulkAnalysisModalProps) {
+export function BulkAnalysisModal({ isOpen, onClose, comments, agendaNotes, type, onComplete }: BulkAnalysisModalProps) {
   const [progress, setProgress] = useState(0);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [results, setResults] = useState<{ id: string; status: 'success' | 'error'; message?: string }[]>([]);
+  const [results, setResults] = useState<{ id: string; status: 'success' | 'error' | 'skipped'; message?: string }[]>([]);
   const [isFinished, setIsFinished] = useState(false);
 
   useEffect(() => {
@@ -33,11 +34,35 @@ export function BulkAnalysisModal({ isOpen, onClose, comments, type, onComplete 
     setProgress(0);
     setResults([]);
 
+    const alreadyAnalyzedCount = comments.filter(c => {
+      const id = String(c.ID);
+      const note = agendaNotes[id];
+      return note && (note.sentimentScore !== undefined || note.overallScore !== undefined);
+    }).length;
+    
+    let skipAllAnalyzed = false;
+
+    if (alreadyAnalyzedCount > 0) {
+      if (window.confirm(`${alreadyAnalyzedCount} yorum zaten analiz edilmiş. Bunları atlamak ister misiniz? (Tamam: Atla, İptal: Hepsini Tekrar Analiz Et)`)) {
+        skipAllAnalyzed = true;
+      }
+    }
+
     for (let i = 0; i < comments.length; i++) {
       const comment = comments[i];
       try {
         if (!comment.COMMENT) {
           throw new Error("Yorum metni boş.");
+        }
+
+        // Check if already analyzed
+        const id = String(comment.ID);
+        const isAlreadyAnalyzed = agendaNotes[id] && (agendaNotes[id].sentimentScore !== undefined || agendaNotes[id].overallScore !== undefined);
+        
+        if (isAlreadyAnalyzed && skipAllAnalyzed) {
+          setResults(prev => [...prev, { id, status: 'skipped', message: 'Atlandı' }]);
+          setProgress(((i + 1) / comments.length) * 100);
+          continue;
         }
 
         const analyticsData = await analyzeCommentComprehensive(comment);
@@ -67,6 +92,7 @@ export function BulkAnalysisModal({ isOpen, onClose, comments, type, onComplete 
   if (!isOpen) return null;
 
   const successCount = results.filter(r => r.status === 'success').length;
+  const skippedCount = results.filter(r => r.status === 'skipped').length;
   const errorCount = results.filter(r => r.status === 'error').length;
 
   return (
@@ -128,11 +154,16 @@ export function BulkAnalysisModal({ isOpen, onClose, comments, type, onComplete 
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-4">
                   <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex flex-col items-center justify-center">
                     <CheckCircle2 size={24} className="text-emerald-500 mb-1" />
                     <span className="text-2xl font-bold text-emerald-700">{successCount}</span>
                     <span className="text-xs font-medium text-emerald-600">Başarılı</span>
+                  </div>
+                  <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col items-center justify-center">
+                    <Brain size={24} className="text-blue-500 mb-1" />
+                    <span className="text-2xl font-bold text-blue-700">{skippedCount}</span>
+                    <span className="text-xs font-medium text-blue-600">Atlanan</span>
                   </div>
                   <div className="bg-red-50 border border-red-100 rounded-xl p-4 flex flex-col items-center justify-center">
                     <AlertCircle size={24} className="text-red-500 mb-1" />

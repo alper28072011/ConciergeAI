@@ -13,7 +13,7 @@ import {
   Award, AlertTriangle, FileText, Download, X, Save, Edit3, Trash2, Clock, 
   Filter, Brain, Globe, Database, CheckCircle2, PieChart as PieChartIcon,
   ChevronRight, ArrowUpRight, ArrowDownRight, Printer, Sparkles, Layout,
-  Settings, Eye, EyeOff, LayoutGrid, List, ChevronDown, ChevronUp, Layers
+  Settings, Eye, EyeOff, LayoutGrid, List, ChevronDown, ChevronUp, Layers, History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { generateAIContent } from '../services/aiService';
@@ -77,8 +77,102 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#71717a'];
 const RADAR_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
 
+// Country code mapping for flags
+const getCountryCode = (countryName: string): string => {
+  if (!countryName) return '';
+  
+  const name = countryName.trim().toLowerCase();
+  
+  const mapping: { [key: string]: string } = {
+    // Common mappings (Turkish & English) - Lowercase keys for robust matching
+    'türkiye': 'tr', 'turkey': 'tr', 'tr': 'tr',
+    'almanya': 'de', 'germany': 'de', 'de': 'de',
+    'ingiltere': 'gb', 'united kingdom': 'gb', 'uk': 'gb', 'birleşik krallık': 'gb', 'great britain': 'gb', 'gb': 'gb',
+    'rusya': 'ru', 'russia': 'ru', 'rusya federasyonu': 'ru', 'russian federation': 'ru', 'ru': 'ru',
+    'hollanda': 'nl', 'netherlands': 'nl', 'nl': 'nl',
+    'belçika': 'be', 'belgium': 'be', 'be': 'be',
+    'fransa': 'fr', 'france': 'fr', 'fr': 'fr',
+    'italya': 'it', 'italy': 'it', 'it': 'it',
+    'ispanya': 'es', 'spain': 'es', 'es': 'es',
+    'abd': 'us', 'usa': 'us', 'united states': 'us', 'amerika': 'us', 'amerika birleşik devletleri': 'us', 'us': 'us',
+    'ukrayna': 'ua', 'ukraine': 'ua', 'ua': 'ua',
+    'polonya': 'pl', 'poland': 'pl', 'pl': 'pl',
+    'isviçre': 'ch', 'switzerland': 'ch', 'ch': 'ch',
+    'avusturya': 'at', 'austria': 'at', 'at': 'at',
+    'isveç': 'se', 'sweden': 'se', 'se': 'se',
+    'norveç': 'no', 'norway': 'no', 'no': 'no',
+    'danimarka': 'dk', 'denmark': 'dk', 'dk': 'dk',
+    'finlandiya': 'fi', 'finland': 'fi', 'fi': 'fi',
+    'yunanistan': 'gr', 'greece': 'gr', 'gr': 'gr',
+    'bulgaristan': 'bg', 'bulgaria': 'bg', 'bg': 'bg',
+    'romanya': 'ro', 'romania': 'ro', 'ro': 'ro',
+    'azerbaycan': 'az', 'azerbaijan': 'az', 'az': 'az',
+    'kazakistan': 'kz', 'kazakhstan': 'kz', 'kz': 'kz',
+    'özbekistan': 'uz', 'uzbekistan': 'uz', 'uz': 'uz',
+    'türkmenistan': 'tm', 'turkmenistan': 'tm', 'tm': 'tm',
+    'kırgızistan': 'kg', 'kyrgyzstan': 'kg', 'kg': 'kg',
+    'iran': 'ir', 'ir': 'ir',
+    'irak': 'iq', 'iraq': 'iq', 'iq': 'iq',
+    'suriye': 'sy', 'syria': 'sy', 'sy': 'sy',
+    'lübnan': 'lb', 'lebanon': 'lb', 'lb': 'lb',
+    'ürdün': 'jo', 'jordan': 'jo', 'jo': 'jo',
+    'mısır': 'eg', 'egypt': 'eg', 'eg': 'eg',
+    'suudi arabistan': 'sa', 'saudi arabia': 'sa', 'sa': 'sa',
+    'bae': 'ae', 'uae': 'ae', 'birleşik arap emirlikleri': 'ae', 'united arab emirates': 'ae', 'ae': 'ae',
+    'katar': 'qa', 'qatar': 'qa', 'qa': 'qa',
+    'kuveyt': 'kw', 'kuwait': 'kw', 'kw': 'kw',
+    'bahreyn': 'bh', 'bahrain': 'bh', 'bh': 'bh',
+    'umman': 'om', 'oman': 'om', 'om': 'om',
+    'israil': 'il', 'israel': 'il', 'il': 'il',
+    'çin': 'cn', 'china': 'cn', 'cn': 'cn',
+    'japonya': 'jp', 'japan': 'jp', 'jp': 'jp',
+    'güney kore': 'kr', 'south korea': 'kr', 'kr': 'kr',
+    'hindistan': 'in', 'india': 'in', 'in': 'in',
+    'pakistan': 'pk', 'pk': 'pk',
+    'kanada': 'ca', 'canada': 'ca', 'ca': 'ca',
+    'meksika': 'mx', 'mexico': 'mx', 'mx': 'mx',
+    'brezilya': 'br', 'brazil': 'br', 'br': 'br',
+    'arjantin': 'ar', 'argentina': 'ar', 'ar': 'ar',
+    'avustralya': 'au', 'australia': 'au', 'au': 'au',
+    'yeni zelanda': 'nz', 'new zealand': 'nz', 'nz': 'nz',
+    'güney afrika': 'za', 'south africa': 'za', 'za': 'za',
+    'fas': 'ma', 'morocco': 'ma', 'ma': 'ma',
+    'tunus': 'tn', 'tunisia': 'tn', 'tn': 'tn',
+    'cezayir': 'dz', 'algeria': 'dz', 'dz': 'dz',
+    'libya': 'ly', 'ly': 'ly',
+    'nijerya': 'ng', 'nigeria': 'ng', 'ng': 'ng',
+    'gürcistan': 'ge', 'georgia': 'ge', 'ge': 'ge',
+    'ermenistan': 'am', 'armenia': 'am', 'am': 'am',
+    'kıbrıs': 'cy', 'cyprus': 'cy', 'cy': 'cy',
+    'malta': 'mt', 'mt': 'mt',
+    'macaristan': 'hu', 'hungary': 'hu', 'hu': 'hu',
+    'çekya': 'cz', 'czechia': 'cz', 'czech republic': 'cz', 'cz': 'cz',
+    'slovakya': 'sk', 'slovakia': 'sk', 'sk': 'sk',
+    'irlanda': 'ie', 'ireland': 'ie', 'ie': 'ie',
+    'lüksemburg': 'lu', 'luxembourg': 'lu', 'lu': 'lu',
+    'sırbistan': 'rs', 'serbia': 'rs', 'rs': 'rs',
+    'hırvatistan': 'hr', 'croatia': 'hr', 'hr': 'hr',
+    'slovenya': 'si', 'slovenia': 'si', 'si': 'si',
+    'bosna hersek': 'ba', 'bosnia and herzegovina': 'ba', 'ba': 'ba',
+    'karadağ': 'me', 'montenegro': 'me', 'me': 'me',
+    'arnavutluk': 'al', 'albania': 'al', 'al': 'al',
+    'kuzey makedonya': 'mk', 'north macedonia': 'mk', 'makedonya': 'mk', 'macedonia': 'mk', 'mk': 'mk',
+    'estonya': 'ee', 'estonia': 'ee', 'ee': 'ee',
+    'letonya': 'lv', 'latvia': 'lv', 'lv': 'lv',
+    'litvanya': 'lt', 'lithuania': 'lt', 'lt': 'lt',
+    'beyaz rusya': 'by', 'belarus': 'by', 'by': 'by',
+    'moldova': 'md', 'md': 'md',
+    'kosova': 'xk', 'kosovo': 'xk', 'xk': 'xk',
+    'izlanda': 'is', 'iceland': 'is', 'is': 'is',
+    'portekiz': 'pt', 'portugal': 'pt', 'pt': 'pt',
+  };
+  
+  return mapping[name] || '';
+};
+
 const AVAILABLE_MODULES = [
   { id: 'kpi_cards', label: 'KPI Özet Kartları', icon: LayoutGrid },
+  { id: 'satisfaction_timeline', label: 'Zamana Göre Memnuniyet Skoru', icon: Clock },
   { id: 'category_satisfaction', label: 'Kategori Bazlı Memnuniyet', icon: BarChart3 },
   { id: 'source_analysis', label: 'Kanal Dağılımı (OTA)', icon: PieChartIcon },
   { id: 'nationality_analysis', label: 'Uyruk Memnuniyet Endeksi', icon: Globe },
@@ -106,6 +200,7 @@ export function DashboardModule() {
   
   // Filters
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | '7days' | '30days' | 'thisYear' | 'custom'>('30days');
+  const [isCompareActive, setIsCompareActive] = useState(false);
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [selectedMainCategory, setSelectedMainCategory] = useState<string>('all');
@@ -116,15 +211,21 @@ export function DashboardModule() {
   const [isNationalityExpanded, setIsNationalityExpanded] = useState(false);
   const [globalViewMode, setGlobalViewMode] = useState<'chart' | 'table'>('chart');
   const [showSubCategories, setShowSubCategories] = useState(false);
-  const [activeModules, setActiveModules] = useState<string[]>(['kpi_cards', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda']);
+  const [activeModules, setActiveModules] = useState<string[]>(['kpi_cards', 'satisfaction_timeline', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda']);
   const [modulesOrder, setModulesOrder] = useState(AVAILABLE_MODULES);
   const [userId, setUserId] = useState<string | null>(null);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string }>({ type: 'all', value: 'all' });
+  const [timelineGranularity, setTimelineGranularity] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  
+  // Show All Toggles for Analytics Sections
+  const [showAllMostMentioned, setShowAllMostMentioned] = useState(false);
+  const [showAllTopPositive, setShowAllTopPositive] = useState(false);
+  const [showAllTopNegative, setShowAllTopNegative] = useState(false);
 
   useEffect(() => {
     setPortalTarget(document.getElementById('header-actions-portal'));
@@ -148,7 +249,7 @@ export function DashboardModule() {
       
       const defaultState = {
         modulesOrder: AVAILABLE_MODULES.map(m => m.id),
-        activeModules: ['kpi_cards', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda'],
+        activeModules: ['kpi_cards', 'satisfaction_timeline', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda'],
         globalViewMode: 'chart',
         dateFilter: '30days',
         customStartDate: '',
@@ -363,7 +464,7 @@ export function DashboardModule() {
     return () => unsubscribe();
   }, []);
 
-  const filteredAnalytics = useMemo(() => {
+  const { filteredAnalytics, previousFilteredAnalytics } = useMemo(() => {
     const now = new Date();
     now.setHours(23, 59, 59, 999);
     const currentYear = now.getFullYear();
@@ -377,65 +478,88 @@ export function DashboardModule() {
       return new Date(dateStr);
     };
 
-    return analytics.filter(item => {
+    let currentStart = new Date(now);
+    let currentEnd = new Date(now);
+    let previousStart = new Date(now);
+    let previousEnd = new Date(now);
+
+    if (dateFilter === 'today') {
+      currentStart.setHours(0, 0, 0, 0);
+      previousEnd = new Date(currentStart);
+      previousEnd.setMilliseconds(-1);
+      previousStart = new Date(previousEnd);
+      previousStart.setHours(0, 0, 0, 0);
+    } else if (dateFilter === 'yesterday') {
+      currentStart.setDate(currentStart.getDate() - 1);
+      currentStart.setHours(0, 0, 0, 0);
+      currentEnd.setDate(currentEnd.getDate() - 1);
+      previousEnd = new Date(currentStart);
+      previousEnd.setMilliseconds(-1);
+      previousStart = new Date(previousEnd);
+      previousStart.setHours(0, 0, 0, 0);
+    } else if (dateFilter === '7days') {
+      currentStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      previousEnd = new Date(currentStart);
+      previousStart = new Date(currentStart.getTime() - 7 * 24 * 60 * 60 * 1000);
+    } else if (dateFilter === '30days') {
+      currentStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      previousEnd = new Date(currentStart);
+      previousStart = new Date(currentStart.getTime() - 30 * 24 * 60 * 60 * 1000);
+    } else if (dateFilter === 'thisYear') {
+      currentStart = new Date(currentYear, 0, 1);
+      previousEnd = new Date(currentStart);
+      previousEnd.setMilliseconds(-1);
+      previousStart = new Date(currentYear - 1, 0, 1);
+    } else if (dateFilter === 'custom' && customStartDate && customEndDate) {
+      currentStart = new Date(customStartDate);
+      currentStart.setHours(0, 0, 0, 0);
+      currentEnd = new Date(customEndDate);
+      currentEnd.setHours(23, 59, 59, 999);
+      const diffTime = currentEnd.getTime() - currentStart.getTime();
+      previousEnd = new Date(currentStart.getTime() - 1);
+      previousStart = new Date(previousEnd.getTime() - diffTime);
+    }
+
+    const current: CommentAnalytics[] = [];
+    const previous: CommentAnalytics[] = [];
+
+    analytics.forEach(item => {
       let itemDate = parseDate(item.date);
       if (isNaN(itemDate.getTime())) {
         itemDate = parseDate(item.createdAt);
       }
       
-      // Date Filter
-      let dateMatch = true;
-      if (dateFilter === 'today') {
-        dateMatch = itemDate.getFullYear() === now.getFullYear() && 
-                    itemDate.getMonth() === now.getMonth() && 
-                    itemDate.getDate() === now.getDate();
-      } else if (dateFilter === 'yesterday') {
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1);
-        dateMatch = itemDate.getFullYear() === yesterday.getFullYear() && 
-                    itemDate.getMonth() === yesterday.getMonth() && 
-                    itemDate.getDate() === yesterday.getDate();
-      } else if (dateFilter === '7days') {
-        const diffTime = now.getTime() - itemDate.getTime();
-        dateMatch = diffTime >= 0 && diffTime <= 7 * 24 * 60 * 60 * 1000;
-      } else if (dateFilter === '30days') {
-        const diffTime = now.getTime() - itemDate.getTime();
-        dateMatch = diffTime >= 0 && diffTime <= 30 * 24 * 60 * 60 * 1000;
-      } else if (dateFilter === 'thisYear') {
-        dateMatch = itemDate.getFullYear() === currentYear;
-      } else if (dateFilter === 'custom' && customStartDate && customEndDate) {
-        const start = new Date(customStartDate);
-        const end = new Date(customEndDate);
-        end.setHours(23, 59, 59, 999);
-        dateMatch = itemDate >= start && itemDate <= end;
-      }
-
-      if (!dateMatch) return false;
-
       // Category & SubCategory Filter
       if (selectedMainCategory !== 'all') {
         const hasCategory = item.topics?.some(t => t.mainCategory === selectedMainCategory);
-        if (!hasCategory) return false;
+        if (!hasCategory) return;
         
         if (selectedSubCategory !== 'all') {
           const hasSub = item.topics?.some(t => t.mainCategory === selectedMainCategory && t.subCategory === selectedSubCategory);
-          if (!hasSub) return false;
+          if (!hasSub) return;
         }
       }
 
       // Nationality Filter
       if (selectedNationalities.length > 0) {
-        if (!selectedNationalities.includes(item.nationality || 'Bilinmiyor')) return false;
+        if (!selectedNationalities.includes(item.nationality || 'Bilinmiyor')) return;
       }
 
       // Source Filter
       if (selectedSources.length > 0) {
-        if (!selectedSources.includes(item.source || 'Bilinmiyor')) return false;
+        if (!selectedSources.includes(item.source || 'Bilinmiyor')) return;
       }
 
-      return true;
+      // Date Filter
+      if (itemDate >= currentStart && itemDate <= currentEnd) {
+        current.push(item);
+      } else if (isCompareActive && itemDate >= previousStart && itemDate <= previousEnd) {
+        previous.push(item);
+      }
     });
-  }, [analytics, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources]);
+
+    return { filteredAnalytics: current, previousFilteredAnalytics: previous };
+  }, [analytics, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources, isCompareActive]);
 
   const drillDownComments = useMemo(() => {
     if (drillDownFilter.type === 'all') return filteredAnalytics;
@@ -450,7 +574,8 @@ export function DashboardModule() {
     });
   }, [filteredAnalytics, drillDownFilter]);
 
-  const dashboardData = useMemo(() => getDashboardData(filteredAnalytics), [filteredAnalytics]);
+  const dashboardData = useMemo(() => getDashboardData(filteredAnalytics, isCompareActive ? previousFilteredAnalytics : undefined), [filteredAnalytics, previousFilteredAnalytics, isCompareActive]);
+  const previousDashboardData = useMemo(() => getDashboardData(previousFilteredAnalytics), [previousFilteredAnalytics]);
 
   const hierarchicalCategoryData = useMemo(() => {
     const groups: { [key: string]: { name: string, count: number, totalScore: number, subCategories: any[] } } = {};
@@ -524,6 +649,36 @@ export function DashboardModule() {
     const noExportElements = clone.querySelectorAll('.no-export');
     noExportElements.forEach(el => el.remove());
 
+    // Fix SVG dimensions in the clone for better export rendering
+    const svgs = clone.querySelectorAll('svg');
+    svgs.forEach(svg => {
+      if (svg.classList.contains('recharts-surface')) {
+        // Ensure viewBox is set correctly if it's missing or zero
+        const viewBox = svg.getAttribute('viewBox');
+        if (!viewBox || viewBox === '0 0 0 0') {
+          const width = svg.getAttribute('width') || svg.getBoundingClientRect().width || '1000';
+          const height = svg.getAttribute('height') || svg.getBoundingClientRect().height || '400';
+          svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        }
+        svg.setAttribute('width', '100%');
+        svg.removeAttribute('height');
+        svg.style.width = '100%';
+        svg.style.height = 'auto';
+        svg.style.display = 'block';
+      }
+    });
+
+    // Fix parent container heights for responsive charts
+    const responsiveContainers = clone.querySelectorAll('.recharts-responsive-container');
+    responsiveContainers.forEach(container => {
+      const parent = container.parentElement;
+      if (parent) {
+        parent.style.height = 'auto';
+        parent.style.minHeight = 'unset';
+        parent.style.overflow = 'visible';
+      }
+    });
+
     const content = clone.innerHTML;
     
     const html = `
@@ -548,12 +703,83 @@ export function DashboardModule() {
             width: 210mm; 
             background: white; 
             min-height: 297mm; 
-            padding: 25mm; 
+            padding: 12mm 15mm; 
             box-shadow: 0 10px 25px rgba(0,0,0,0.1); 
             border-radius: 4px;
         }
-        /* Recharts SVG responsiveness in static HTML */
-        svg { width: 100% !important; height: auto !important; }
+        /* Recharts SVG responsiveness in static HTML - only for charts */
+        .recharts-responsive-container { width: 100% !important; height: auto !important; min-height: unset !important; }
+        .recharts-responsive-container > div { width: 100% !important; height: auto !important; position: relative !important; }
+        .recharts-wrapper { width: 100% !important; height: auto !important; padding-bottom: 20px !important; }
+        .recharts-surface { width: 100% !important; height: auto !important; overflow: visible !important; display: block !important; }
+        .recharts-layer { visibility: visible !important; opacity: 1 !important; clip-path: none !important; }
+        
+        /* Fix axis labels and text sizes */
+        .recharts-cartesian-axis-tick-value, .recharts-cartesian-axis-tick text { 
+            font-size: 12px !important; 
+            font-weight: 700 !important; 
+            fill: #334155 !important; 
+        }
+        .recharts-label, .recharts-label-list text { 
+            font-size: 12px !important; 
+            font-weight: 900 !important; 
+        }
+        .recharts-text { font-family: 'Inter', sans-serif !important; font-size: 12px !important; }
+        
+        /* Normalize legend dots */
+        .recharts-legend-wrapper {
+            position: relative !important;
+            bottom: auto !important;
+            left: auto !important;
+            right: auto !important;
+            top: auto !important;
+            width: 100% !important;
+            height: auto !important;
+            margin-top: 20px !important;
+        }
+        .recharts-legend-item {
+            display: flex !important;
+            align-items: center !important;
+            gap: 6px !important;
+            margin-right: 20px !important;
+        }
+        .recharts-legend-item svg { 
+            width: 14px !important; 
+            height: 14px !important; 
+            margin-right: 2px !important;
+            vertical-align: middle !important;
+        }
+        .recharts-legend-item svg path {
+            transform: scale(1.2) !important;
+            transform-origin: center !important;
+        }
+        .recharts-legend-item-text {
+            vertical-align: middle !important;
+            font-size: 12px !important;
+            color: #1e293b !important;
+            font-weight: 700 !important;
+        }
+        .recharts-default-legend {
+            display: flex !important;
+            flex-wrap: wrap !important;
+            justify-content: center !important;
+            gap: 12px !important;
+            margin-top: 30px !important;
+            padding: 0 !important;
+            list-style: none !important;
+        }
+        
+        /* Section styling for report */
+        section {
+            break-inside: avoid;
+            margin-bottom: 3rem !important;
+            border: 1px solid #f1f5f9 !important;
+            border-radius: 1.5rem !important;
+            padding: 2rem !important;
+            background: #ffffff !important;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
+        }
+        
         /* Ensure grid layout works */
         .grid { display: grid !important; }
         /* Custom scrollbar hide */
@@ -562,6 +788,8 @@ export function DashboardModule() {
         /* Fix for some tailwind classes that might need explicit display */
         .flex { display: flex !important; }
         .hidden { display: none !important; }
+        /* Flag proportionality */
+        img { object-fit: cover !important; }
     </style>
 </head>
 <body>
@@ -905,6 +1133,22 @@ export function DashboardModule() {
               </div>
             )}
 
+            {/* Compare Toggle */}
+            <div className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className={`p-1 rounded-md ${isCompareActive ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-200 text-slate-400'}`}>
+                  <History size={12} />
+                </div>
+                <span className="text-[10px] font-bold text-slate-700">Önceki Dönemle Karşılaştır</span>
+              </div>
+              <button
+                onClick={() => setIsCompareActive(!isCompareActive)}
+                className={`relative inline-flex h-4 w-7 items-center rounded-full transition-colors ${isCompareActive ? 'bg-indigo-500' : 'bg-slate-300'}`}
+              >
+                <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${isCompareActive ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+              </button>
+            </div>
+
             {/* Multi-selects for Source & Nationality */}
             <div className="space-y-3">
               <div className="space-y-1">
@@ -1026,7 +1270,7 @@ export function DashboardModule() {
                       color: 'indigo' 
                     },
                     { 
-                      label: 'Analiz Edilen Yorum', 
+                      label: 'Toplam Yorum Sayısı', 
                       value: dashboardData.kpis.totalComments, 
                       change: dashboardData.kpis.commentChange, 
                       icon: MessageSquare, 
@@ -1078,6 +1322,124 @@ export function DashboardModule() {
               );
             }
 
+            if (module.id === 'satisfaction_timeline') {
+              const timelineData = dashboardData.satisfactionOverTime[timelineGranularity];
+              return (
+                <section key="satisfaction_timeline" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                        <div className="p-1.5 bg-indigo-50 rounded-lg">
+                          <Clock size={18} className="text-indigo-600" />
+                        </div>
+                        Zamana Göre Memnuniyet Skoru
+                      </h3>
+                      <p className="text-xs text-slate-500 mt-1">Seçilen periyoda göre ortalama memnuniyet değişimi</p>
+                    </div>
+                    <div className="flex p-1 bg-slate-100 rounded-lg no-print">
+                      {[
+                        { id: 'daily', label: 'Günlük' },
+                        { id: 'weekly', label: 'Haftalık' },
+                        { id: 'monthly', label: 'Aylık' },
+                        { id: 'yearly', label: 'Yıllık' }
+                      ].map((g) => (
+                        <button
+                          key={g.id}
+                          onClick={() => setTimelineGranularity(g.id as any)}
+                          className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${
+                            timelineGranularity === g.id 
+                              ? 'bg-white text-indigo-600 shadow-sm' 
+                              : 'text-slate-500 hover:text-slate-700'
+                          }`}
+                        >
+                          {g.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {globalViewMode === 'chart' ? (
+                    <div className="h-[300px] w-full relative min-w-0 min-h-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={timelineData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis 
+                            dataKey="date" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fontSize: 10, fill: '#64748b' }}
+                            dy={10}
+                          />
+                          <YAxis 
+                            domain={[0, 100]} 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{ fontSize: 10, fill: '#64748b' }}
+                            tickFormatter={(v) => `%${v}`}
+                          />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                            formatter={(value: any) => [`%${value}`, 'Ort. Skor']}
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="avgScore" 
+                            stroke="#6366f1" 
+                            strokeWidth={3} 
+                            dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }}
+                            activeDot={{ r: 6, strokeWidth: 0 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-100">
+                            <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Tarih / Periyot</th>
+                            <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                            <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Ort. Memnuniyet</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {timelineData.map((item, idx) => (
+                            <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                              <td className="py-3 px-4 text-sm font-bold text-slate-700">{item.date}</td>
+                              <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">{item.count}</td>
+                              <td className="py-3 px-4">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
+                                    <div 
+                                      className={`h-full rounded-full ${
+                                        item.avgScore >= 80 ? 'bg-emerald-500' :
+                                        item.avgScore >= 60 ? 'bg-blue-500' :
+                                        item.avgScore >= 40 ? 'bg-amber-500' :
+                                        'bg-red-500'
+                                      }`}
+                                      style={{ width: `${item.avgScore}%` }}
+                                    />
+                                  </div>
+                                  <span className={`text-xs font-black w-10 ${
+                                    item.avgScore >= 80 ? 'text-emerald-600' :
+                                    item.avgScore >= 60 ? 'text-blue-600' :
+                                    item.avgScore >= 40 ? 'text-amber-600' :
+                                    'text-red-600'
+                                  }`}>
+                                    %{item.avgScore}
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </section>
+              );
+            }
+
             if (module.id === 'category_satisfaction') {
               return (
                 <section key="category_satisfaction" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
@@ -1088,14 +1450,14 @@ export function DashboardModule() {
                     </div>
                     <button
                       onClick={() => setShowSubCategories(!showSubCategories)}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      title={showSubCategories ? 'Alt Konuları Gizle' : 'Alt Konuları Göster'}
+                      className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all ${
                         showSubCategories 
                           ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-100' 
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
                       }`}
                     >
                       <Layers size={14} />
-                      {showSubCategories ? 'Alt Konuları Gizle' : 'Alt Konuları Göster'}
                     </button>
                   </div>
 
@@ -1146,11 +1508,22 @@ export function DashboardModule() {
                             cursor={{ fill: '#f8fafc' }}
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
                           />
+                          {isCompareActive && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
+                          {isCompareActive && (
+                            <Bar 
+                              dataKey="prevScore" 
+                              name="Önceki Dönem"
+                              radius={[0, 4, 4, 0]} 
+                              barSize={showSubCategories ? 8 : 12}
+                              fill="#cbd5e1"
+                            />
+                          )}
                           <Bar 
                             dataKey="score" 
+                            name="Bu Dönem"
                             radius={[0, 4, 4, 0]} 
                             barSize={showSubCategories ? 12 : 20}
-                            label={{ position: 'right', fontSize: 10, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
+                            label={{ position: 'right', fontSize: 12, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
                           >
                             {categoryChartData.map((entry, index) => (
                               <Cell 
@@ -1168,7 +1541,7 @@ export function DashboardModule() {
                         <thead>
                           <tr className="border-b border-slate-100">
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kategori</th>
-                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Bahsedilme Sayısı</th>
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
                           </tr>
                         </thead>
@@ -1298,8 +1671,20 @@ export function DashboardModule() {
                           </Pie>
                           <Tooltip 
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                            formatter={(value: any, name: string, props: any) => {
+                              if (isCompareActive && props.payload.prevCount !== undefined) {
+                                return [
+                                  <div key="tooltip-content" className="flex flex-col gap-1">
+                                    <span>Bu Dönem: {value}</span>
+                                    <span className="text-slate-400">Önceki Dönem: {props.payload.prevCount}</span>
+                                  </div>,
+                                  name
+                                ];
+                              }
+                              return [value, name];
+                            }}
                           />
-                          <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: '11px', fontWeight: 600 }} />
+                          <Legend verticalAlign="bottom" iconType="circle" iconSize={10} wrapperStyle={{ fontSize: '12px', fontWeight: 600, paddingTop: '15px' }} />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
@@ -1310,7 +1695,9 @@ export function DashboardModule() {
                           <tr className="border-b border-slate-100">
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kanal Kaynağı</th>
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                            {isCompareActive && <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Önceki Yorum Sayısı</th>}
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
+                            {isCompareActive && <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Önceki Memnuniyet</th>}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
@@ -1329,6 +1716,11 @@ export function DashboardModule() {
                               <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">
                                 {item.count}
                               </td>
+                              {isCompareActive && (
+                                <td className="py-3 px-4 text-sm text-slate-400 text-center font-mono">
+                                  {item.prevCount || 0}
+                                </td>
+                              )}
                               <td className="py-3 px-4">
                                 <div className="flex items-center gap-3">
                                   <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
@@ -1352,6 +1744,13 @@ export function DashboardModule() {
                                   </span>
                                 </div>
                               </td>
+                              {isCompareActive && (
+                                <td className="py-3 px-4">
+                                  <span className="text-xs font-bold text-slate-400">
+                                    %{item.prevScore || 0}
+                                  </span>
+                                </td>
+                              )}
                             </tr>
                           ))}
                         </tbody>
@@ -1381,7 +1780,7 @@ export function DashboardModule() {
                         <BarChart 
                           layout="vertical" 
                           data={dashboardData.nationalityAnalysis} 
-                          margin={{ left: 20, right: 60, top: 10, bottom: 10 }}
+                          margin={{ left: 20, right: 80, top: 10, bottom: 10 }}
                           onClick={(data: any) => {
                             if (data && data.activeLabel) {
                               setDrillDownFilter({ type: 'nationality', value: data.activeLabel });
@@ -1396,18 +1795,73 @@ export function DashboardModule() {
                             axisLine={false} 
                             tickLine={false} 
                             interval={0}
-                            tick={{ fontSize: 11, fontWeight: 600, fill: '#64748b' }}
-                            width={120}
+                            tick={(props) => {
+                              const { x, y, payload } = props;
+                              const countryCode = getCountryCode(payload.value);
+                              return (
+                                <g transform={`translate(${x},${y})`}>
+                                  {countryCode ? (
+                                    <image
+                                      x="-135"
+                                      y="-10"
+                                      width="20"
+                                      height="14"
+                                      href={`https://flagcdn.com/w40/${countryCode}.png`}
+                                      preserveAspectRatio="xMidYMid slice"
+                                      style={{ borderRadius: '2px' }}
+                                    />
+                                  ) : (
+                                    <g transform="translate(-135, -10)">
+                                      <circle cx="10" cy="7" r="7" fill="#f1f5f9" />
+                                      <path 
+                                        d="M10 0a7 7 0 0 0-7 7 7 7 0 0 0 7 7 7 7 0 0 0 7-7 7 7 0 0 0-7-7zm0 1.5a5.5 5.5 0 0 1 5.5 5.5 5.5 5.5 0 0 1-5.5 5.5 5.5 5.5 0 0 1-5.5-5.5 5.5 5.5 0 0 1 5.5-5.5zM6.5 7h7M10 1.5v11" 
+                                        stroke="#94a3b8" 
+                                        strokeWidth="0.5" 
+                                        fill="none" 
+                                      />
+                                    </g>
+                                  )}
+                                  <text
+                                    x={-105}
+                                    y={2}
+                                    fill="#64748b"
+                                    fontSize={12}
+                                    fontWeight={600}
+                                    textAnchor="start"
+                                  >
+                                    {payload.value}
+                                  </text>
+                                </g>
+                              );
+                            }}
+                            width={140}
                           />
                           <Tooltip 
                             cursor={{ fill: '#f8fafc' }}
                             contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                            formatter={(value: any, name: string) => {
+                              if (name === 'avgScore') return [`%${value}`, 'Bu Dönem Memnuniyet'];
+                              if (name === 'prevScore') return [`%${value}`, 'Önceki Dönem Memnuniyet'];
+                              if (name === 'count') return [value, 'Bahsedilme Sayısı'];
+                              return [value, name];
+                            }}
                           />
+                          {isCompareActive && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
+                          {isCompareActive && (
+                            <Bar 
+                              dataKey="prevScore" 
+                              name="Önceki Dönem"
+                              fill="#cbd5e1" 
+                              radius={[0, 4, 4, 0]} 
+                              barSize={12}
+                            />
+                          )}
                           <Bar 
                             dataKey="avgScore" 
+                            name="Bu Dönem"
                             radius={[0, 4, 4, 0]} 
-                            barSize={20}
-                            label={{ position: 'right', fontSize: 10, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
+                            barSize={isCompareActive ? 12 : 24}
+                            label={{ position: 'right', fontSize: 12, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
                           >
                             {dashboardData.nationalityAnalysis.map((entry, index) => (
                               <Cell 
@@ -1426,50 +1880,83 @@ export function DashboardModule() {
                           <tr className="border-b border-slate-100">
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Uyruk / Pazar</th>
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                            {isCompareActive && <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Önceki Yorum Sayısı</th>}
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
+                            {isCompareActive && <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Önceki Memnuniyet</th>}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                          {dashboardData.nationalityAnalysis.map((item, idx) => (
-                            <tr 
-                              key={idx} 
-                              className="hover:bg-slate-50 transition-colors cursor-pointer group"
-                              onClick={() => setDrillDownFilter({ type: 'nationality', value: item.name })}
-                            >
-                              <td className="py-3 px-4">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity" />
-                                  <span className="text-sm font-bold text-slate-800 tracking-tight">{item.name}</span>
-                                </div>
-                              </td>
-                              <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono font-bold">
-                                {item.count}
-                              </td>
-                              <td className="py-3 px-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
-                                    <div 
-                                      className={`h-full rounded-full ${
-                                        item.avgScore >= 80 ? 'bg-emerald-500' :
-                                        item.avgScore >= 60 ? 'bg-blue-500' :
-                                        item.avgScore >= 40 ? 'bg-amber-500' :
-                                        'bg-red-500'
-                                      }`}
-                                      style={{ width: `${item.avgScore}%` }}
-                                    />
+                          {dashboardData.nationalityAnalysis.map((item, idx) => {
+                            const countryCode = getCountryCode(item.name);
+                            return (
+                              <tr 
+                                key={idx} 
+                                className="hover:bg-slate-50 transition-colors cursor-pointer group"
+                                onClick={() => setDrillDownFilter({ type: 'nationality', value: item.name })}
+                              >
+                                <td className="py-3 px-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    {countryCode ? (
+                                      <img 
+                                        src={`https://flagcdn.com/w40/${countryCode}.png`}
+                                        srcSet={`https://flagcdn.com/w80/${countryCode}.png 2x`}
+                                        width="24"
+                                        height="18"
+                                        alt={`${item.name} bayrağı`}
+                                        className="rounded-sm shadow-sm object-cover border border-slate-100 shrink-0"
+                                        referrerPolicy="no-referrer"
+                                        style={{ width: '24px', height: '18px', minWidth: '24px' }}
+                                      />
+                                    ) : (
+                                      <div className="w-6 h-[18px] bg-slate-100 rounded-sm flex items-center justify-center border border-slate-200 shrink-0">
+                                        <Globe className="w-3 h-3 text-slate-400" />
+                                      </div>
+                                    )}
+                                    <span className="text-sm font-bold text-slate-800 tracking-tight truncate">{item.name}</span>
                                   </div>
-                                  <span className={`text-xs font-black w-10 ${
-                                    item.avgScore >= 80 ? 'text-emerald-600' :
-                                    item.avgScore >= 60 ? 'text-blue-600' :
-                                    item.avgScore >= 40 ? 'text-amber-600' :
-                                    'text-red-600'
-                                  }`}>
-                                    %{item.avgScore}
-                                  </span>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                                </td>
+                                <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono font-bold">
+                                  {item.count}
+                                </td>
+                                {isCompareActive && (
+                                  <td className="py-3 px-4 text-sm text-slate-400 text-center font-mono font-bold">
+                                    {item.prevCount || 0}
+                                  </td>
+                                )}
+                                <td className="py-3 px-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
+                                      <div 
+                                        className={`h-full rounded-full ${
+                                          item.avgScore >= 80 ? 'bg-emerald-500' :
+                                          item.avgScore >= 60 ? 'bg-blue-500' :
+                                          item.avgScore >= 40 ? 'bg-amber-500' :
+                                          'bg-red-500'
+                                        }`}
+                                        style={{ width: `${item.avgScore}%` }}
+                                      />
+                                    </div>
+                                    <span className={`text-xs font-black w-10 ${
+                                      item.avgScore >= 80 ? 'text-emerald-600' :
+                                      item.avgScore >= 60 ? 'text-blue-600' :
+                                      item.avgScore >= 40 ? 'text-amber-600' :
+                                      'text-red-600'
+                                    }`}>
+                                      %{item.avgScore}
+                                    </span>
+                                  </div>
+                                </td>
+                                {isCompareActive && (
+                                  <td className="py-3 px-4">
+                                    <span className="text-xs font-bold text-slate-400">
+                                      %{item.prevScore || 0}
+                                    </span>
+                                  </td>
+                                )}
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -1480,95 +1967,384 @@ export function DashboardModule() {
 
             if (module.id === 'hotel_agenda') {
               return (
-                <div key="hotel_agenda" className="grid grid-cols-3 gap-6">
-                  {/* Most Mentioned */}
-                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-                      <h4 className="text-xs font-black text-slate-900 uppercase tracking-widest flex items-center gap-2">
-                        <TrendingUp size={14} className="text-indigo-500" />
-                        En Çok Konuşulanlar
-                      </h4>
-                    </div>
-                    <div className="divide-y divide-slate-100">
-                      {dashboardData.mostMentioned.slice(0, 6).map((item, idx) => (
-                        <div 
-                          key={idx} 
-                          className="p-3 hover:bg-slate-50 transition-colors flex items-center justify-between group cursor-pointer"
-                          onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
-                        >
-                          <div>
-                            <p className="text-xs font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{item.subCategory}</p>
-                            <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
+                <div key="hotel_agenda" className="flex flex-col gap-8">
+                  {/* En Çok Konuşulanlar */}
+                  <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                          <div className="p-1.5 bg-indigo-50 rounded-lg">
+                            <TrendingUp size={18} className="text-indigo-600" />
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs font-black text-slate-700">{item.count}</p>
-                            <p className="text-[9px] font-bold text-slate-400 uppercase">Yorum</p>
-                          </div>
-                        </div>
-                      ))}
+                          En Çok Konuşulan Konular
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1">En yüksek yorum hacmine sahip, gündemi belirleyen alt kategoriler</p>
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Top Positive */}
-                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 bg-emerald-50/30">
-                      <h4 className="text-xs font-black text-emerald-900 uppercase tracking-widest flex items-center gap-2">
-                        <Award size={14} className="text-emerald-500" />
-                        En Çok Övülenler
-                      </h4>
-                    </div>
-                    <div className="divide-y divide-slate-100">
-                      {dashboardData.topPositive.slice(0, 6).map((item, idx) => (
-                        <div 
-                          key={idx} 
-                          className="p-3 hover:bg-emerald-50/20 transition-colors flex items-center justify-between cursor-pointer"
-                          onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
-                        >
-                          <div>
-                            <p className="text-xs font-bold text-slate-800">{item.subCategory}</p>
-                            <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <div className="text-right">
-                              <p className="text-xs font-black text-emerald-600">%{item.avgScore}</p>
-                            </div>
-                            <ChevronRight size={12} className="text-slate-300" />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                    {globalViewMode === 'chart' ? (
+                      <div className={`w-full relative min-w-0 min-h-0 transition-all duration-300`} style={{ height: showAllMostMentioned ? `${Math.max(400, dashboardData.mostMentioned.length * 40)}px` : '400px' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart 
+                            layout="vertical" 
+                            data={showAllMostMentioned ? dashboardData.mostMentioned : dashboardData.mostMentioned.slice(0, 10)} 
+                            margin={{ left: 20, right: 80, top: 10, bottom: 10 }}
+                            onClick={(data: any) => {
+                              if (data && data.activeLabel) {
+                                setDrillDownFilter({ type: 'category', value: data.activeLabel });
+                              }
+                            }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                            <XAxis type="number" domain={[0, 'dataMax + 5']} hide />
+                            <YAxis 
+                              dataKey="subCategory" 
+                              type="category" 
+                              axisLine={false} 
+                              tickLine={false} 
+                              tick={{ fontSize: 11, fontWeight: 700, fill: '#475569' }}
+                              width={160}
+                            />
+                            <Tooltip 
+                              cursor={{ fill: '#f8fafc' }}
+                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                              formatter={(value: any, name: string) => {
+                                if (name === 'count') return [value, 'Bu Dönem Bahsedilme'];
+                                if (name === 'prevCount') return [value, 'Önceki Dönem Bahsedilme'];
+                                if (name === 'avgScore') return [`%${value}`, 'Memnuniyet Skoru'];
+                                return [value, name];
+                              }}
+                            />
+                            {isCompareActive && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
+                            {isCompareActive && (
+                              <Bar 
+                                dataKey="prevCount" 
+                                name="Önceki Dönem"
+                                fill="#cbd5e1" 
+                                radius={[0, 6, 6, 0]} 
+                                barSize={12}
+                              />
+                            )}
+                            <Bar 
+                              dataKey="count" 
+                              name="Bu Dönem"
+                              fill="#6366f1" 
+                              radius={[0, 6, 6, 0]} 
+                              barSize={isCompareActive ? 12 : 24}
+                              label={{ position: 'right', fontSize: 12, fontWeight: 900, fill: '#4f46e5', offset: 10 }}
+                            />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-slate-100">
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Alt Kategori</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ana Kategori</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Bahsedilme Sayısı</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Skor</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {(showAllMostMentioned ? dashboardData.mostMentioned : dashboardData.mostMentioned.slice(0, 10)).map((item, idx) => (
+                              <tr 
+                                key={idx} 
+                                className="hover:bg-slate-50/80 transition-all group cursor-pointer"
+                                onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                              >
+                                <td className="py-4 px-4">
+                                  <span className="text-sm font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{item.subCategory}</span>
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{item.mainCategory}</span>
+                                </td>
+                                <td className="py-4 px-4 text-center">
+                                  <span className="text-sm font-black text-indigo-600">{item.count}</span>
+                                </td>
+                                <td className="py-4 px-4 text-center">
+                                  <span className={`text-xs font-bold ${
+                                    item.avgScore >= 80 ? 'text-emerald-600' :
+                                    item.avgScore >= 60 ? 'text-blue-600' :
+                                    item.avgScore >= 40 ? 'text-amber-600' :
+                                    'text-red-600'
+                                  }`}>%{item.avgScore}</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
 
-                  {/* Top Negative (Urgency) */}
-                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="p-4 border-b border-slate-100 bg-red-50/30">
-                      <h4 className="text-xs font-black text-red-900 uppercase tracking-widest flex items-center gap-2">
-                        <AlertTriangle size={14} className="text-red-500" />
-                        Acil Müdahale Gerekenler
-                      </h4>
-                    </div>
-                    <div className="divide-y divide-slate-100">
-                      {dashboardData.topNegative.slice(0, 6).map((item, idx) => (
-                        <div 
-                          key={idx} 
-                          className="p-3 hover:bg-red-50/20 transition-colors flex items-center justify-between cursor-pointer"
-                          onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                    {dashboardData.mostMentioned.length > 10 && (
+                      <div className="mt-6 pt-4 border-t border-slate-50 flex justify-center">
+                        <button 
+                          onClick={() => setShowAllMostMentioned(!showAllMostMentioned)}
+                          className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
                         >
-                          <div>
-                            <p className="text-xs font-bold text-slate-800">{item.subCategory}</p>
-                            <div className="flex items-center gap-2">
-                              <p className="text-[10px] text-slate-400">{item.mainCategory}</p>
-                              <span className="text-[8px] font-bold bg-red-100 text-red-600 px-1.5 py-0.5 rounded uppercase tracking-tighter">Kritik</span>
-                            </div>
+                          {showAllMostMentioned ? (
+                            <>Daha Az Göster <ChevronUp size={14} /></>
+                          ) : (
+                            <>Tümünü Gör ({dashboardData.mostMentioned.length}) <ChevronDown size={14} /></>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </section>
+
+                  {/* En Çok Övülenler */}
+                  <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                          <div className="p-1.5 bg-emerald-50 rounded-lg">
+                            <Award size={18} className="text-emerald-600" />
                           </div>
-                          <div className="text-right">
-                            <p className="text-xs font-black text-red-600">%{item.avgScore}</p>
-                            <p className="text-[9px] font-bold text-slate-400 uppercase">Skor</p>
-                          </div>
-                        </div>
-                      ))}
+                          En Çok Övülen Konular
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1">Misafirlerin en yüksek puan verdiği ve memnuniyetin zirve yaptığı alanlar</p>
+                      </div>
                     </div>
-                  </div>
+
+                    {globalViewMode === 'chart' ? (
+                      <div className={`w-full relative min-w-0 min-h-0 transition-all duration-300`} style={{ height: showAllTopPositive ? `${Math.max(400, dashboardData.topPositive.length * 40)}px` : '400px' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart 
+                            layout="vertical" 
+                            data={showAllTopPositive ? dashboardData.topPositive : dashboardData.topPositive.slice(0, 10)} 
+                            margin={{ left: 20, right: 100, top: 10, bottom: 10 }}
+                            onClick={(data: any) => {
+                              if (data && data.activeLabel) {
+                                setDrillDownFilter({ type: 'category', value: data.activeLabel });
+                              }
+                            }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                            <XAxis type="number" domain={[0, 100]} hide />
+                            <YAxis 
+                              dataKey="subCategory" 
+                              type="category" 
+                              axisLine={false} 
+                              tickLine={false} 
+                              tick={{ fontSize: 11, fontWeight: 700, fill: '#475569' }}
+                              width={160}
+                            />
+                            <Tooltip 
+                              cursor={{ fill: '#f8fafc' }}
+                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                              formatter={(value: any, name: string) => {
+                                if (name === 'avgScore') return [`%${value}`, 'Bu Dönem Memnuniyet'];
+                                if (name === 'prevScore') return [`%${value}`, 'Önceki Dönem Memnuniyet'];
+                                if (name === 'count') return [value, 'Bahsedilme Sayısı'];
+                                return [value, name];
+                              }}
+                            />
+                            {isCompareActive && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
+                            {isCompareActive && (
+                              <Bar 
+                                dataKey="prevScore" 
+                                name="Önceki Dönem"
+                                fill="#cbd5e1" 
+                                radius={[0, 6, 6, 0]} 
+                                barSize={12}
+                              />
+                            )}
+                            <Bar 
+                              dataKey="avgScore" 
+                              name="Bu Dönem"
+                              fill="#10b981" 
+                              radius={[0, 6, 6, 0]} 
+                              barSize={isCompareActive ? 12 : 24}
+                              label={{ position: 'right', fontSize: 12, fontWeight: 900, fill: '#059669', offset: 10, formatter: (val: any) => `%${val}` }}
+                            />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-slate-100">
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Alt Kategori</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ana Kategori</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Bahsedilme Sayısı</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Memnuniyet Skoru</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {(showAllTopPositive ? dashboardData.topPositive : dashboardData.topPositive.slice(0, 10)).map((item, idx) => (
+                              <tr 
+                                key={idx} 
+                                className="hover:bg-slate-50/80 transition-all group cursor-pointer"
+                                onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                              >
+                                <td className="py-4 px-4">
+                                  <span className="text-sm font-bold text-slate-800 group-hover:text-emerald-600 transition-colors">{item.subCategory}</span>
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{item.mainCategory}</span>
+                                </td>
+                                <td className="py-4 px-4 text-center">
+                                  <span className="text-xs font-bold text-slate-500">{item.count}</span>
+                                </td>
+                                <td className="py-4 px-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[120px]">
+                                      <div className="h-full bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.3)]" style={{ width: `${item.avgScore}%` }} />
+                                    </div>
+                                    <span className="text-xs font-black text-emerald-600 w-10">%{item.avgScore}</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {dashboardData.topPositive.length > 10 && (
+                      <div className="mt-6 pt-4 border-t border-slate-50 flex justify-center">
+                        <button 
+                          onClick={() => setShowAllTopPositive(!showAllTopPositive)}
+                          className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
+                        >
+                          {showAllTopPositive ? (
+                            <>Daha Az Göster <ChevronUp size={14} /></>
+                          ) : (
+                            <>Tümünü Gör ({dashboardData.topPositive.length}) <ChevronDown size={14} /></>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Acil Müdahale Gerekenler */}
+                  <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-6">
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                          <div className="p-1.5 bg-rose-50 rounded-lg">
+                            <AlertTriangle size={18} className="text-rose-600" />
+                          </div>
+                          Acil Müdahale Gerekenler
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-1">En düşük performans gösteren ve operasyonel müdahale bekleyen kritik konular</p>
+                      </div>
+                    </div>
+
+                    {globalViewMode === 'chart' ? (
+                      <div className={`w-full relative min-w-0 min-h-0 transition-all duration-300`} style={{ height: showAllTopNegative ? `${Math.max(400, dashboardData.topNegative.length * 40)}px` : '400px' }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart 
+                            layout="vertical" 
+                            data={showAllTopNegative ? dashboardData.topNegative : dashboardData.topNegative.slice(0, 10)} 
+                            margin={{ left: 20, right: 100, top: 10, bottom: 10 }}
+                            onClick={(data: any) => {
+                              if (data && data.activeLabel) {
+                                setDrillDownFilter({ type: 'category', value: data.activeLabel });
+                              }
+                            }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} stroke="#f1f5f9" />
+                            <XAxis type="number" domain={[0, 100]} hide />
+                            <YAxis 
+                              dataKey="subCategory" 
+                              type="category" 
+                              axisLine={false} 
+                              tickLine={false} 
+                              tick={{ fontSize: 11, fontWeight: 700, fill: '#475569' }}
+                              width={160}
+                            />
+                            <Tooltip 
+                              cursor={{ fill: '#fff1f2' }}
+                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                              formatter={(value: any, name: string) => {
+                                if (name === 'avgScore') return [`%${value}`, 'Bu Dönem Memnuniyet'];
+                                if (name === 'prevScore') return [`%${value}`, 'Önceki Dönem Memnuniyet'];
+                                if (name === 'count') return [value, 'Bahsedilme Sayısı'];
+                                return [value, name];
+                              }}
+                            />
+                            {isCompareActive && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
+                            {isCompareActive && (
+                              <Bar 
+                                dataKey="prevScore" 
+                                name="Önceki Dönem"
+                                fill="#cbd5e1" 
+                                radius={[0, 6, 6, 0]} 
+                                barSize={12}
+                              />
+                            )}
+                            <Bar 
+                              dataKey="avgScore" 
+                              name="Bu Dönem"
+                              fill="#ef4444" 
+                              radius={[0, 6, 6, 0]} 
+                              barSize={isCompareActive ? 12 : 24}
+                              label={{ position: 'right', fontSize: 12, fontWeight: 900, fill: '#dc2626', offset: 10, formatter: (val: any) => `%${val}` }}
+                            />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left border-collapse">
+                          <thead>
+                            <tr className="border-b border-slate-100">
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Alt Kategori</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ana Kategori</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Bahsedilme Sayısı</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Memnuniyet Skoru</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-50">
+                            {(showAllTopNegative ? dashboardData.topNegative : dashboardData.topNegative.slice(0, 10)).map((item, idx) => (
+                              <tr 
+                                key={idx} 
+                                className="hover:bg-rose-50/30 transition-all group cursor-pointer"
+                                onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                              >
+                                <td className="py-4 px-4">
+                                  <span className="text-sm font-bold text-slate-800 group-hover:text-rose-600 transition-colors">{item.subCategory}</span>
+                                </td>
+                                <td className="py-4 px-4">
+                                  <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{item.mainCategory}</span>
+                                </td>
+                                <td className="py-4 px-4 text-center">
+                                  <span className="text-xs font-bold text-slate-500">{item.count}</span>
+                                </td>
+                                <td className="py-4 px-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[120px]">
+                                      <div className="h-full bg-rose-500 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.3)]" style={{ width: `${item.avgScore}%` }} />
+                                    </div>
+                                    <span className="text-xs font-black text-rose-600 w-10">%{item.avgScore}</span>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {dashboardData.topNegative.length > 10 && (
+                      <div className="mt-6 pt-4 border-t border-slate-50 flex justify-center">
+                        <button 
+                          onClick={() => setShowAllTopNegative(!showAllTopNegative)}
+                          className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                        >
+                          {showAllTopNegative ? (
+                            <>Daha Az Göster <ChevronUp size={14} /></>
+                          ) : (
+                            <>Tümünü Gör ({dashboardData.topNegative.length}) <ChevronDown size={14} /></>
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </section>
                 </div>
               );
             }
