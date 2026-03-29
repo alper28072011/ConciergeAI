@@ -529,71 +529,53 @@ ${JSON.stringify(timelineActions.map(a => ({
           <title>${title}</title>
           <meta charset="utf-8">
           <style>
-            /* Reset */
+            /* 1. Temel Sıfırlama ve Profesyonel Font (Word Standardı) */
             html, body {
               margin: 0;
               padding: 0;
               background: white;
-              width: 100%;
-              height: 100%;
-            }
-            
-            /* Tell the printer to use A4 paper and remove default browser margins */
-            @page { 
-              size: A4; 
-              margin: 0; 
-            }
-
-            /* The A4 Page Container */
-            .page { 
-              width: 210mm;
-              min-height: 297mm;
-              padding: 45mm 25mm 25mm 25mm;
-              margin: 0 auto;
-              box-sizing: border-box;
-              page-break-after: always;
-              
-              /* Typography */
-              font-family: 'Georgia', serif; 
+              font-family: 'Times New Roman', Times, serif; 
               color: black;
               font-size: 12pt;
-              line-height: 1.6;
-              text-align: justify;
-              text-justify: inter-word;
+            }
+            
+            /* 2. A4 Kağıt Standartları */
+            @page { 
+              size: A4; 
+              margin: 20mm; /* Yazıcının kendi standart kenar boşluklarını kullan */
             }
 
-            /* Enforce strict word wrapping rules */
-            .page * {
-              box-sizing: border-box;
+            /* 3. Kusursuz Metin Akışı (Wrapping Motoru) */
+            .page { 
+              width: 100%;
               max-width: 100%;
-              /* 1. Allow text to wrap normally at spaces */
-              white-space: normal !important;
-              /* 2. Break words ONLY if a single word is longer than the entire line */
-              overflow-wrap: break-word !important;
-              word-wrap: break-word !important;
-              /* 3. NEVER break a normal word in the middle */
-              word-break: normal !important;
-              /* 4. Disable automatic hyphenation */
-              hyphens: none !important;
+              box-sizing: border-box;
+              line-height: 1.5;
+              
+              /* Bu 3 satır taşmayı ve yanlış kesilmeyi sonsuza dek çözer: */
+              white-space: pre-wrap; /* Editördeki alt satıra geçişleri korur ve düzgün sarar */
+              overflow-wrap: break-word; /* SADECE kelime sayfadan uzunsa kırar */
+              word-break: normal; /* Kelimelerin ortasından rastgele kesilmesini YASAKLAR */
             }
 
-            /* Paragraph spacing */
-            p { 
-              margin-top: 0 !important; 
-              margin-bottom: 1.2em !important; 
-              text-align: justify !important; 
+            /* 4. Paragraf ve Başlık Ayarları */
+            .page p { 
+              margin: 0 0 1em 0; 
+              text-align: left; /* Türkçe metinler için en güvenli varsayılan değer */
+            }
+            .page h1, .page h2, .page h3 { 
+              margin-top: 1em; 
+              margin-bottom: 0.5em; 
+              font-weight: bold; 
+              line-height: 1.2;
             }
 
-            /* Preserve Quill alignments */
+            /* 5. ReactQuill Hizalama Destekleri (Kullanıcı Seçimini Korumak İçin) */
             .ql-align-center { text-align: center !important; }
             .ql-align-right { text-align: right !important; }
             .ql-align-justify { text-align: justify !important; }
-
-            h1, h2, h3 { margin-top: 1em; margin-bottom: 0.5em; font-weight: bold; }
-            ul, ol { margin-bottom: 1em; padding-left: 2em; }
-            strong { font-weight: bold; }
-            em { font-style: italic; }
-            u { text-decoration: underline; }
+            .ql-indent-1 { padding-left: 3em; }
+            .ql-indent-2 { padding-left: 6em; }
           </style>
         </head>
         <body>
