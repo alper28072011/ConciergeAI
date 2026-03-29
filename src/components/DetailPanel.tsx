@@ -545,35 +545,40 @@ ${JSON.stringify(timelineActions.map(a => ({
               margin: 20mm; /* Yazıcının kendi standart kenar boşluklarını kullan */
             }
 
-            /* 3. Kusursuz Metin Akışı (Wrapping Motoru) */
+            /* 3. Kusursuz Metin Akışı (Kelimeleri Kesmeyi Önleyen Motor) */
             .page { 
               width: 100%;
               max-width: 100%;
               box-sizing: border-box;
               line-height: 1.5;
               
-              /* Bu 3 satır taşmayı ve yanlış kesilmeyi sonsuza dek çözer: */
-              white-space: pre-wrap; /* Editördeki alt satıra geçişleri korur ve düzgün sarar */
-              overflow-wrap: break-word; /* SADECE kelime sayfadan uzunsa kırar */
-              word-break: normal; /* Kelimelerin ortasından rastgele kesilmesini YASAKLAR */
+              /* Burası kelime kesilmelerini ve sayfa taşmalarını KÖKTEN çözer */
+              white-space: pre-wrap !important; /* Kullanıcının enter boşluklarını korur, satır sonuna gelince sarar */
+              word-wrap: normal !important; /* Sadece kelime bittikten sonra (boşlukta) alt satıra geçer */
+              overflow-wrap: normal !important; /* Kelimenin ortasından kopmasını yasaklar */
+              word-break: normal !important; /* Rastgele kesilmeleri iptal eder */
+              hyphens: none !important; /* Otomatik tireleme ve hecelemeyi kapatır */
             }
 
-            /* 4. Paragraf ve Başlık Ayarları */
-            .page p { 
-              margin: 0 0 1em 0; 
-              text-align: left; /* Türkçe metinler için en güvenli varsayılan değer */
+            /* 4. Zorunlu Sola Yaslama (Hatalı justify'ı iptal eder) */
+            .page, .page p, .page div, .page span, .ql-editor { 
+              text-align: left !important; /* En güvenilir Türkçe okunabilirlik standardı */
+              margin: 0 0 1em 0;
             }
-            .page h1, .page h2, .page h3 { 
+
+            /* Sadece bilerek ortalanmış veya sağa yaslanmış metinlere saygı duy */
+            .ql-align-center { text-align: center !important; }
+            .ql-align-right { text-align: right !important; }
+            /* DİKKAT: .ql-align-justify bilerek EKLENMEDİ, yazıcıda sola yaslanmaya zorlanacak */
+
+            h1, h2, h3 { 
               margin-top: 1em; 
               margin-bottom: 0.5em; 
               font-weight: bold; 
               line-height: 1.2;
+              text-align: left !important;
             }
 
-            /* 5. ReactQuill Hizalama Destekleri (Kullanıcı Seçimini Korumak İçin) */
-            .ql-align-center { text-align: center !important; }
-            .ql-align-right { text-align: right !important; }
-            .ql-align-justify { text-align: justify !important; }
             .ql-indent-1 { padding-left: 3em; }
             .ql-indent-2 { padding-left: 6em; }
           </style>
