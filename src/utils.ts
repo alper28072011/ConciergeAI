@@ -83,12 +83,17 @@ export const buildDynamicPayload = (
   processedString = processedString.replace(/"Value":\s*"2024-01-01"/g, `"Value": "{{START_DATE}}"`);
   processedString = processedString.replace(/"Value":\s*"2024-12-31"/g, `"Value": "{{END_DATE}}"`);
 
+  // Escape special characters in strings so they don't break JSON
+  const escapeJsonString = (str: string) => {
+    return str.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+  };
+
   // 1. Replace Placeholders
-  processedString = processedString.replace(/{{LOGIN_TOKEN}}/g, activeSettings.loginToken || '');
-  processedString = processedString.replace(/{{HOTELID}}/g, activeSettings.hotelId || '');
+  processedString = processedString.replace(/{{LOGIN_TOKEN}}/g, escapeJsonString(activeSettings.loginToken || ''));
+  processedString = processedString.replace(/{{HOTELID}}/g, escapeJsonString(activeSettings.hotelId || ''));
   
-  if (startDate !== undefined) processedString = processedString.replace(/{{START_DATE}}/g, startDate || '');
-  if (endDate !== undefined) processedString = processedString.replace(/{{END_DATE}}/g, endDate || '');
+  if (startDate !== undefined) processedString = processedString.replace(/{{START_DATE}}/g, escapeJsonString(startDate || ''));
+  if (endDate !== undefined) processedString = processedString.replace(/{{END_DATE}}/g, escapeJsonString(endDate || ''));
 
   // 2. Parse JSON
   let payload: any;
@@ -212,23 +217,28 @@ export const buildUnifiedTimeline = (
     });
   });
 
-  // 3. Add Guest Interactions (Welcome Call, etc.)
+  // 3. Add Guest Interactions (Welcome Call, etc.) - Only if no welcome call actions exist in firebaseActions
   guestInteractions.forEach(interaction => {
     if (interaction.welcomeCallDate && interaction.welcomeCallStatus) {
-      let desc = 'Hoş Geldiniz Araması Yapıldı';
-      if (interaction.welcomeCallStatus === 'answered_all_good') desc = 'Hoş Geldiniz Araması Yapıldı: Ulaşıldı - Her şey yolunda';
-      else if (interaction.welcomeCallStatus === 'answered_has_request') desc = 'Hoş Geldiniz Araması Yapıldı: Ulaşıldı - Talebi Var';
-      else if (interaction.welcomeCallStatus === 'no_answer') desc = 'Hoş Geldiniz Araması Yapıldı: Ulaşılamadı';
+      // Check if we already have welcome call logs in firebaseActions for this guest
+      const hasWelcomeCallLogs = firebaseActions.some(a => a.type === 'welcome_call' && String(a.resId) === String(interaction.resId));
+      
+      if (!hasWelcomeCallLogs) {
+        let desc = 'Hoş Geldiniz Araması Yapıldı';
+        if (interaction.welcomeCallStatus === 'answered_all_good') desc = 'Hoş Geldiniz Araması Yapıldı: Ulaşıldı - Her şey yolunda';
+        else if (interaction.welcomeCallStatus === 'answered_has_request') desc = 'Hoş Geldiniz Araması Yapıldı: Ulaşıldı - Talebi Var';
+        else if (interaction.welcomeCallStatus === 'no_answer') desc = 'Hoş Geldiniz Araması Yapıldı: Ulaşılamadı';
 
-      timeline.push({
-        id: `welcome_call_${interaction.id || interaction.resId}`,
-        date: interaction.welcomeCallDate,
-        type: 'welcome_call',
-        description: desc,
-        content: interaction.welcomeCallNotes || undefined,
-        resId: interaction.resId,
-        source: 'Sistem'
-      });
+        timeline.push({
+          id: `welcome_call_${interaction.id || interaction.resId}`,
+          date: interaction.welcomeCallDate,
+          type: 'welcome_call',
+          description: desc,
+          content: interaction.welcomeCallNotes || undefined,
+          resId: interaction.resId,
+          source: 'Sistem'
+        });
+      }
     }
   });
 

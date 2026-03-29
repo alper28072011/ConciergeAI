@@ -74,7 +74,7 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ actions, onDeleteAct
               {icon}
             </div>
             <div className={`bg-white p-4 rounded-xl border ${borderColor} shadow-sm relative`}>
-              {action.type !== 'elektra' && action.type !== 'welcome_call' && action.type !== 'survey_sent' && onDeleteAction && (
+              {action.type !== 'elektra' && action.type !== 'survey_sent' && onDeleteAction && (
                 <button
                   onClick={() => onDeleteAction(action.id)}
                   className="absolute top-2 right-2 p-1.5 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover:opacity-100 transition-all"

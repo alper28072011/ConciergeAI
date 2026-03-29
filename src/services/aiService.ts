@@ -11,6 +11,27 @@ const COST_RATES = {
   'gemini-3.1-pro-preview': { input: 2.00, output: 12.00 }
 };
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function fetchWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const errorStr = String(error?.message || error);
+      if (errorStr.includes('429') || errorStr.includes('RESOURCE_EXHAUSTED') || errorStr.includes('quota')) {
+        if (i === maxRetries - 1) throw error;
+        const delay = Math.pow(2, i) * 2000 + Math.random() * 1000;
+        console.warn(`Rate limit hit. Retrying in ${Math.round(delay/1000)}s...`);
+        await sleep(delay);
+      } else {
+        throw error;
+      }
+    }
+  }
+  throw new Error("Max retries reached");
+}
+
 export async function generateAIContent(prompt: string, actionName: string, featureKey?: AIFeature): Promise<string> {
   let settings: Partial<ApiSettings> = {};
   try {
@@ -31,10 +52,10 @@ export async function generateAIContent(prompt: string, actionName: string, feat
   const ai = new GoogleGenAI({ apiKey: String(apiKey).trim().replace(/^["']|["']$/g, '') });
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await fetchWithRetry(() => ai.models.generateContent({
       model: model,
       contents: prompt,
-    });
+    }));
 
     const text = response.text || '';
     
@@ -109,7 +130,7 @@ Yorum:
 ${comment.COMMENT || ''}`;
 
   try {
-    const response = await ai.models.generateContent({
+    const response = await fetchWithRetry(() => ai.models.generateContent({
       model: model,
       contents: prompt,
       config: {
@@ -135,7 +156,7 @@ ${comment.COMMENT || ''}`;
           required: ["overallScore", "topics"]
         }
       }
-    });
+    }));
 
     const text = response.text || '{}';
     const result = JSON.parse(text);

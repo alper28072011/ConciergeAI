@@ -223,7 +223,7 @@ export function LetterModule() {
   const handleBulkResetAnalysis = async () => {
     if (selectedCommentIds.length === 0) return;
 
-    if (!window.confirm(`Seçili ${selectedCommentIds.length} yorumun tüm analiz verilerini (Duygu Analizi, Derin Analiz, Aksiyonlar) veritabanından silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`)) {
+    if (!window.confirm(`Seçili ${selectedCommentIds.length} yorumun tüm analiz verilerini (Derin Analiz, Aksiyonlar) veritabanından silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`)) {
       return;
     }
 
@@ -269,14 +269,6 @@ export function LetterModule() {
             </span>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => openBulkModal('sentiment')}
-              disabled={isBulkResetting}
-              className="px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
-            >
-              <Brain size={16} />
-              Toplu Duygu Analizi
-            </button>
             <button
               onClick={() => openBulkModal('deep')}
               disabled={isBulkResetting}

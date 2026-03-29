@@ -3,7 +3,7 @@ import { X, ChevronDown, ChevronUp, Eye, EyeOff, Brain, DollarSign, Activity, Se
 import { ApiSettings, AILog } from '../types';
 import { doc, setDoc, collection, getDocs } from "firebase/firestore";
 import { db } from '../firebase';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -123,35 +123,44 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
   const bookmarkletRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
-    const saved = localStorage.getItem('hotelApiSettings');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        
-        // Auto-fix for hardcoded dates in comment template
-        let commentTemplate = parsed.commentPayloadTemplate || DEFAULT_COMMENT_TEMPLATE;
-        if (commentTemplate.includes('"Value": "2024-01-01"')) {
-          commentTemplate = commentTemplate.replace(/"Value": "2024-01-01"/g, '"Value": "{{START_DATE}}"');
-        }
-        if (commentTemplate.includes('"Value": "2024-12-31"')) {
-          commentTemplate = commentTemplate.replace(/"Value": "2024-12-31"/g, '"Value": "{{END_DATE}}"');
-        }
+    const loadSettings = () => {
+      const saved = localStorage.getItem('hotelApiSettings');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          
+          // Auto-fix for hardcoded dates in comment template
+          let commentTemplate = parsed.commentPayloadTemplate || DEFAULT_COMMENT_TEMPLATE;
+          if (commentTemplate.includes('"Value": "2024-01-01"')) {
+            commentTemplate = commentTemplate.replace(/"Value": "2024-01-01"/g, '"Value": "{{START_DATE}}"');
+          }
+          if (commentTemplate.includes('"Value": "2024-12-31"')) {
+            commentTemplate = commentTemplate.replace(/"Value": "2024-12-31"/g, '"Value": "{{END_DATE}}"');
+          }
 
-        setSettings({
-          baseUrl: parsed.baseUrl || '',
-          loginToken: parsed.loginToken || parsed.token || '',
-          hotelId: parsed.hotelId || '',
-          commentPayloadTemplate: commentTemplate,
-          commentDetailPayloadTemplate: parsed.commentDetailPayloadTemplate || DEFAULT_COMMENT_DETAIL_TEMPLATE,
-          inhousePayloadTemplate: parsed.inhousePayloadTemplate || DEFAULT_INHOUSE_TEMPLATE,
-          reservationPayloadTemplate: parsed.reservationPayloadTemplate || DEFAULT_RESERVATION_TEMPLATE,
-          checkoutPayloadTemplate: parsed.checkoutPayloadTemplate || DEFAULT_CHECKOUT_TEMPLATE,
-          geminiApiKey: parsed.geminiApiKey || '',
-          geminiModel: parsed.geminiModel || 'gemini-2.5-flash',
-          featureModels: parsed.featureModels || {}
-        });
-      } catch (e) {}
-    }
+          setSettings({
+            baseUrl: parsed.baseUrl || '',
+            loginToken: parsed.loginToken || parsed.token || '',
+            hotelId: parsed.hotelId || '',
+            commentPayloadTemplate: commentTemplate,
+            commentDetailPayloadTemplate: parsed.commentDetailPayloadTemplate || DEFAULT_COMMENT_DETAIL_TEMPLATE,
+            inhousePayloadTemplate: parsed.inhousePayloadTemplate || DEFAULT_INHOUSE_TEMPLATE,
+            reservationPayloadTemplate: parsed.reservationPayloadTemplate || DEFAULT_RESERVATION_TEMPLATE,
+            checkoutPayloadTemplate: parsed.checkoutPayloadTemplate || DEFAULT_CHECKOUT_TEMPLATE,
+            geminiApiKey: parsed.geminiApiKey || '',
+            geminiModel: parsed.geminiModel || 'gemini-2.5-flash',
+            featureModels: parsed.featureModels || {}
+          });
+        } catch (e) {}
+      }
+    };
+
+    loadSettings();
+
+    window.addEventListener('hotelApiSettingsUpdated', loadSettings);
+    return () => {
+      window.removeEventListener('hotelApiSettingsUpdated', loadSettings);
+    };
   }, [isOpen]);
 
   useEffect(() => {
@@ -253,16 +262,14 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
 
     localStorage.setItem('hotelApiSettings', JSON.stringify(settings));
     
-    if (settings.loginToken) {
-      try {
-        // Sync all settings to Firestore for centralized management
-        await setDoc(doc(db, "config", "api_settings"), {
-          ...settings,
-          updatedAt: new Date().toISOString()
-        }, { merge: true });
-      } catch (error) {
-        console.error("Error syncing settings to Firestore:", error);
-      }
+    try {
+      // Sync all settings to Firestore for centralized management
+      await setDoc(doc(db, "config", "api_settings"), {
+        ...settings,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error syncing settings to Firestore:", error);
     }
 
     onSave(settings);
@@ -483,20 +490,6 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
                 <div className="mt-6 border-t border-slate-100 pt-6">
                   <h4 className="text-sm font-semibold text-slate-800 mb-4">Modül Bazlı Model Tercihleri</h4>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">Duygu Analizi (Sentiment)</label>
-                      <select
-                        value={settings.featureModels?.sentimentAnalysis || ''}
-                        onChange={(e) => handleFeatureModelChange('sentimentAnalysis', e.target.value)}
-                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-white"
-                      >
-                        <option value="">Varsayılan Modeli Kullan</option>
-                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
-                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
-                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
-                      </select>
-                    </div>
                     <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">Mektup Üretimi</label>
                       <select

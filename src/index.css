@@ -28,6 +28,11 @@
   scrollbar-width: none;
 }
 
+/* Dashboard Toggle Row */
+.hidden-row {
+  display: none !important;
+}
+
 /* ReactQuill overrides */
 .ql-container {
   font-family: inherit !important;

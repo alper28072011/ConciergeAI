@@ -30,24 +30,8 @@ export const executeElektraQuery = async (payload: any): Promise<any> => {
   };
 
   // Construct dynamic endpoint
-  // Assuming the standard pattern is BaseURL/Action/Object
-  // However, the previous implementation used just BaseURL and sent Action/Object in the body.
-  // Wait, looking at the previous App.tsx:
-  // const response = await fetch(settings.baseUrl, { ... body: JSON.stringify(payload) ... });
-  // The payload contained Action and Object.
-  // The user prompt says: "Dinamik endpoint'i payload.Action ve payload.Object değerlerine göre oluştursun (Örn: ${baseUrl}/${payload.Action}/${payload.Object})."
-  // But Elektraweb API usually works by posting to a single endpoint or by following the Action/Object path.
-  // If the previous code was working by posting to `settings.baseUrl` (which might be just the root API URL), then we should stick to that or follow the new instruction.
-  // The prompt explicitly says: "Dinamik endpoint'i ... oluştursun".
-  // Let's assume the user wants to modernize the URL structure too, OR the previous `baseUrl` was actually the full endpoint and now we are making it dynamic.
-  // Let's check the previous `baseUrl` example in SettingsModal: "https://4001.hoteladvisor.net"
-  // If `baseUrl` is "https://4001.hoteladvisor.net", then `${baseUrl}/${payload.Action}/${payload.Object}` would be "https://4001.hoteladvisor.net/Select/QA_HOTEL_GUEST_COMMENT".
-  // This is a common REST pattern.
-  
-  // However, the payload ALSO needs to contain Action and Object for some APIs.
-  // Let's include them in the body as well to be safe, or just follow the instruction.
-  
-  const endpoint = `${settings.baseUrl}/${payload.Action}/${payload.Object}`;
+  const baseUrl = settings.baseUrl.replace(/\/+$/, '');
+  const endpoint = `${baseUrl}/${payload.Action}/${payload.Object}`;
 
   try {
     const response = await fetch(endpoint, {
@@ -59,14 +43,56 @@ export const executeElektraQuery = async (payload: any): Promise<any> => {
     });
 
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) {
+      let errorMsg = `API Hatası: ${response.status}`;
+      try {
+        const errText = await response.text();
+        console.error('API Error Response:', response.status, errText);
+        
+        // Try to parse JSON error if possible
+        try {
+          const errJson = JSON.parse(errText);
+          if (errJson.Message || errJson.ExceptionMessage) {
+            errorMsg = errJson.Message || errJson.ExceptionMessage;
+          }
+        } catch (e) {
+          // If it's HTML (like an IIS 403 page), just show a generic message
+          if (errText.includes('<html')) {
+            if (response.status === 403) {
+              errorMsg = "403 Forbidden: Yetkisiz erişim veya yanlış endpoint. Lütfen Base URL'yi kontrol edin.";
+            } else if (response.status === 404) {
+              errorMsg = "404 Not Found: Endpoint bulunamadı. Lütfen Base URL'yi kontrol edin.";
+            }
+          } else if (errText) {
+            errorMsg = errText;
+          }
+        }
+      } catch (e) {
+        // Ignore text parsing errors
+      }
+
+      if (response.status === 401) {
         throw new Error('TOKEN_EXPIRED');
       }
-      throw new Error(`API Hatası: ${response.status}`);
+      
+      // Only throw TOKEN_EXPIRED for 403 if the message actually hints at it
+      if (response.status === 403 && (errorMsg.toLowerCase().includes('token') || errorMsg.toLowerCase().includes('expired') || errorMsg.toLowerCase().includes('yetki'))) {
+        throw new Error('TOKEN_EXPIRED');
+      }
+
+      throw new Error(errorMsg);
     }
 
     const data = await response.json();
     
+    // Check if the API returned a logical error
+    if (data && data.Success === false) {
+      const msg = data.Message || data.ExceptionMessage || 'API İşlem Başarısız';
+      if (msg.toLowerCase().includes('token') || msg.toLowerCase().includes('expired') || msg.toLowerCase().includes('yetki')) {
+        throw new Error('TOKEN_EXPIRED');
+      }
+      throw new Error(msg);
+    }
+
     // The previous code expected data.ResultSets[0]
     if (data && data.ResultSets && data.ResultSets.length > 0) {
       return data.ResultSets[0];

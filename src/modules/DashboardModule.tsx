@@ -13,9 +13,10 @@ import {
   Award, AlertTriangle, FileText, Download, X, Save, Edit3, Trash2, Clock, 
   Filter, Brain, Globe, Database, CheckCircle2, PieChart as PieChartIcon,
   ChevronRight, ArrowUpRight, ArrowDownRight, Printer, Sparkles, Layout,
-  Settings, Eye, EyeOff, LayoutGrid, List, ChevronDown, ChevronUp, Layers, History
+  Settings, Eye, EyeOff, LayoutGrid, List, ChevronDown, ChevronUp, Layers, History,
+  MousePointerClick
 } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { generateAIContent } from '../services/aiService';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -209,6 +210,8 @@ export function DashboardModule() {
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
   const [isSourceExpanded, setIsSourceExpanded] = useState(false);
   const [isNationalityExpanded, setIsNationalityExpanded] = useState(false);
+  const [isCategoryExpanded, setIsCategoryExpanded] = useState(false);
+  const [isDateExpanded, setIsDateExpanded] = useState(false);
   const [globalViewMode, setGlobalViewMode] = useState<'chart' | 'table'>('chart');
   const [showSubCategories, setShowSubCategories] = useState(false);
   const [activeModules, setActiveModules] = useState<string[]>(['kpi_cards', 'satisfaction_timeline', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda']);
@@ -240,6 +243,13 @@ export function DashboardModule() {
   const [editingReportId, setEditingReportId] = useState<string | null>(null);
   const [editingReportType, setEditingReportType] = useState<string>('dashboard_summary');
   const [isSavingReport, setIsSavingReport] = useState(false);
+  const [isExportOptionsModalOpen, setIsExportOptionsModalOpen] = useState(false);
+  const [exportOptions, setExportOptions] = useState({
+    includeComments: true,
+    includeFilters: true,
+    interactive: true,
+    title: `Otel CRM Kokpit Raporu - ${new Date().toLocaleDateString('tr-TR')}`
+  });
 
   // Load User Preferences
   useEffect(() => {
@@ -260,6 +270,7 @@ export function DashboardModule() {
         selectedSources: [],
         isSourceExpanded: false,
         isNationalityExpanded: false,
+        isDateExpanded: true,
       };
 
       try {
@@ -288,6 +299,7 @@ export function DashboardModule() {
           if (data.selectedSources) setSelectedSources(data.selectedSources);
           if (data.isSourceExpanded !== undefined) setIsSourceExpanded(data.isSourceExpanded);
           if (data.isNationalityExpanded !== undefined) setIsNationalityExpanded(data.isNationalityExpanded);
+          if (data.isDateExpanded !== undefined) setIsDateExpanded(data.isDateExpanded);
         }
       } catch (error) {
         console.error("Tercihler yüklenirken hata:", error);
@@ -331,6 +343,7 @@ export function DashboardModule() {
         selectedSources,
         isSourceExpanded,
         isNationalityExpanded,
+        isDateExpanded,
         updatedAt: new Date().toISOString()
       };
 
@@ -643,11 +656,21 @@ export function DashboardModule() {
     
     // Remove scrollbars and extra padding for export
     clone.classList.remove('overflow-y-auto', 'pr-4', 'custom-scrollbar', 'pb-20');
-    clone.classList.add('flex', 'flex-col', 'gap-6');
     
     // Remove any elements that shouldn't be exported
     const noExportElements = clone.querySelectorAll('.no-export');
     noExportElements.forEach(el => el.remove());
+
+    // Make interactive buttons visible if interactive is selected
+    if (exportOptions.interactive) {
+      const interactiveOnlyElements = clone.querySelectorAll('.interactive-only');
+      interactiveOnlyElements.forEach(el => {
+        el.classList.remove('interactive-only', 'hidden');
+      });
+    } else {
+      const interactiveOnlyElements = clone.querySelectorAll('.interactive-only');
+      interactiveOnlyElements.forEach(el => el.remove());
+    }
 
     // Fix SVG dimensions in the clone for better export rendering
     const svgs = clone.querySelectorAll('svg');
@@ -681,136 +704,243 @@ export function DashboardModule() {
 
     const content = clone.innerHTML;
     
+    const dateRangeLabel = dateFilter === 'today' ? 'Bugün' :
+                           dateFilter === 'yesterday' ? 'Dün' :
+                           dateFilter === '7days' ? 'Son 7 Gün' :
+                           dateFilter === '30days' ? 'Son 30 Gün' :
+                           dateFilter === 'thisYear' ? 'Bu Yıl' :
+                           dateFilter === 'custom' ? `${customStartDate} - ${customEndDate}` : 'Tümü';
+
     const html = `
 <!DOCTYPE html>
 <html lang="tr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Otel CRM Kokpit Raporu - ${new Date().toLocaleDateString('tr-TR')}</title>
+    <title>${exportOptions.title || 'Yönetim Raporu'}</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
-        body { 
-            font-family: 'Inter', sans-serif; 
-            background-color: #f1f5f9; 
-            margin: 0; 
-            padding: 40px 0; 
-            display: flex; 
-            justify-content: center; 
-        }
-        .report-container { 
-            width: 210mm; 
-            background: white; 
-            min-height: 297mm; 
-            padding: 12mm 15mm; 
-            box-shadow: 0 10px 25px rgba(0,0,0,0.1); 
-            border-radius: 4px;
-        }
-        /* Recharts SVG responsiveness in static HTML - only for charts */
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #1e293b; margin: 0; padding: 40px 0; display: flex; justify-content: center; }
+        .report-container { width: 210mm; background: white; min-height: 297mm; padding: 12mm 15mm; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border-radius: 4px; }
         .recharts-responsive-container { width: 100% !important; height: auto !important; min-height: unset !important; }
         .recharts-responsive-container > div { width: 100% !important; height: auto !important; position: relative !important; }
         .recharts-wrapper { width: 100% !important; height: auto !important; padding-bottom: 20px !important; }
         .recharts-surface { width: 100% !important; height: auto !important; overflow: visible !important; display: block !important; }
         .recharts-layer { visibility: visible !important; opacity: 1 !important; clip-path: none !important; }
-        
-        /* Fix axis labels and text sizes */
-        .recharts-cartesian-axis-tick-value, .recharts-cartesian-axis-tick text { 
-            font-size: 12px !important; 
-            font-weight: 700 !important; 
-            fill: #334155 !important; 
-        }
-        .recharts-label, .recharts-label-list text { 
-            font-size: 12px !important; 
-            font-weight: 900 !important; 
-        }
+        .recharts-cartesian-axis-tick-value, .recharts-cartesian-axis-tick text { font-size: 12px !important; font-weight: 700 !important; fill: #334155 !important; }
+        .recharts-label, .recharts-label-list text { font-size: 12px !important; font-weight: 900 !important; }
         .recharts-text { font-family: 'Inter', sans-serif !important; font-size: 12px !important; }
-        
-        /* Normalize legend dots */
-        .recharts-legend-wrapper {
-            position: relative !important;
-            bottom: auto !important;
-            left: auto !important;
-            right: auto !important;
-            top: auto !important;
-            width: 100% !important;
-            height: auto !important;
-            margin-top: 20px !important;
+        .recharts-legend-wrapper { position: relative !important; bottom: auto !important; left: auto !important; right: auto !important; top: auto !important; width: 100% !important; height: auto !important; }
+        .comment-card { border-left: 4px solid #6366f1; }
+        @media print {
+            .no-print { display: none; }
+            body { background-color: white; padding: 0; }
+            .report-container { width: 100%; box-shadow: none; border: none; padding: 0; }
+            .shadow-xl, .shadow-lg, .shadow-md { shadow: none !important; border: 1px solid #e2e8f0; }
         }
-        .recharts-legend-item {
-            display: flex !important;
-            align-items: center !important;
-            gap: 6px !important;
-            margin-right: 20px !important;
-        }
-        .recharts-legend-item svg { 
-            width: 14px !important; 
-            height: 14px !important; 
-            margin-right: 2px !important;
-            vertical-align: middle !important;
-        }
-        .recharts-legend-item svg path {
-            transform: scale(1.2) !important;
-            transform-origin: center !important;
-        }
-        .recharts-legend-item-text {
-            vertical-align: middle !important;
-            font-size: 12px !important;
-            color: #1e293b !important;
-            font-weight: 700 !important;
-        }
-        .recharts-default-legend {
-            display: flex !important;
-            flex-wrap: wrap !important;
-            justify-content: center !important;
-            gap: 12px !important;
-            margin-top: 30px !important;
-            padding: 0 !important;
-            list-style: none !important;
-        }
-        
-        /* Section styling for report */
-        section {
-            break-inside: avoid;
-            margin-bottom: 3rem !important;
-            border: 1px solid #f1f5f9 !important;
-            border-radius: 1.5rem !important;
-            padding: 2rem !important;
-            background: #ffffff !important;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.05) !important;
-        }
-        
-        /* Ensure grid layout works */
-        .grid { display: grid !important; }
-        /* Custom scrollbar hide */
-        .custom-scrollbar::-webkit-scrollbar { display: none; }
-        .custom-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        /* Fix for some tailwind classes that might need explicit display */
-        .flex { display: flex !important; }
-        .hidden { display: none !important; }
-        /* Flag proportionality */
-        img { object-fit: cover !important; }
     </style>
 </head>
 <body>
     <div class="report-container">
-        <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 40px; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px;">
+        <header class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
             <div>
-                <h1 style="font-size: 24px; font-weight: 900; color: #0f172a; text-transform: uppercase; letter-spacing: -0.025em; margin: 0;">Otel CRM Kokpit Raporu</h1>
-                <p style="font-size: 14px; color: #64748b; font-weight: 500; margin: 4px 0 0;">Yönetim Faaliyet ve Analiz Özeti</p>
+                <h1 class="text-3xl font-black text-slate-900 tracking-tight">${exportOptions.title || 'Yönetim Raporu'}</h1>
+                <p class="text-slate-500 font-medium mt-1">Oluşturulma Tarihi: ${new Date().toLocaleString('tr-TR')}</p>
+                <div class="flex items-center gap-3 mt-3">
+                    <span class="px-3 py-1 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-full border border-indigo-100">
+                        Dönem: ${dateRangeLabel}
+                    </span>
+                    <span class="px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full border border-emerald-100">
+                        Kaynak: ${selectedSources.length === 0 ? 'Tümü' : selectedSources.join(', ')}
+                    </span>
+                </div>
             </div>
-            <div style="text-align: right;">
-                <p style="font-size: 11px; color: #94a3b8; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; margin: 0;">Rapor Tarihi</p>
-                <p style="font-size: 16px; color: #4f46e5; font-weight: 800; margin: 0;">${new Date().toLocaleDateString('tr-TR')}</p>
+            <div class="no-print flex gap-2">
+                <button onclick="window.print()" class="px-4 py-2 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+                    Yazdır / PDF
+                </button>
             </div>
-        </div>
-        <div class="flex flex-col gap-6">
+        </header>
+
+        <main id="report-body" class="flex flex-col gap-6">
             ${content}
-        </div>
-        <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid #f1f5f9; text-align: center;">
-            <p style="font-size: 10px; color: #94a3b8; font-weight: 500;">Bu rapor sistem tarafından otomatik olarak oluşturulmuştur. &copy; ${new Date().getFullYear()} Otel CRM İş Zekası Modülü</p>
-        </div>
+        </main>
+
+        <footer class="mt-12 py-8 border-t border-slate-200 text-center">
+            <p class="text-slate-400 text-sm font-bold tracking-widest uppercase">Elektra AI Dashboard &copy; 2026</p>
+        </footer>
     </div>
+
+    ${exportOptions.includeComments ? `
+    <script>
+        const allComments = ${JSON.stringify(filteredAnalytics)};
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            const clickableElements = document.querySelectorAll('.html-export-clickable');
+            const titleEl = document.getElementById('html-export-drilldown-title');
+            const clearBtn = document.getElementById('html-export-drilldown-clear');
+            const containerEl = document.getElementById('html-export-comments-container');
+            const countEl = document.getElementById('html-export-comments-count');
+
+            let currentFilter = { type: 'all', value: 'all' };
+            let expandedComments = {};
+
+            function renderComments(comments) {
+                if (!containerEl) return;
+                
+                if (comments.length === 0) {
+                    containerEl.innerHTML = '<div class="flex flex-col items-center justify-center py-20 text-slate-400 opacity-50"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><p class="text-xs font-bold">Yorum Bulunamadı</p></div>';
+                    return;
+                }
+
+                let html = '';
+                comments.forEach((commentData, idx) => {
+                    const localText = commentData.comment || commentData.rawText || commentData.COMMENT || '';
+                    const isExpanded = !!expandedComments[commentData.commentId];
+                    const isLong = localText.length > 150;
+                    const displayedText = isExpanded ? localText : localText.slice(0, 150);
+                    const dateStr = new Date(commentData.date || commentData.createdAt).toLocaleDateString('tr-TR');
+                    
+                    let topicsHtml = '';
+                    if (commentData.topics && commentData.topics.length > 0) {
+                        topicsHtml = '<div class="mt-3 pt-3 border-t border-slate-50 flex flex-wrap gap-1">';
+                        commentData.topics.forEach(topic => {
+                            topicsHtml += '<span class="text-[8px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase">' + topic.subCategory + '</span>';
+                        });
+                        topicsHtml += '</div>';
+                    }
+
+                    let textHtml = '';
+                    if (localText) {
+                        textHtml = '<p class="text-xs text-slate-700 leading-relaxed italic">"' + displayedText + (!isExpanded && isLong ? '...' : '') + '"</p>';
+                        if (isLong) {
+                            textHtml += '<button onclick="window.toggleComment(\\'' + commentData.commentId + '\\')" class="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 mt-1 uppercase">' + (isExpanded ? 'Daha Az Göster' : 'Devamını Oku') + '</button>';
+                        }
+                    } else {
+                        textHtml = '<p class="text-xs text-slate-400 italic animate-pulse">Metin senkronize ediliyor...</p>';
+                    }
+
+                    html += '<div class="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group">' +
+                                '<div class="flex items-center justify-between mb-2">' +
+                                    '<div class="flex items-center gap-2">' +
+                                        '<span class="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">' + (commentData.source || 'Bilinmiyor') + '</span>' +
+                                        '<span class="text-[10px] font-bold text-slate-400">' + dateStr + '</span>' +
+                                    '</div>' +
+                                    '<div class="text-xs font-black text-slate-600">' + (commentData.overallScore || 0) + '/100</div>' +
+                                '</div>' +
+                                '<div class="relative">' + textHtml + '</div>' +
+                                topicsHtml +
+                            '</div>';
+                });
+                containerEl.innerHTML = html;
+            }
+
+            window.toggleComment = function(commentId) {
+                expandedComments[commentId] = !expandedComments[commentId];
+                applyFilter();
+            };
+
+            function applyFilter() {
+                let filtered = allComments;
+                if (currentFilter.type !== 'all') {
+                    filtered = allComments.filter(item => {
+                        if (currentFilter.type === 'category') {
+                            return item.topics && item.topics.some(t => t.subCategory === currentFilter.value || t.mainCategory === currentFilter.value);
+                        }
+                        if (currentFilter.type === 'source') return item.source === currentFilter.value;
+                        if (currentFilter.type === 'nationality') return item.nationality === currentFilter.value;
+                        return true;
+                    });
+                }
+
+                if (titleEl) {
+                    titleEl.textContent = currentFilter.type === 'all' ? 'Tüm Filtrelenmiş Yorumlar' : currentFilter.value + ' Analizi';
+                }
+                if (clearBtn) {
+                    if (currentFilter.type === 'all') {
+                        clearBtn.classList.add('hidden');
+                    } else {
+                        clearBtn.classList.remove('hidden');
+                    }
+                }
+                if (countEl) {
+                    countEl.textContent = 'Toplam ' + filtered.length + ' Yorum Listeleniyor';
+                }
+                
+                renderComments(filtered);
+            }
+
+            clickableElements.forEach(el => {
+                el.addEventListener('click', function(e) {
+                    // For SVG elements, we might need to find the closest element with the data attributes
+                    let target = e.target;
+                    while (target && target !== document.body && !target.classList.contains('html-export-clickable')) {
+                        target = target.parentElement;
+                    }
+                    if (!target) target = e.currentTarget;
+
+                    const type = target.getAttribute('data-filter-type');
+                    const value = target.getAttribute('data-filter-value');
+                    if (type && value) {
+                        currentFilter = { type: type, value: value };
+                        expandedComments = {}; // reset expansion on filter change
+                        applyFilter();
+                        
+                        // Scroll to comments section
+                        const commentsSection = document.getElementById('html-export-drilldown-title');
+                        if (commentsSection) {
+                            commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    }
+                });
+            });
+
+            if (clearBtn) {
+                clearBtn.addEventListener('click', function() {
+                    currentFilter = { type: 'all', value: 'all' };
+                    expandedComments = {};
+                    applyFilter();
+                });
+            }
+
+            // Initial render
+            applyFilter();
+        });
+    </script>
+    ` : ''}
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            ${exportOptions.interactive ? `
+            // Handle "Show All" toggles
+            const toggleButtons = document.querySelectorAll('[data-toggle-btn]');
+            toggleButtons.forEach(btn => {
+                const sectionId = btn.getAttribute('data-toggle-btn');
+                const rows = document.querySelectorAll(\`[data-section="\${sectionId}"] .toggleable-row\`);
+                
+                // Initial state
+                let isExpanded = btn.getAttribute('data-expanded') === 'true';
+                
+                btn.addEventListener('click', () => {
+                    isExpanded = !isExpanded;
+                    rows.forEach(row => {
+                        if (isExpanded) {
+                            row.classList.remove('hidden');
+                        } else {
+                            row.classList.add('hidden');
+                        }
+                    });
+                    
+                    btn.setAttribute('data-expanded', isExpanded);
+                    const count = btn.getAttribute('data-count');
+                    btn.innerHTML = isExpanded ? 'Daha Az Göster <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block ml-1"><polyline points="18 15 12 9 6 15"></polyline></svg>' : 'Tümünü Gör (' + count + ') <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block ml-1"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+                });
+            });
+            ` : ''}
+        });
+    </script>
 </body>
 </html>
     `;
@@ -819,11 +949,13 @@ export function DashboardModule() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Otel_CRM_Kokpit_Raporu_${new Date().toISOString().split('T')[0]}.html`;
+    a.download = `${exportOptions.title || 'elektra-rapor'}-${new Date().toISOString().split('T')[0]}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    
+    setIsExportOptionsModalOpen(false);
   };
 
   const handleGenerateDashboardReport = async () => {
@@ -1084,54 +1216,81 @@ export function DashboardModule() {
             </div>
 
             {/* Date Presets */}
-            <div className="space-y-2">
-              <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">Dönem</label>
-              <div className="grid grid-cols-2 gap-1">
-                {[
-                  { id: 'today', label: 'Bugün' },
-                  { id: 'yesterday', label: 'Dün' },
-                  { id: '7days', label: '7 Gün' },
-                  { id: '30days', label: '30 Gün' },
-                  { id: 'thisYear', label: 'Bu Yıl' },
-                  { id: 'custom', label: 'Özel' }
-                ].map(preset => (
-                  <button
-                    key={preset.id}
-                    onClick={() => setDateFilter(preset.id as any)}
-                    className={`px-1.5 py-1.5 text-[9px] font-bold rounded-md border transition-all ${
-                      dateFilter === preset.id 
-                        ? 'bg-slate-900 border-slate-900 text-white shadow-sm' 
-                        : 'bg-white border-slate-100 text-slate-600 hover:border-slate-300'
-                    }`}
-                  >
-                    {preset.label}
-                  </button>
-                ))}
+            <div className="space-y-1">
+              <div 
+                className="flex items-center justify-between cursor-pointer group"
+                onClick={() => setIsDateExpanded(!isDateExpanded)}
+              >
+                <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer group-hover:text-slate-600 transition-colors">
+                  Dönem {dateFilter !== 'custom' ? (
+                    <span className="text-indigo-500">
+                      ({[
+                        { id: 'today', label: 'Bugün' },
+                        { id: 'yesterday', label: 'Dün' },
+                        { id: '7days', label: '7 Gün' },
+                        { id: '30days', label: '30 Gün' },
+                        { id: 'thisYear', label: 'Bu Yıl' },
+                        { id: 'custom', label: 'Özel' }
+                      ].find(p => p.id === dateFilter)?.label})
+                    </span>
+                  ) : <span className="text-indigo-500">(Özel)</span>}
+                </label>
+                <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${isDateExpanded ? 'rotate-180' : ''}`} />
+              </div>
+
+              {/* Custom Date Inputs - Always visible if 'custom' is selected, matching user request */}
+              {dateFilter === 'custom' && (
+                <div className="grid grid-cols-2 gap-1.5 animate-in fade-in slide-in-from-top-1 py-1">
+                  <div className="space-y-0.5">
+                    <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Başlangıç</span>
+                    <input 
+                      type="date" 
+                      value={customStartDate}
+                      onChange={(e) => setCustomStartDate(e.target.value)}
+                      className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    />
+                  </div>
+                  <div className="space-y-0.5">
+                    <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Bitiş</span>
+                    <input 
+                      type="date" 
+                      value={customEndDate}
+                      onChange={(e) => setCustomEndDate(e.target.value)}
+                      className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div 
+                className={`overflow-hidden transition-all duration-300 ease-in-out ${isDateExpanded ? 'max-h-64 opacity-100' : 'max-h-0 opacity-0'}`}
+              >
+                <div className="space-y-3 py-1">
+                  <div className="grid grid-cols-2 gap-1">
+                    {[
+                      { id: 'today', label: 'Bugün' },
+                      { id: 'yesterday', label: 'Dün' },
+                      { id: '7days', label: '7 Gün' },
+                      { id: '30days', label: '30 Gün' },
+                      { id: 'thisYear', label: 'Bu Yıl' },
+                      { id: 'custom', label: 'Özel' }
+                    ].map(preset => (
+                      <button
+                        key={preset.id}
+                        onClick={() => setDateFilter(preset.id as any)}
+                        className={`px-1.5 py-1.5 text-[9px] font-bold rounded-md border transition-all ${
+                          dateFilter === preset.id 
+                            ? 'bg-slate-900 border-slate-900 text-white shadow-sm' 
+                            : 'bg-white border-slate-100 text-slate-600 hover:border-slate-300'
+                        }`}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
-
-            {dateFilter === 'custom' && (
-              <div className="grid grid-cols-2 gap-1.5 animate-in fade-in slide-in-from-top-1">
-                <div className="space-y-0.5">
-                  <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Başlangıç</span>
-                  <input 
-                    type="date" 
-                    value={customStartDate}
-                    onChange={(e) => setCustomStartDate(e.target.value)}
-                    className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  />
-                </div>
-                <div className="space-y-0.5">
-                  <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Bitiş</span>
-                  <input 
-                    type="date" 
-                    value={customEndDate}
-                    onChange={(e) => setCustomEndDate(e.target.value)}
-                    className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-            )}
 
             {/* Compare Toggle */}
             <div className="flex items-center justify-between p-2 bg-slate-50 rounded-lg border border-slate-100">
@@ -1149,8 +1308,58 @@ export function DashboardModule() {
               </button>
             </div>
 
-            {/* Multi-selects for Source & Nationality */}
+            {/* Multi-selects for Source, Nationality & Category */}
             <div className="space-y-3">
+              <div className="space-y-1">
+                <div 
+                  className="flex items-center justify-between cursor-pointer group"
+                  onClick={() => setIsCategoryExpanded(!isCategoryExpanded)}
+                >
+                  <label className="text-[8px] font-bold text-slate-400 uppercase tracking-widest cursor-pointer group-hover:text-slate-600 transition-colors">
+                    Kategori {selectedMainCategory !== 'all' && <span className="text-indigo-500">({selectedMainCategory})</span>}
+                  </label>
+                  <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform duration-200 ${isCategoryExpanded ? 'rotate-180' : ''}`} />
+                </div>
+                <div 
+                  className={`overflow-hidden transition-all duration-300 ease-in-out ${isCategoryExpanded ? 'max-h-[400px] opacity-100' : 'max-h-0 opacity-0'}`}
+                >
+                  <div className="flex flex-col gap-3 py-2">
+                    <div className="space-y-1">
+                      <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Ana Kategori</span>
+                      <select 
+                        value={selectedMainCategory}
+                        onChange={(e) => {
+                          setSelectedMainCategory(e.target.value);
+                          setSelectedSubCategory('all');
+                        }}
+                        className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      >
+                        <option value="all">Tümü</option>
+                        {taxonomy && Object.keys(taxonomy.categories).map(cat => (
+                          <option key={cat} value={cat}>{cat}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {selectedMainCategory !== 'all' && taxonomy && taxonomy.categories[selectedMainCategory] && (
+                      <div className="space-y-1 animate-in fade-in slide-in-from-top-1">
+                        <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Alt Kategori</span>
+                        <select 
+                          value={selectedSubCategory}
+                          onChange={(e) => setSelectedSubCategory(e.target.value)}
+                          className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
+                        >
+                          <option value="all">Tümü</option>
+                          {taxonomy.categories[selectedMainCategory].map(sub => (
+                            <option key={sub} value={sub}>{sub}</option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-1">
                 <div 
                   className="flex items-center justify-between cursor-pointer group"
@@ -1228,7 +1437,7 @@ export function DashboardModule() {
             </button>
             <div className="grid grid-cols-2 gap-1.5">
               <button
-                onClick={handleExportHtml}
+                onClick={() => setIsExportOptionsModalOpen(true)}
                 className="bg-white text-slate-700 border border-slate-200 p-2 rounded-lg font-bold text-[9px] flex flex-col items-center justify-center gap-1 hover:bg-slate-50 transition-all shadow-sm"
               >
                 <FileText size={14} className="text-slate-400" />
@@ -1291,7 +1500,7 @@ export function DashboardModule() {
                   ].map((kpi, idx) => (
                     <div 
                       key={idx} 
-                      className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden group cursor-pointer hover:border-indigo-300 transition-all"
+                      className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden group cursor-pointer hover:border-indigo-300 transition-all html-export-clickable"
                       onClick={() => {
                         if (kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı') {
                           setDrillDownFilter({ type: 'category', value: kpi.value });
@@ -1299,6 +1508,8 @@ export function DashboardModule() {
                           setDrillDownFilter({ type: 'all', value: 'all' });
                         }
                       }}
+                      data-filter-type={kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı' ? 'category' : 'all'}
+                      data-filter-value={kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı' ? kpi.value : 'all'}
                     >
                       <div className={`absolute top-0 right-0 w-24 h-24 bg-${kpi.color}-50 rounded-full -mr-12 -mt-12 transition-transform group-hover:scale-110`} />
                       <div className="relative z-10">
@@ -1462,8 +1673,12 @@ export function DashboardModule() {
                   </div>
 
                   {globalViewMode === 'chart' ? (
-                    <div className={`w-full relative min-w-0 min-h-0 transition-all duration-500 ${showSubCategories ? 'h-[900px]' : 'h-[450px]'}`}>
-                      <ResponsiveContainer width="100%" height="100%">
+                    <div className="w-full overflow-y-auto custom-scrollbar pr-2" style={{ maxHeight: '700px' }}>
+                      <div 
+                        className="w-full relative min-w-0 min-h-0 transition-all duration-500" 
+                        style={{ height: showSubCategories ? `${Math.max(600, categoryChartData.length * 45)}px` : `${Math.max(400, categoryChartData.length * 60)}px` }}
+                      >
+                        <ResponsiveContainer width="100%" height="100%">
                         <BarChart 
                           layout="vertical" 
                           data={categoryChartData} 
@@ -1514,7 +1729,7 @@ export function DashboardModule() {
                               dataKey="prevScore" 
                               name="Önceki Dönem"
                               radius={[0, 4, 4, 0]} 
-                              barSize={showSubCategories ? 8 : 12}
+                              barSize={showSubCategories ? 10 : 14}
                               fill="#cbd5e1"
                             />
                           )}
@@ -1522,18 +1737,22 @@ export function DashboardModule() {
                             dataKey="score" 
                             name="Bu Dönem"
                             radius={[0, 4, 4, 0]} 
-                            barSize={showSubCategories ? 12 : 20}
+                            barSize={showSubCategories ? 14 : 24}
                             label={{ position: 'right', fontSize: 12, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
                           >
                             {categoryChartData.map((entry, index) => (
                               <Cell 
                                 key={`cell-${index}`} 
                                 fill={entry.isSub ? '#818cf8' : '#4f46e5'} 
+                                className="html-export-clickable cursor-pointer"
+                                data-filter-type="category"
+                                data-filter-value={entry.name}
                               />
                             ))}
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
+                    </div>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
@@ -1549,7 +1768,9 @@ export function DashboardModule() {
                           {hierarchicalCategoryData.map((group, gIdx) => (
                             <React.Fragment key={gIdx}>
                               <tr 
-                                className="hover:bg-slate-50 transition-colors group cursor-pointer"
+                                className="hover:bg-slate-50 transition-colors group cursor-pointer html-export-clickable"
+                                data-filter-type="category"
+                                data-filter-value={group.name}
                                 onClick={() => setDrillDownFilter({ type: 'category', value: group.name })}
                               >
                                 <td className="py-3 px-4">
@@ -1595,7 +1816,9 @@ export function DashboardModule() {
                                     animate={{ opacity: 1, x: 0 }}
                                     exit={{ opacity: 0, x: -10 }}
                                     transition={{ duration: 0.2, delay: sIdx * 0.03 }}
-                                    className="bg-slate-50/50 hover:bg-indigo-50 transition-colors cursor-pointer border-l-2 border-indigo-200"
+                                    className="bg-slate-50/50 hover:bg-indigo-50 transition-colors cursor-pointer border-l-2 border-indigo-200 html-export-clickable"
+                                    data-filter-type="category"
+                                    data-filter-value={sub.subCategory}
                                     onClick={() => setDrillDownFilter({ type: 'category', value: sub.subCategory })}
                                   >
                                     <td className="py-2 px-4 pl-8">
@@ -1665,8 +1888,14 @@ export function DashboardModule() {
                             dataKey="count"
                             nameKey="name"
                           >
-                            {dashboardData.sourceAnalysis.map((_, index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            {dashboardData.sourceAnalysis.map((entry, index) => (
+                              <Cell 
+                                key={`cell-${index}`} 
+                                fill={COLORS[index % COLORS.length]} 
+                                className="html-export-clickable cursor-pointer"
+                                data-filter-type="source"
+                                data-filter-value={entry.name}
+                              />
                             ))}
                           </Pie>
                           <Tooltip 
@@ -1704,7 +1933,9 @@ export function DashboardModule() {
                           {dashboardData.sourceAnalysis.map((item, idx) => (
                             <tr 
                               key={idx} 
-                              className="hover:bg-slate-50 transition-colors cursor-pointer"
+                              className="hover:bg-slate-50 transition-colors cursor-pointer html-export-clickable"
+                              data-filter-type="source"
+                              data-filter-value={item.name}
                               onClick={() => setDrillDownFilter({ type: 'source', value: item.name })}
                             >
                               <td className="py-3 px-4">
@@ -1772,11 +2003,12 @@ export function DashboardModule() {
                   </div>
 
                   {globalViewMode === 'chart' ? (
-                    <div 
-                      className="w-full relative min-w-0 min-h-0 overflow-hidden" 
-                      style={{ height: `${Math.max(400, dashboardData.nationalityAnalysis.length * 40)}px` }}
-                    >
-                      <ResponsiveContainer width="100%" height="100%">
+                    <div className="w-full overflow-y-auto custom-scrollbar pr-2" style={{ maxHeight: '500px' }}>
+                      <div 
+                        className="w-full relative min-w-0 min-h-0 overflow-hidden" 
+                        style={{ height: `${Math.max(400, dashboardData.nationalityAnalysis.length * 45)}px` }}
+                      >
+                        <ResponsiveContainer width="100%" height="100%">
                         <BarChart 
                           layout="vertical" 
                           data={dashboardData.nationalityAnalysis} 
@@ -1867,11 +2099,15 @@ export function DashboardModule() {
                               <Cell 
                                 key={`cell-${index}`} 
                                 fill={entry.avgScore >= 80 ? '#10b981' : entry.avgScore >= 60 ? '#4f46e5' : entry.avgScore >= 40 ? '#f59e0b' : '#ef4444'} 
+                                className="html-export-clickable cursor-pointer"
+                                data-filter-type="nationality"
+                                data-filter-value={entry.name}
                               />
                             ))}
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
+                    </div>
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
@@ -1891,7 +2127,9 @@ export function DashboardModule() {
                             return (
                               <tr 
                                 key={idx} 
-                                className="hover:bg-slate-50 transition-colors cursor-pointer group"
+                                className="hover:bg-slate-50 transition-colors cursor-pointer group html-export-clickable"
+                                data-filter-type="nationality"
+                                data-filter-value={item.name}
                                 onClick={() => setDrillDownFilter({ type: 'nationality', value: item.name })}
                               >
                                 <td className="py-3 px-4">
@@ -2047,12 +2285,14 @@ export function DashboardModule() {
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Skor</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-50">
-                            {(showAllMostMentioned ? dashboardData.mostMentioned : dashboardData.mostMentioned.slice(0, 10)).map((item, idx) => (
+                          <tbody className="divide-y divide-slate-50" data-section="most-mentioned">
+                            {dashboardData.mostMentioned.map((item, idx) => (
                               <tr 
                                 key={idx} 
-                                className="hover:bg-slate-50/80 transition-all group cursor-pointer"
+                                className={`hover:bg-slate-50/80 transition-all group cursor-pointer html-export-clickable ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllMostMentioned && idx >= 10) ? 'hidden' : ''}`}
                                 onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                                data-filter-type="category"
+                                data-filter-value={item.subCategory}
                               >
                                 <td className="py-4 px-4">
                                   <span className="text-sm font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{item.subCategory}</span>
@@ -2082,7 +2322,10 @@ export function DashboardModule() {
                       <div className="mt-6 pt-4 border-t border-slate-50 flex justify-center">
                         <button 
                           onClick={() => setShowAllMostMentioned(!showAllMostMentioned)}
-                          className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                          data-toggle-btn="most-mentioned"
+                          data-expanded={showAllMostMentioned}
+                          data-count={dashboardData.mostMentioned.length}
+                          className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all interactive-only"
                         >
                           {showAllMostMentioned ? (
                             <>Daha Az Göster <ChevronUp size={14} /></>
@@ -2173,12 +2416,14 @@ export function DashboardModule() {
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Memnuniyet Skoru</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-50">
-                            {(showAllTopPositive ? dashboardData.topPositive : dashboardData.topPositive.slice(0, 10)).map((item, idx) => (
+                          <tbody className="divide-y divide-slate-50" data-section="top-positive">
+                            {dashboardData.topPositive.map((item, idx) => (
                               <tr 
                                 key={idx} 
-                                className="hover:bg-slate-50/80 transition-all group cursor-pointer"
+                                className={`hover:bg-slate-50/80 transition-all group cursor-pointer html-export-clickable ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopPositive && idx >= 10) ? 'hidden' : ''}`}
                                 onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                                data-filter-type="category"
+                                data-filter-value={item.subCategory}
                               >
                                 <td className="py-4 px-4">
                                   <span className="text-sm font-bold text-slate-800 group-hover:text-emerald-600 transition-colors">{item.subCategory}</span>
@@ -2208,7 +2453,10 @@ export function DashboardModule() {
                       <div className="mt-6 pt-4 border-t border-slate-50 flex justify-center">
                         <button 
                           onClick={() => setShowAllTopPositive(!showAllTopPositive)}
-                          className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all"
+                          data-toggle-btn="top-positive"
+                          data-expanded={showAllTopPositive}
+                          data-count={dashboardData.topPositive.length}
+                          className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-emerald-600 hover:bg-emerald-50 rounded-xl transition-all interactive-only"
                         >
                           {showAllTopPositive ? (
                             <>Daha Az Göster <ChevronUp size={14} /></>
@@ -2299,12 +2547,14 @@ export function DashboardModule() {
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Memnuniyet Skoru</th>
                             </tr>
                           </thead>
-                          <tbody className="divide-y divide-slate-50">
-                            {(showAllTopNegative ? dashboardData.topNegative : dashboardData.topNegative.slice(0, 10)).map((item, idx) => (
+                          <tbody className="divide-y divide-slate-50" data-section="top-negative">
+                            {dashboardData.topNegative.map((item, idx) => (
                               <tr 
                                 key={idx} 
-                                className="hover:bg-rose-50/30 transition-all group cursor-pointer"
+                                className={`hover:bg-rose-50/30 transition-all group cursor-pointer html-export-clickable ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopNegative && idx >= 10) ? 'hidden' : ''}`}
                                 onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                                data-filter-type="category"
+                                data-filter-value={item.subCategory}
                               >
                                 <td className="py-4 px-4">
                                   <span className="text-sm font-bold text-slate-800 group-hover:text-rose-600 transition-colors">{item.subCategory}</span>
@@ -2334,7 +2584,10 @@ export function DashboardModule() {
                       <div className="mt-6 pt-4 border-t border-slate-50 flex justify-center">
                         <button 
                           onClick={() => setShowAllTopNegative(!showAllTopNegative)}
-                          className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition-all"
+                          data-toggle-btn="top-negative"
+                          data-expanded={showAllTopNegative}
+                          data-count={dashboardData.topNegative.length}
+                          className="flex items-center gap-2 px-4 py-2 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded-xl transition-all interactive-only"
                         >
                           {showAllTopNegative ? (
                             <>Daha Az Göster <ChevronUp size={14} /></>
@@ -2365,22 +2618,21 @@ export function DashboardModule() {
                   <MessageSquare size={16} className="text-indigo-500" />
                   Yorum Detayları
                 </h3>
-                <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">
+                <p id="html-export-drilldown-title" className="text-[10px] text-slate-500 font-bold uppercase mt-1">
                   {drillDownFilter.type === 'all' ? 'Tüm Filtrelenmiş Yorumlar' : `${drillDownFilter.value} Analizi`}
                 </p>
               </div>
-              {drillDownFilter.type !== 'all' && (
-                <button 
-                  onClick={() => setDrillDownFilter({ type: 'all', value: 'all' })}
-                  className="p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 transition-colors"
-                  title="Filtreyi Temizle"
-                >
-                  <X size={16} />
-                </button>
-              )}
+              <button 
+                id="html-export-drilldown-clear"
+                onClick={() => setDrillDownFilter({ type: 'all', value: 'all' })}
+                className={`p-1.5 hover:bg-slate-200 rounded-lg text-slate-400 transition-colors ${drillDownFilter.type === 'all' ? 'hidden' : ''}`}
+                title="Filtreyi Temizle"
+              >
+                <X size={16} />
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col gap-3">
+            <div id="html-export-comments-container" className="flex-1 overflow-y-auto p-4 custom-scrollbar flex flex-col gap-3">
               {drillDownComments.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 text-slate-400 opacity-50">
                   <MessageSquare size={40} className="mb-2" />
@@ -2433,7 +2685,7 @@ export function DashboardModule() {
             </div>
             
             <div className="p-4 border-t border-slate-100 bg-slate-50/30">
-              <p className="text-[10px] font-bold text-slate-400 text-center uppercase">
+              <p id="html-export-comments-count" className="text-[10px] font-bold text-slate-400 text-center uppercase">
                 Toplam {drillDownComments.length} Yorum Listeleniyor
               </p>
             </div>
@@ -2588,6 +2840,103 @@ export function DashboardModule() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Export Options Modal */}
+      {isExportOptionsModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden"
+          >
+            <div className="p-6 border-b border-slate-100 bg-slate-50/50">
+              <div className="flex items-center justify-between mb-2">
+                <div className="p-2 bg-indigo-100 rounded-xl text-indigo-600">
+                  <Download size={20} />
+                </div>
+                <button 
+                  onClick={() => setIsExportOptionsModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <h3 className="text-xl font-black text-slate-900 tracking-tight">Dışa Aktarma Seçenekleri</h3>
+              <p className="text-sm text-slate-500 font-medium">Raporunuzu özelleştirin ve HTML olarak indirin.</p>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Rapor Başlığı</label>
+                <input 
+                  type="text" 
+                  value={exportOptions.title}
+                  onChange={(e) => setExportOptions({ ...exportOptions, title: e.target.value })}
+                  placeholder="Örn: Mart 2026 Yönetim Sunumu"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all font-bold text-slate-700"
+                />
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white rounded-lg text-slate-400 group-hover:text-indigo-600 transition-colors">
+                      <MessageSquare size={18} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-slate-800">Yorumları Dahil Et</p>
+                      <p className="text-[10px] text-slate-500 font-medium">Tüm müşteri geri bildirimlerini rapora ekler.</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setExportOptions({ ...exportOptions, includeComments: !exportOptions.includeComments })}
+                    className={`w-12 h-6 rounded-full transition-all relative ${exportOptions.includeComments ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${exportOptions.includeComments ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white rounded-lg text-slate-400 group-hover:text-indigo-600 transition-colors">
+                      <MousePointerClick size={18} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-slate-800">Etkileşimli Rapor</p>
+                      <p className="text-[10px] text-slate-500 font-medium">Tıklanabilir grafikler ve genişletilebilir listeler.</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setExportOptions({ ...exportOptions, interactive: !exportOptions.interactive })}
+                    className={`w-12 h-6 rounded-full transition-all relative ${exportOptions.interactive ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${exportOptions.interactive ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex gap-3">
+              <button 
+                onClick={() => setIsExportOptionsModalOpen(false)}
+                className="flex-1 px-4 py-3 text-sm font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-all"
+              >
+                İptal
+              </button>
+              <button 
+                onClick={() => {
+                  handleExportHtml();
+                  setIsExportOptionsModalOpen(false);
+                }}
+                className="flex-2 px-6 py-3 bg-indigo-600 text-white rounded-xl font-bold text-sm hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all flex items-center justify-center gap-2"
+              >
+                <Download size={18} />
+                Raporu İndir
+              </button>
+            </div>
+          </motion.div>
         </div>
       )}
 

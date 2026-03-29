@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { CommentData, UnifiedTimelineAction, LetterTemplate, CommentAnalytics, PhonebookContact } from '../types';
 import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone, Save, Database, Brain, Plus, FileText, Send, Edit3, Trash2, X, PhoneCall } from 'lucide-react';
 import { formatTRDate, parseElektraActions, buildUnifiedTimeline, formatHtmlContent } from '../utils';
-import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, where } from "firebase/firestore";
+import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, where, updateDoc } from "firebase/firestore";
 import { db } from '../firebase';
 import { deleteCommentData } from '../services/firebaseService';
 import { generateAIContent, analyzeCommentComprehensive } from '../services/aiService';
@@ -66,6 +66,7 @@ export function DetailPanel({ comment }: DetailPanelProps) {
 
   // Preview Modal State
   const [selectedPreviewAction, setSelectedPreviewAction] = useState<UnifiedTimelineAction | null>(null);
+  const [editingActionId, setEditingActionId] = useState<string | null>(null);
 
   // Sentiment State
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -226,7 +227,7 @@ export function DetailPanel({ comment }: DetailPanelProps) {
       if (rect) {
         setSelectionPosition({
           x: rect.left + rect.width / 2,
-          y: rect.top + window.scrollY - 40
+          y: rect.top - 10
         });
       }
     } else {
@@ -239,7 +240,19 @@ export function DetailPanel({ comment }: DetailPanelProps) {
     const contact = phonebook.find(c => c.id === selectedContactId);
     if (!contact || !comment) return;
 
-    const message = `🚨 *Misafir Geri Bildirimi* 🚨
+    let sourceContext = 'Misafir Geri Bildirimi';
+    if (selectedPreviewAction) {
+      switch (selectedPreviewAction.type) {
+        case 'welcome_call': sourceContext = 'Hoş Geldiniz Araması'; break;
+        case 'manual': sourceContext = 'Manuel Not'; break;
+        case 'ai_letter': sourceContext = 'AI Mektup'; break;
+        case 'template': sourceContext = 'Şablon Mektup'; break;
+        case 'elektra': sourceContext = 'Elektra Yorumu'; break;
+        default: sourceContext = 'İçerik Önizleme';
+      }
+    }
+
+    const message = `🚨 *${sourceContext}* 🚨
 *Oda:* ${comment.ROOMNO || 'N/A'}
 *Misafir:* Misafir
 *Departman:* ${contact.department}
@@ -270,6 +283,17 @@ ${comment.COMMENT}`;
   const addActionToTimeline = async (description: string, type: 'ai_letter' | 'template' | 'manual' | 'whatsapp_sent' | 'report', content?: string) => {
     if (!comment?.ID) return;
     try {
+      if (editingActionId) {
+        const actionRef = doc(db, "comment_actions", editingActionId);
+        await updateDoc(actionRef, {
+          description: type === 'ai_letter' ? 'AI Mektup Güncellendi' : description,
+          ...(content ? { content } : {}),
+          updatedAt: serverTimestamp()
+        });
+        setEditingActionId(null);
+        return;
+      }
+
       const actionsRef = collection(db, "comment_actions");
       await addDoc(actionsRef, {
         commentId: String(comment.ID),
@@ -281,7 +305,7 @@ ${comment.COMMENT}`;
         ...(content ? { content } : {})
       });
     } catch (error) {
-      console.error("Error adding action:", error);
+      console.error("Error adding/updating action:", error);
     }
   };
 
@@ -304,8 +328,9 @@ ${comment.COMMENT}`;
 
     // Check if already analyzed
     if (deepAnalytics !== null || sentimentScore !== null) {
-      alert("Bu yorum zaten analiz edilmiş. Tekrar analiz etmek için lütfen önce mevcut analizi sıfırlayın.");
-      return;
+      if (!window.confirm("Bu yorum zaten analiz edilmiş. Mevcut analizi silip yeniden analiz etmek istediğinize emin misiniz?")) {
+        return;
+      }
     }
 
     setIsDeepAnalyzing(true);
@@ -333,7 +358,7 @@ ${comment.COMMENT}`;
   const handleResetAnalysis = async () => {
     if (!comment?.ID) return;
     
-    if (!window.confirm("Bu yoruma ait tüm analiz verilerini (Duygu Analizi, Derin Analiz, Aksiyonlar) veritabanından silmek istediğinize emin misiniz? Bu işlem geri alınamaz.")) {
+    if (!window.confirm("Bu yoruma ait tüm analiz verilerini (Derin Analiz, Aksiyonlar) veritabanından silmek istediğinize emin misiniz? Bu işlem geri alınamaz.")) {
       return;
     }
 
@@ -360,9 +385,10 @@ ${comment.COMMENT}`;
     setTranslatedLetter('');
     setShowTranslation(false);
 
+    const guestName = comment?.RESNAMEID_LOOKUP ? (comment.RESNAMEID_LOOKUP.split('-')[1]?.trim() || 'Misafir') : 'Misafir';
     try {
       const prompt = `You are a professional 5-star hotel Guest Relations Manager / Concierge. Write a polite and professional letter to a guest.
-Guest Name: Misafir
+Guest Name: ${guestName}
 Nationality: ${comment?.NATIONALITY}
 Room Number: ${comment?.ROOMNO}
 Check-In: ${formatTRDate(comment?.CHECKIN || '')}
@@ -372,7 +398,13 @@ Action Taken by Hotel: ${comment?.ANSWER}
 Extra Notes from Staff: ${extraNotes}
 Target Language: ${targetLanguage}
 
-The letter should be empathetic, professional, and address the guest's feedback and the actions taken. Do not include placeholders, write the final letter. Format with appropriate paragraphs.`;
+CRITICAL INSTRUCTIONS:
+1. Start the letter by addressing the guest by their name (e.g., "Dear ${guestName}," translated to the Target Language).
+2. At the end of the letter, include a sentence stating that they can contact the Guest Relations team in any situation, translated to the Target Language.
+3. Sign off the letter with "Guest Relations Team" translated to the Target Language.
+4. The tone must be highly professional, empathetic, and solution-oriented. Make the guest feel we genuinely care about their comfort.
+5. DO NOT list actions hour-by-hour or use timestamps. Summarize the actions taken generally (e.g., "We have informed our technical team about your concern").
+6. Do not include placeholders, write the final letter. Format with appropriate paragraphs.`;
 
       const text = await generateAIContent(prompt, 'Mektup Üretimi', 'letterGeneration');
       const formattedText = text ? text.replace(/\n/g, '<br>') : 'Mektup oluşturulamadı (Boş yanıt).';
@@ -480,83 +512,106 @@ ${JSON.stringify(timelineActions.map(a => ({
     window.print();
   };
 
-  const handleDownloadPDF = async (content: string) => {
-    try {
-      const htmlToImage = await import('html-to-image');
-      const { jsPDF } = await import('jspdf');
-      
-      const element = document.createElement('div');
-      element.className = 'ql-editor';
-      const isHtml = /<\/?[a-z][\s\S]*>/i.test(content);
-      element.innerHTML = isHtml ? content : content.replace(/\n/g, '<br>');
-      element.style.padding = '40px';
-      element.style.fontFamily = 'serif';
-      element.style.fontSize = '16px';
-      element.style.lineHeight = '1.6';
-      element.style.color = '#000';
-      element.style.background = '#fff';
-      element.style.width = '794px'; // A4 width at 96 DPI
-      
-      // We must append it to the body temporarily for html-to-image to work properly
-      element.style.position = 'absolute';
-      element.style.left = '-9999px';
-      document.body.appendChild(element);
-
-      const imgData = await htmlToImage.toJpeg(element, {
-        quality: 1.0,
-        pixelRatio: 2,
-        backgroundColor: '#ffffff'
-      });
-      
-      document.body.removeChild(element);
-
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (element.offsetHeight * pdfWidth) / element.offsetWidth;
-      
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Misafir_Mektubu_${comment?.ROOMNO || 'Misafir'}.pdf`);
-    } catch (error) {
-      console.error("PDF oluşturulurken hata:", error);
-      alert("PDF oluşturulurken bir hata oluştu.");
-    }
-  };
-
-  const handlePrintPreview = (content: string) => {
+  const handlePrintDocument = (content: string, title: string = 'Belge Yazdır') => {
     const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      const isHtml = /<\/?[a-z][\s\S]*>/i.test(content);
-      const htmlContent = isHtml ? content : content.replace(/\n/g, '<br>');
-      printWindow.document.write(`
-        <html>
-          <head>
-            <title>Yazdır</title>
-            <style>
-              body { font-family: serif; padding: 40px; line-height: 1.6; color: #000; }
-              h1, h2, h3 { margin-top: 1em; margin-bottom: 0.5em; font-weight: bold; }
-              p { margin-bottom: 1em; }
-              ul, ol { margin-bottom: 1em; padding-left: 2em; }
-              ul { list-style-type: disc; }
-              ol { list-style-type: decimal; }
-              strong { font-weight: bold; }
-              em { font-style: italic; }
-            </style>
-          </head>
-          <body>
-            ${htmlContent}
-            <script>
-              window.onload = () => { window.print(); window.close(); };
-            </script>
-          </body>
-        </html>
-      `);
-      printWindow.document.close();
+    if (!printWindow) {
+      alert("Lütfen açılır pencerelere (pop-up) izin verin.");
+      return;
     }
+
+    const isHtml = /<\/?[a-z][\s\S]*>/i.test(content);
+    const htmlContent = isHtml ? content : content.replace(/\n/g, '<br>');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>${title}</title>
+          <meta charset="utf-8">
+          <style>
+            /* Reset */
+            html, body {
+              margin: 0;
+              padding: 0;
+              background: white;
+              width: 100%;
+              height: 100%;
+            }
+            
+            /* Tell the printer to use A4 paper and remove default browser margins */
+            @page { 
+              size: A4; 
+              margin: 0; 
+            }
+
+            /* The A4 Page Container */
+            .page { 
+              width: 210mm;
+              min-height: 297mm;
+              padding: 45mm 25mm 25mm 25mm;
+              margin: 0 auto;
+              box-sizing: border-box;
+              page-break-after: always;
+              
+              /* Typography */
+              font-family: 'Georgia', serif; 
+              color: black;
+              font-size: 12pt;
+              line-height: 1.6;
+              text-align: justify;
+              text-justify: inter-word;
+            }
+
+            /* Enforce strict word wrapping rules */
+            .page * {
+              box-sizing: border-box;
+              max-width: 100%;
+              /* 1. Allow text to wrap normally at spaces */
+              white-space: normal !important;
+              /* 2. Break words ONLY if a single word is longer than the entire line */
+              overflow-wrap: break-word !important;
+              word-wrap: break-word !important;
+              /* 3. NEVER break a normal word in the middle */
+              word-break: normal !important;
+              /* 4. Disable automatic hyphenation */
+              hyphens: none !important;
+            }
+
+            /* Paragraph spacing */
+            p { 
+              margin-top: 0 !important; 
+              margin-bottom: 1.2em !important; 
+              text-align: justify !important; 
+            }
+
+            /* Preserve Quill alignments */
+            .ql-align-center { text-align: center !important; }
+            .ql-align-right { text-align: right !important; }
+            .ql-align-justify { text-align: justify !important; }
+
+            h1, h2, h3 { margin-top: 1em; margin-bottom: 0.5em; font-weight: bold; }
+            ul, ol { margin-bottom: 1em; padding-left: 2em; }
+            strong { font-weight: bold; }
+            em { font-style: italic; }
+            u { text-decoration: underline; }
+          </style>
+        </head>
+        <body>
+          <div class="page">
+            ${htmlContent}
+          </div>
+          <script>
+            window.onload = () => {
+              setTimeout(() => {
+                window.print();
+                window.close();
+              }, 300);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   if (!comment) {
@@ -836,6 +891,10 @@ ${JSON.stringify(timelineActions.map(a => ({
                   <button 
                     onClick={() => {
                       setShowActionDropdown(false);
+                      setEditingActionId(null);
+                      setGeneratedLetter('');
+                      setTranslatedLetter('');
+                      setShowTranslation(false);
                       setIsAILetterModalOpen(true);
                     }}
                     className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-purple-50 flex items-center gap-3 transition-colors group"
@@ -945,40 +1004,11 @@ ${JSON.stringify(timelineActions.map(a => ({
                     Kopyala
                   </button>
                   <button
-                    onClick={async () => {
-                      try {
-                        const htmlToImage = await import('html-to-image');
-                        const { jsPDF } = await import('jspdf');
-                        
-                        const element = document.getElementById('report-content');
-                        if (element) {
-                          const imgData = await htmlToImage.toJpeg(element, {
-                            quality: 1.0,
-                            pixelRatio: 2,
-                            backgroundColor: '#ffffff'
-                          });
-                          
-                          const pdf = new jsPDF({
-                            orientation: 'portrait',
-                            unit: 'mm',
-                            format: 'a4'
-                          });
-
-                          const pdfWidth = pdf.internal.pageSize.getWidth();
-                          const pdfHeight = (element.offsetHeight * pdfWidth) / element.offsetWidth;
-                          
-                          pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-                          pdf.save(`Vaka_Raporu_${comment?.ROOMNO || 'Bilinmiyor'}.pdf`);
-                        }
-                      } catch (error) {
-                        console.error("PDF oluşturulurken hata:", error);
-                        alert("PDF oluşturulurken bir hata oluştu.");
-                      }
-                    }}
+                    onClick={() => handlePrintDocument(generatedReport, `Vaka_Raporu_${comment?.ROOMNO || 'Bilinmiyor'}`)}
                     className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
                   >
-                    <Download size={16} />
-                    PDF İndir
+                    <Printer size={16} />
+                    Yazdır
                   </button>
                   <button 
                     onClick={async () => {
@@ -1008,7 +1038,7 @@ ${JSON.stringify(timelineActions.map(a => ({
                 <Sparkles size={18} className="text-purple-500" />
                 AI Mektup Oluştur
               </h3>
-              <button onClick={() => setIsAILetterModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+              <button onClick={() => { setIsAILetterModalOpen(false); setEditingActionId(null); }} className="text-slate-400 hover:text-slate-600 p-1">
                 <X size={20} />
               </button>
             </div>
@@ -1066,12 +1096,9 @@ ${JSON.stringify(timelineActions.map(a => ({
                       </button>
                       
                       <button 
-                        onClick={() => handleDownloadPDF(showTranslation ? translatedLetter : generatedLetter)}
+                        onClick={() => handlePrintDocument(showTranslation ? translatedLetter : generatedLetter, `Misafir_Mektubu_${comment?.ROOMNO || 'Misafir'}`)}
                         className="flex items-center gap-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition-colors"
                       >
-                        <Download size={14} /> PDF
-                      </button>
-                      <button onClick={handlePrint} className="flex items-center gap-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition-colors">
                         <Printer size={14} /> Yazdır
                       </button>
                       <button 
@@ -1210,7 +1237,7 @@ ${JSON.stringify(timelineActions.map(a => ({
 
       {/* WhatsApp Routing Modal */}
       {isWhatsAppModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl">
             <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-emerald-50">
               <h3 className="font-semibold text-slate-800 flex items-center gap-2">
@@ -1251,7 +1278,15 @@ ${JSON.stringify(timelineActions.map(a => ({
               <div>
                 <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Mesaj Önizleme</label>
                 <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono whitespace-pre-wrap text-slate-600">
-                  {`🚨 *Misafir Geri Bildirimi* 🚨\n*Oda:* ${comment?.ROOMNO || 'N/A'}\n*Misafir:* Misafir\n*Departman:* ${phonebook.find(c => c.id === selectedContactId)?.department || '...'}\n\n📌 *Odaklanılacak Alan:*\n"_${selectedText || '...'}_"\n\n*Yorumun Tamamı:*\n${comment?.COMMENT}`}
+                  {`🚨 *${
+                    selectedPreviewAction 
+                      ? (selectedPreviewAction.type === 'welcome_call' ? 'Hoş Geldiniz Araması' :
+                         selectedPreviewAction.type === 'manual' ? 'Manuel Not' :
+                         selectedPreviewAction.type === 'ai_letter' ? 'AI Mektup' :
+                         selectedPreviewAction.type === 'template' ? 'Şablon Mektup' :
+                         selectedPreviewAction.type === 'elektra' ? 'Elektra Yorumu' : 'İçerik Önizleme')
+                      : 'Misafir Geri Bildirimi'
+                  }* 🚨\n*Oda:* ${comment?.ROOMNO || 'N/A'}\n*Misafir:* Misafir\n*Departman:* ${phonebook.find(c => c.id === selectedContactId)?.department || '...'}\n\n📌 *Odaklanılacak Alan:*\n"_${selectedText || '...'}_"\n\n*Yorumun Tamamı:*\n${comment?.COMMENT}`}
                 </div>
               </div>
             </div>
@@ -1297,29 +1332,67 @@ ${JSON.stringify(timelineActions.map(a => ({
                 Döküman Önizleme
               </h3>
               <div className="flex items-center gap-3">
+                {selectedPreviewAction.type === 'ai_letter' && (
+                  <button 
+                    onClick={() => {
+                      setGeneratedLetter(selectedPreviewAction.content || '');
+                      setTranslatedLetter('');
+                      setShowTranslation(false);
+                      setEditingActionId(selectedPreviewAction.id);
+                      setSelectedPreviewAction(null);
+                      setSelectedText('');
+                      setSelectionPosition(null);
+                      setIsAILetterModalOpen(true);
+                    }}
+                    className="flex items-center gap-2 text-sm font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
+                  >
+                    <Edit3 size={14} /> Düzenle
+                  </button>
+                )}
                 <button 
-                  onClick={() => handleDownloadPDF(selectedPreviewAction.content || '')}
-                  className="flex items-center gap-2 text-sm font-medium bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
-                >
-                  <Download size={14} /> PDF İndir
-                </button>
-                <button 
-                  onClick={() => handlePrintPreview(selectedPreviewAction.content || '')}
+                  onClick={() => handlePrintDocument(selectedPreviewAction.content || '', 'Döküman_Önizleme')}
                   className="flex items-center gap-2 text-sm font-medium bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
                 >
                   <Printer size={14} /> Yazdır
                 </button>
-                <button onClick={() => setSelectedPreviewAction(null)} className="text-slate-400 hover:text-slate-600 p-1 ml-2">
+                <button 
+                  onClick={() => {
+                    setSelectedPreviewAction(null);
+                    setSelectedText('');
+                    setSelectionPosition(null);
+                  }} 
+                  className="text-slate-400 hover:text-slate-600 p-1 ml-2"
+                >
                   <X size={20} />
                 </button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-8 bg-slate-100/50">
-              <div className="bg-white p-8 rounded-xl shadow-sm min-h-[500px] border border-slate-200 font-serif ql-snow">
+              <div 
+                className="bg-white p-8 rounded-xl shadow-sm min-h-[500px] border border-slate-200 font-serif ql-snow relative"
+                onMouseUp={handleTextSelection}
+                onKeyUp={handleTextSelection}
+              >
                 <div 
                   className="ql-editor p-0"
                   dangerouslySetInnerHTML={{ __html: formatHtmlContent(selectedPreviewAction.content) }}
                 />
+                
+                {/* Floating WhatsApp Button */}
+                {selectionPosition && selectedText && (
+                  <div 
+                    className="fixed z-[100] animate-in fade-in zoom-in duration-200"
+                    style={{ left: selectionPosition.x, top: selectionPosition.y, transform: 'translate(-50%, -100%)' }}
+                  >
+                    <button
+                      onClick={() => setIsWhatsAppModalOpen(true)}
+                      className="bg-emerald-600 text-white px-3 py-1.5 rounded-full shadow-xl flex items-center gap-2 text-xs font-bold hover:bg-emerald-700 transition-all hover:scale-105"
+                    >
+                      <MessageCircle size={14} />
+                      WhatsApp ile İlet
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>

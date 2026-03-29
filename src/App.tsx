@@ -14,7 +14,7 @@ import { GuestListModule } from './modules/GuestListModule';
 import { TemplateModule } from './modules/TemplateModule';
 import { DashboardModule } from './modules/DashboardModule';
 import { PhonebookModule } from './modules/PhonebookModule';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { BarChart3, PhoneCall } from 'lucide-react';
 
 export default function App() {
@@ -63,33 +63,47 @@ export default function App() {
       window.history.replaceState({ path: newUrl }, '', newUrl);
     }
 
-    // Listen for token updates from Firestore
-    const unsubscribe = onSnapshot(doc(db, "config", "api_settings"), (doc) => {
-      if (doc.exists()) {
-        const data = doc.data();
-        if (data.loginToken) {
-          const savedSettings = localStorage.getItem('hotelApiSettings');
-          let settings: ApiSettings = {
-            baseUrl: '',
-            loginToken: '',
-            hotelId: ''
-          };
+    // Listen for settings updates from Firestore
+    const unsubscribe = onSnapshot(doc(db, "config", "api_settings"), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const savedSettings = localStorage.getItem('hotelApiSettings');
+        let currentSettings: any = {};
 
-          if (savedSettings) {
-            try {
-              settings = JSON.parse(savedSettings);
-            } catch (e) {
-              console.error('Error parsing settings', e);
-            }
+        if (savedSettings) {
+          try {
+            currentSettings = JSON.parse(savedSettings);
+          } catch (e) {
+            console.error('Error parsing settings', e);
           }
+        }
 
-          // Only update if different
-          if (settings.loginToken !== data.loginToken) {
-            console.log("Syncing new token from Firestore...");
-            settings.loginToken = data.loginToken;
-            localStorage.setItem('hotelApiSettings', JSON.stringify(settings));
-            // Optional: Trigger a re-fetch or notify user
-          }
+        // Check if there are meaningful differences to avoid infinite loops
+        // We compare key fields
+        const hasChanges = 
+          currentSettings.loginToken !== data.loginToken ||
+          currentSettings.baseUrl !== data.baseUrl ||
+          currentSettings.hotelId !== data.hotelId ||
+          currentSettings.commentPayloadTemplate !== data.commentPayloadTemplate ||
+          currentSettings.commentDetailPayloadTemplate !== data.commentDetailPayloadTemplate ||
+          currentSettings.inhousePayloadTemplate !== data.inhousePayloadTemplate ||
+          currentSettings.reservationPayloadTemplate !== data.reservationPayloadTemplate ||
+          currentSettings.checkoutPayloadTemplate !== data.checkoutPayloadTemplate ||
+          currentSettings.geminiApiKey !== data.geminiApiKey ||
+          currentSettings.geminiModel !== data.geminiModel ||
+          JSON.stringify(currentSettings.featureModels || {}) !== JSON.stringify(data.featureModels || {});
+
+        if (hasChanges) {
+          console.log("Syncing settings from Firestore...");
+          // Merge data with existing settings
+          const newSettings = { ...currentSettings, ...data };
+          // Remove updatedAt from local storage if it exists to keep it clean
+          delete newSettings.updatedAt;
+          
+          localStorage.setItem('hotelApiSettings', JSON.stringify(newSettings));
+          
+          // Dispatch a custom event so other components can react if needed
+          window.dispatchEvent(new Event('hotelApiSettingsUpdated'));
         }
       }
     });

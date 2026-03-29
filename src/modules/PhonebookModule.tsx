@@ -3,7 +3,7 @@ import { Phone, User, Building2, Plus, Trash2, Search, Loader2, PhoneCall } from
 import { collection, onSnapshot, addDoc, deleteDoc, doc, serverTimestamp, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { PhonebookContact } from '../types';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export function PhonebookModule() {
   const [contacts, setContacts] = useState<PhonebookContact[]>([]);

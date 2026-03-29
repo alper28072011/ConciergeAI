@@ -4,7 +4,7 @@ import { CommentData, CommentAnalytics } from '../types';
 import { analyzeCommentComprehensive } from '../services/aiService';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface BulkAnalysisModalProps {
   isOpen: boolean;
@@ -20,33 +20,41 @@ export function BulkAnalysisModal({ isOpen, onClose, comments, agendaNotes, type
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [results, setResults] = useState<{ id: string; status: 'success' | 'error' | 'skipped'; message?: string }[]>([]);
   const [isFinished, setIsFinished] = useState(false);
+  const [showSkipChoice, setShowSkipChoice] = useState(false);
+  const [skipAnalyzed, setSkipAnalyzed] = useState(true);
+  const hasInitialized = React.useRef(false);
 
   useEffect(() => {
-    if (isOpen) {
+    if (!isOpen) {
+      hasInitialized.current = false;
+      return;
+    }
+
+    if (isOpen && !hasInitialized.current) {
+      hasInitialized.current = true;
       setProgress(0);
       setResults([]);
       setIsFinished(false);
+      
+      const alreadyAnalyzedCount = comments.filter(c => {
+        const id = String(c.ID);
+        const note = agendaNotes[id];
+        return note && (note.sentimentScore !== undefined || note.overallScore !== undefined);
+      }).length;
+      
+      if (alreadyAnalyzedCount > 0) {
+        setShowSkipChoice(true);
+      } else {
+        setShowSkipChoice(false);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, comments, agendaNotes]);
 
   const startAnalysis = async () => {
     setIsAnalyzing(true);
     setProgress(0);
     setResults([]);
-
-    const alreadyAnalyzedCount = comments.filter(c => {
-      const id = String(c.ID);
-      const note = agendaNotes[id];
-      return note && (note.sentimentScore !== undefined || note.overallScore !== undefined);
-    }).length;
-    
-    let skipAllAnalyzed = false;
-
-    if (alreadyAnalyzedCount > 0) {
-      if (window.confirm(`${alreadyAnalyzedCount} yorum zaten analiz edilmiş. Bunları atlamak ister misiniz? (Tamam: Atla, İptal: Hepsini Tekrar Analiz Et)`)) {
-        skipAllAnalyzed = true;
-      }
-    }
+    setShowSkipChoice(false);
 
     for (let i = 0; i < comments.length; i++) {
       const comment = comments[i];
@@ -59,7 +67,7 @@ export function BulkAnalysisModal({ isOpen, onClose, comments, agendaNotes, type
         const id = String(comment.ID);
         const isAlreadyAnalyzed = agendaNotes[id] && (agendaNotes[id].sentimentScore !== undefined || agendaNotes[id].overallScore !== undefined);
         
-        if (isAlreadyAnalyzed && skipAllAnalyzed) {
+        if (isAlreadyAnalyzed && skipAnalyzed) {
           setResults(prev => [...prev, { id, status: 'skipped', message: 'Atlandı' }]);
           setProgress(((i + 1) / comments.length) * 100);
           continue;
@@ -76,6 +84,11 @@ export function BulkAnalysisModal({ isOpen, onClose, comments, agendaNotes, type
         }, { merge: true });
 
         setResults(prev => [...prev, { id: String(comment.ID), status: 'success' }]);
+        
+        // Add a small delay to avoid hitting rate limits (15 RPM free tier)
+        if (i < comments.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
       } catch (error: any) {
         console.error(`Error analyzing comment ${comment.ID}:`, error);
         setResults(prev => [...prev, { id: String(comment.ID), status: 'error', message: error.message }]);
@@ -111,8 +124,8 @@ export function BulkAnalysisModal({ isOpen, onClose, comments, agendaNotes, type
         >
           <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
             <h3 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-              {type === 'deep' ? <Sparkles size={20} className="text-purple-600" /> : <Brain size={20} className="text-blue-600" />}
-              Toplu {type === 'deep' ? 'Derin Analiz' : 'Duygu Analizi'} ({comments.length} Yorum)
+              <Sparkles size={20} className="text-purple-600" />
+              Toplu Derin Analiz ({comments.length} Yorum)
             </h3>
             {!isAnalyzing && (
               <button onClick={onClose} className="p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 rounded-lg transition-colors">
@@ -127,6 +140,49 @@ export function BulkAnalysisModal({ isOpen, onClose, comments, agendaNotes, type
                 <p className="text-slate-600">
                   Seçili <strong>{comments.length}</strong> yorum için {type === 'deep' ? 'Derin Yapay Zeka Analizi' : 'Duygu Skoru Analizi'} başlatılacak. Bu işlem yorum sayısına bağlı olarak biraz zaman alabilir.
                 </p>
+
+                {showSkipChoice && (
+                  <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-left space-y-3">
+                    <div className="flex items-center gap-2 text-amber-800 font-bold text-sm">
+                      <AlertCircle size={16} />
+                      Daha Önce Analiz Edilmiş Yorumlar Var
+                    </div>
+                    <p className="text-xs text-amber-700 leading-relaxed">
+                      Seçtiğiniz yorumlardan bazıları zaten analiz edilmiş. Ne yapmak istersiniz?
+                    </p>
+                    <div className="grid grid-cols-1 gap-2">
+                      <button
+                        onClick={() => setSkipAnalyzed(true)}
+                        className={`flex items-center justify-between p-2.5 rounded-lg border transition-all ${
+                          skipAnalyzed 
+                            ? 'bg-white border-amber-500 shadow-sm ring-1 ring-amber-500' 
+                            : 'bg-amber-100/50 border-transparent text-amber-700'
+                        }`}
+                      >
+                        <div className="flex flex-col text-left">
+                          <span className="text-[10px] font-bold">Analiz Edilenleri Atla</span>
+                          <span className="text-[9px] opacity-70">Sadece yeni yorumları analiz et (Önerilen)</span>
+                        </div>
+                        {skipAnalyzed && <CheckCircle2 size={14} className="text-amber-600" />}
+                      </button>
+                      <button
+                        onClick={() => setSkipAnalyzed(false)}
+                        className={`flex items-center justify-between p-2.5 rounded-lg border transition-all ${
+                          !skipAnalyzed 
+                            ? 'bg-white border-amber-500 shadow-sm ring-1 ring-amber-500' 
+                            : 'bg-amber-100/50 border-transparent text-amber-700'
+                        }`}
+                      >
+                        <div className="flex flex-col text-left">
+                          <span className="text-[10px] font-bold">Hepsini Yeniden Analiz Et</span>
+                          <span className="text-[9px] opacity-70">Mevcut analizlerin üzerine yaz</span>
+                        </div>
+                        {!skipAnalyzed && <CheckCircle2 size={14} className="text-amber-600" />}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <button
                   onClick={startAnalysis}
                   className={`w-full py-3 rounded-xl font-bold text-white shadow-sm transition-all flex items-center justify-center gap-2 ${

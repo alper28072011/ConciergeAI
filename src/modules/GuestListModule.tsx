@@ -1,18 +1,20 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import ReactQuill from 'react-quill-new';
+import ReactQuillModule from 'react-quill-new';
+const ReactQuill = (ReactQuillModule as any).default || ReactQuillModule;
 import 'react-quill-new/dist/quill.snow.css';
-import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText, Brain, CheckCircle2, AlertCircle, RefreshCw, Phone, PhoneOff, PhoneForwarded, Plus, X, Sparkles, Edit3, Database, Trash2, BarChart3, Download, Save, Clock } from 'lucide-react';
-import { GuestData, CommentData, ApiSettings, GuestListTab, UnifiedTimelineAction } from '../types';
+import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, Filter, Users, CalendarDays, LogOut, Star, FileText, Brain, CheckCircle2, AlertCircle, RefreshCw, Phone, PhoneOff, PhoneForwarded, Plus, X, Sparkles, Edit3, Database, Trash2, BarChart3, Download, Save, Clock, LayoutGrid, Printer, Send } from 'lucide-react';
+import { GuestData, CommentData, ApiSettings, GuestListTab, UnifiedTimelineAction, PhonebookContact } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { generateAIContent } from '../services/aiService';
 import { buildDynamicPayload, formatTRDate, groupCommentDetails, buildUnifiedTimeline, formatHtmlContent } from '../utils';
 import { TimelineView } from '../components/TimelineView';
 import { BulkAnalysisModal } from '../components/BulkAnalysisModal';
 import { ActionEntryModal } from '../components/ActionEntryModal';
-import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { BulkLabelModal } from '../components/BulkLabelModal';
+import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch, onSnapshot, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { deleteCommentData } from '../services/firebaseService';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export function GuestListModule() {
   const [guests, setGuests] = useState<GuestData[]>([]);
@@ -58,6 +60,13 @@ export function GuestListModule() {
   const [callNotes, setCallNotes] = useState('');
   const [isSavingCall, setIsSavingCall] = useState(false);
 
+  // WhatsApp State for Welcome Call
+  const [phonebook, setPhonebook] = useState<PhonebookContact[]>([]);
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+  const [selectedContactId, setSelectedContactId] = useState('');
+  const [selectedText, setSelectedText] = useState('');
+  const [selectionPosition, setSelectionPosition] = useState<{ x: number, y: number } | null>(null);
+
   // Mail Merge Modal State
   const [isMailMergeModalOpen, setIsMailMergeModalOpen] = useState(false);
   const [selectedGuestForMail, setSelectedGuestForMail] = useState<GuestData | null>(null);
@@ -67,6 +76,7 @@ export function GuestListModule() {
   // Bulk Selection & Bulk Mail Merge State
   const [selectedGuestIds, setSelectedGuestIds] = useState<string[]>([]);
   const [isBulkMailMergeOpen, setIsBulkMailMergeOpen] = useState(false);
+  const [isBulkLabelModalOpen, setIsBulkLabelModalOpen] = useState(false);
   const [bulkTemplates, setBulkTemplates] = useState<any[]>([]);
   const [selectedBulkTemplateId, setSelectedBulkTemplateId] = useState<string>('');
   const [bulkGeneratedLetters, setBulkGeneratedLetters] = useState<{guest: GuestData, content: string}[]>([]);
@@ -78,7 +88,7 @@ export function GuestListModule() {
   const [isBulkResetting, setIsBulkResetting] = useState(false);
 
   // Timeline Preview State
-  const [selectedPreviewAction, setSelectedPreviewAction] = useState<UnifiedTimelineAction | null>(null);
+  const [selectedPreviewAction, setSelectedPreviewAction] = useState<{ action: UnifiedTimelineAction, guest: GuestData } | null>(null);
 
   // Action Modals State
   const [isActionDropdownOpen, setIsActionDropdownOpen] = useState(false);
@@ -174,8 +184,9 @@ export function GuestListModule() {
     setShowAITranslation(false);
 
     try {
+      const guestName = selectedGuestForAction.GUESTNAMES || 'Misafir';
       const prompt = `You are a professional 5-star hotel Guest Relations Manager / Concierge. Write a polite and professional letter to a guest.
-Guest Name: ${selectedGuestForAction.GUESTNAME} ${selectedGuestForAction.GUESTSURNAME}
+Guest Name: ${guestName}
 Nationality: ${selectedGuestForAction.NATIONALITY}
 Room Number: ${selectedGuestForAction.ROOMNO}
 Check-In: ${formatTRDate(selectedGuestForAction.CHECKIN || '')}
@@ -183,7 +194,13 @@ Check-Out: ${formatTRDate(selectedGuestForAction.CHECKOUT || '')}
 Extra Notes from Staff: ${extraNotes}
 Target Language: ${targetLanguage}
 
-The letter should be empathetic, professional, and address the guest. Do not include placeholders, write the final letter. Format with appropriate paragraphs.`;
+CRITICAL INSTRUCTIONS:
+1. Start the letter by addressing the guest by their name (e.g., "Dear ${guestName}," translated to the Target Language).
+2. At the end of the letter, include a sentence stating that they can contact the Guest Relations team in any situation, translated to the Target Language.
+3. Sign off the letter with "Guest Relations Team" translated to the Target Language.
+4. The tone must be highly professional, empathetic, and solution-oriented. Make the guest feel we genuinely care about their comfort.
+5. DO NOT list actions hour-by-hour or use timestamps. Summarize the actions taken generally (e.g., "We have informed our technical team about your concern").
+6. Do not include placeholders, write the final letter. Format with appropriate paragraphs.`;
 
       const text = await generateAIContent(prompt, 'Mektup Üretimi', 'letterGeneration');
       const formattedText = text ? text.replace(/\n/g, '<br>') : 'Mektup oluşturulamadı (Boş yanıt).';
@@ -264,6 +281,19 @@ The letter should be empathetic, professional, and address the guest. Do not inc
     setSelectedGuestIds([]);
   }, [activeTab]);
 
+  // Fetch phonebook for WhatsApp routing
+  useEffect(() => {
+    const q = query(collection(db, 'phonebook'), orderBy('fullName', 'asc'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const contactList: PhonebookContact[] = [];
+      snapshot.forEach((doc) => {
+        contactList.push({ id: doc.id, ...doc.data() } as PhonebookContact);
+      });
+      setPhonebook(contactList);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Firebase Real-time Listener
   useEffect(() => {
     const unsubSurveys = onSnapshot(collection(db, 'survey_logs'), (snapshot) => {
@@ -312,6 +342,87 @@ The letter should be empathetic, professional, and address the guest. Do not inc
       unsubCommentActions();
     };
   }, []);
+
+  // Real-time update of guests based on firebaseCache
+  useEffect(() => {
+    setGuests(prevGuests => {
+      if (prevGuests.length === 0) return prevGuests;
+      
+      let hasChanges = false;
+      const updatedGuests = prevGuests.map(guest => {
+        const matchedComments = guest.comments || [];
+        const hasSurveySent = firebaseCache.surveys.some(log => log.guestId === guest.RESID);
+        const interaction = firebaseCache.interactions[guest.RESID] || {};
+        
+        let sentimentScore = interaction.sentimentScore;
+        let sentimentAnalysisDate = interaction.sentimentAnalysisDate;
+
+        if (sentimentScore === undefined && matchedComments.length > 0) {
+          for (const comment of matchedComments) {
+            const note = firebaseCache.agenda[comment.COMMENTID];
+            if (note && note.sentimentScore !== undefined) {
+              sentimentScore = note.sentimentScore;
+              sentimentAnalysisDate = note.sentimentAnalysisDate;
+              break;
+            }
+          }
+        }
+        
+        const elektraAnswers = matchedComments.map(c => c.ANSWER).filter(Boolean).join('\n');
+        const guestCommentIds = matchedComments.map(c => String(c.COMMENTID));
+        
+        const filteredActions = firebaseCache.commentActions.filter(a => 
+          (a.resId && String(a.resId) === String(guest.RESID)) || 
+          (a.commentId && guestCommentIds.includes(String(a.commentId)))
+        );
+        
+        const filteredInteractions = (Object.values(firebaseCache.interactions) as any[]).filter(i => 
+          String(i.resId) === String(guest.RESID)
+        );
+        
+        const filteredSurveys = firebaseCache.surveys.filter(s => 
+          String(s.resId) === String(guest.RESID)
+        );
+
+        const newTimelineActions = buildUnifiedTimeline(
+          elektraAnswers,
+          filteredActions,
+          filteredInteractions,
+          filteredSurveys
+        );
+
+        const isChanged = 
+          guest.surveySent !== hasSurveySent ||
+          guest.sentimentScore !== sentimentScore ||
+          guest.sentimentAnalysisDate !== sentimentAnalysisDate ||
+          guest.generatedLetter !== interaction.generatedLetter ||
+          guest.letterSentDate !== interaction.letterSentDate ||
+          guest.welcomeCallStatus !== (interaction.welcomeCallStatus || 'not_called') ||
+          guest.welcomeCallNotes !== (interaction.welcomeCallNotes || '') ||
+          guest.welcomeCallDate !== (interaction.welcomeCallDate || '') ||
+          JSON.stringify(guest.timelineActions) !== JSON.stringify(newTimelineActions);
+
+        if (isChanged) {
+          hasChanges = true;
+          return {
+            ...guest,
+            surveySent: hasSurveySent,
+            sentimentScore: sentimentScore,
+            sentimentAnalysisDate: sentimentAnalysisDate,
+            generatedLetter: interaction.generatedLetter,
+            letterSentDate: interaction.letterSentDate,
+            welcomeCallStatus: interaction.welcomeCallStatus || 'not_called',
+            welcomeCallNotes: interaction.welcomeCallNotes || '',
+            welcomeCallDate: interaction.welcomeCallDate || '',
+            timelineActions: newTimelineActions
+          };
+        }
+        return guest;
+      });
+
+      return hasChanges ? updatedGuests : prevGuests;
+    });
+  }, [firebaseCache]);
 
   const handleFilterChange = (column: string, value: string) => {
     setColumnFilters(prev => ({
@@ -558,8 +669,17 @@ The letter should be empathetic, professional, and address the guest. Do not inc
       case 'no_welcome_call':
         filtered = filtered.filter(g => !g.welcomeCallStatus || g.welcomeCallStatus === 'not_called');
         break;
-      case 'has_request':
+      case 'welcome_call_done':
+        filtered = filtered.filter(g => g.welcomeCallStatus && g.welcomeCallStatus !== 'not_called');
+        break;
+      case 'welcome_call_all_good':
+        filtered = filtered.filter(g => g.welcomeCallStatus === 'answered_all_good');
+        break;
+      case 'welcome_call_has_request':
         filtered = filtered.filter(g => g.welcomeCallStatus === 'answered_has_request');
+        break;
+      case 'welcome_call_no_answer':
+        filtered = filtered.filter(g => g.welcomeCallStatus === 'no_answer');
         break;
       default:
         break;
@@ -602,6 +722,28 @@ The letter should be empathetic, professional, and address the guest. Do not inc
 
       await setDoc(interactionRef, payload, { merge: true });
 
+      // Add to comment_actions for timeline history only if changed
+      const hasChanged = 
+        selectedGuestForCall.welcomeCallStatus !== callStatus || 
+        (callStatus === 'answered_has_request' && selectedGuestForCall.welcomeCallNotes !== callNotes);
+
+      if (callStatus !== 'not_called' && hasChanged) {
+        const actionsRef = collection(db, "comment_actions");
+        let desc = 'Hoş Geldiniz Araması Yapıldı';
+        if (callStatus === 'answered_all_good') desc = 'Hoş Geldiniz Araması: Ulaşıldı - Her şey yolunda';
+        else if (callStatus === 'answered_has_request') desc = 'Hoş Geldiniz Araması: Ulaşıldı - Talebi Var';
+        else if (callStatus === 'no_answer') desc = 'Hoş Geldiniz Araması: Ulaşılamadı';
+
+        await addDoc(actionsRef, {
+          resId: String(selectedGuestForCall.RESID),
+          type: 'welcome_call',
+          description: desc,
+          content: callStatus === 'answered_has_request' ? callNotes : '',
+          date: new Date().toISOString(),
+          source: 'Misafir İlişkileri'
+        });
+      }
+
       // Update local state
       setGuests(prev => prev.map(g => 
         g.RESID === selectedGuestForCall.RESID 
@@ -610,12 +752,84 @@ The letter should be empathetic, professional, and address the guest. Do not inc
       ));
 
       setIsWelcomeCallModalOpen(false);
+      setSelectedText('');
+      setSelectionPosition(null);
     } catch (error) {
       console.error("Error saving welcome call:", error);
       alert("Kaydedilirken bir hata oluştu.");
     } finally {
       setIsSavingCall(false);
     }
+  };
+
+  const handleTextSelection = () => {
+    const selection = window.getSelection();
+    const text = selection?.toString().trim();
+    
+    if (text && text.length > 0) {
+      setSelectedText(text);
+      
+      // Get position for floating button
+      const range = selection?.getRangeAt(0);
+      const rect = range?.getBoundingClientRect();
+      if (rect) {
+        setSelectionPosition({
+          x: rect.left + rect.width / 2,
+          y: rect.top - 10
+        });
+      }
+    } else {
+      setSelectedText('');
+      setSelectionPosition(null);
+    }
+  };
+
+  const handleSendWhatsApp = async () => {
+    const contact = phonebook.find(c => c.id === selectedContactId);
+    
+    let targetGuest = selectedPreviewAction?.guest || selectedGuestForCall;
+
+    if (!contact || !targetGuest) return;
+
+    let sourceContext = 'Hoş Geldiniz Araması';
+    if (selectedPreviewAction?.action) {
+      switch (selectedPreviewAction.action.type) {
+        case 'welcome_call': sourceContext = 'Hoş Geldiniz Araması'; break;
+        case 'manual': sourceContext = 'Manuel Not'; break;
+        case 'ai_letter': sourceContext = 'AI Mektup'; break;
+        case 'template': sourceContext = 'Şablon Mektup'; break;
+        case 'elektra': sourceContext = 'Elektra Yorumu'; break;
+        default: sourceContext = 'İçerik Önizleme';
+      }
+    }
+
+    const message = `🚨 *Misafir Talebi (${sourceContext})* 🚨
+*Oda:* ${targetGuest.ROOMNO || 'N/A'}
+*Misafir:* ${targetGuest.GUESTNAMES || 'Misafir'}
+*Departman:* ${contact.department}
+
+📌 *Talep Detayı:*
+"_${selectedText}_"`;
+
+    const encodedText = encodeURIComponent(message);
+    const whatsappUrl = `https://wa.me/${contact.phoneNumber}?text=${encodedText}`;
+    
+    window.open(whatsappUrl, '_blank');
+
+    // Log to timeline
+    const actionsRef = collection(db, "comment_actions");
+    await addDoc(actionsRef, {
+      resId: String(targetGuest.RESID),
+      type: 'whatsapp_sent',
+      description: `WhatsApp İletisi: ${contact.department} (${contact.fullName})`,
+      content: `Talep: ${selectedText}`,
+      date: new Date().toISOString(),
+      source: 'Misafir İlişkileri'
+    });
+
+    setIsWhatsAppModalOpen(false);
+    setSelectedText('');
+    setSelectionPosition(null);
   };
 
   const openMailMergeModal = async (guest: GuestData) => {
@@ -695,50 +909,78 @@ The letter should be empathetic, professional, and address the guest. Do not inc
     }
   };
 
-  const handleSavePdf = async () => {
-    try {
-      const htmlToImage = await import('html-to-image');
-      const { jsPDF } = await import('jspdf');
-      
-      const element = document.getElementById('mail-merge-content');
-      if (!element) return;
+  const handlePrintLetter = () => {
+    const element = document.getElementById('mail-merge-content');
+    if (!element) return;
 
-      // html-to-image works best with elements already in the DOM.
-      // We pass the element directly and use the 'style' option to force A4 dimensions during capture.
-      const imgData = await htmlToImage.toJpeg(element, {
-        quality: 1.0,
-        pixelRatio: 2,
-        backgroundColor: '#ffffff',
-        style: {
-          width: '794px', // A4 width at 96 DPI
-          minHeight: '1123px', // A4 height at 96 DPI
-          padding: '75px', // ~20mm margin
-          margin: '0',
-          border: 'none',
-          boxShadow: 'none',
-          transform: 'none',
-          boxSizing: 'border-box',
-          overflow: 'visible',
-          position: 'static'
-        }
-      });
-
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      const pdfWidth = 210;
-      const imgProps = pdf.getImageProperties(imgData);
-      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-      
-      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`${selectedGuestForMail?.GUESTNAMES || 'Misafir'}_Mektup.pdf`);
-    } catch (error) {
-      console.error("Error generating PDF:", error);
-      alert("PDF oluşturulurken bir hata oluştu.");
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Lütfen açılır pencerelere (pop-up) izin verin.");
+      return;
     }
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Mektup Yazdır</title>
+          <style>
+            @page { 
+              size: A4; 
+              margin: 45mm 25mm 25mm 25mm; 
+            }
+            body { 
+              margin: 0; 
+              padding: 0; 
+              font-family: 'Georgia', serif; 
+              background: white;
+              color: #1a1a1a;
+              font-size: 12pt;
+              line-height: 1.6;
+              text-align: justify;
+            }
+            .page { 
+              page-break-after: always;
+            }
+            /* Force natural text wrapping and prevent arbitrary word breaks */
+            .page * {
+              max-width: 100%;
+              word-break: normal !important;
+              overflow-wrap: normal !important;
+              word-wrap: normal !important;
+              white-space: normal !important;
+              hyphens: none !important;
+            }
+            /* Preserve Quill formatting */
+            .ql-align-center { text-align: center !important; }
+            .ql-align-right { text-align: right !important; }
+            .ql-align-justify { text-align: justify !important; }
+            p { margin-bottom: 1.2em; margin-top: 0; text-align: justify; }
+            h1, h2, h3 { margin-top: 1em; margin-bottom: 0.5em; font-weight: bold; }
+            ul, ol { margin-bottom: 1em; padding-left: 2em; }
+            ul { list-style-type: disc; }
+            ol { list-style-type: decimal; }
+            strong { font-weight: 600; }
+            em { font-style: italic; }
+            u { text-decoration: underline; }
+          </style>
+        </head>
+        <body>
+          <div class="page">
+            ${element.innerHTML}
+          </div>
+          <script>
+            window.onload = () => {
+              setTimeout(() => {
+                window.print();
+                window.close();
+              }, 300);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const handleMarkAsSent = async () => {
@@ -919,7 +1161,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
       return;
     }
 
-    if (!window.confirm(`Seçili misafirlerin toplam ${commentsToReset.length} yorumuna ait tüm analiz verilerini (Duygu Analizi, Derin Analiz, Aksiyonlar) veritabanından silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`)) {
+    if (!window.confirm(`Seçili misafirlerin toplam ${commentsToReset.length} yorumuna ait tüm analiz verilerini (Derin Analiz, Aksiyonlar) veritabanından silmek istediğinize emin misiniz? Bu işlem geri alınamaz.`)) {
       return;
     }
 
@@ -992,62 +1234,110 @@ ${JSON.stringify(selectedGuests.map(g => ({
     setIsGeneratingBulk(false);
   };
 
-  const handleSaveBulkPdf = async () => {
-    setIsGeneratingBulk(true);
-    try {
-      const htmlToImage = await import('html-to-image');
-      const { jsPDF } = await import('jspdf');
-      
-      const letters = document.querySelectorAll('.letter-container');
-      if (letters.length === 0) return;
+  const handlePrintBulkLetters = () => {
+    const letters = document.querySelectorAll('.letter-container');
+    if (letters.length === 0) return;
 
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4'
-      });
-
-      for (let i = 0; i < letters.length; i++) {
-        const letter = letters[i] as HTMLElement;
-        
-        // Pass the existing DOM element directly to avoid blank rendering issues.
-        // Use the 'style' option to force A4 dimensions during the internal cloning process.
-        const imgData = await htmlToImage.toJpeg(letter, {
-          quality: 1.0,
-          pixelRatio: 2,
-          backgroundColor: '#ffffff',
-          style: {
-            width: '794px', // A4 width at 96 DPI
-            minHeight: '1123px', // A4 height at 96 DPI
-            padding: '75px', // ~20mm margin
-            margin: '0',
-            border: 'none',
-            boxShadow: 'none',
-            transform: 'none',
-            boxSizing: 'border-box',
-            overflow: 'visible',
-            position: 'static'
-          }
-        });
-        
-        if (i > 0) {
-          pdf.addPage();
-        }
-        
-        const pdfWidth = 210;
-        const imgProps = pdf.getImageProperties(imgData);
-        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-        
-        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-      }
-
-      pdf.save(`Toplu_Mektuplar_${new Date().toISOString().split('T')[0]}.pdf`);
-    } catch (error) {
-      console.error("Error generating bulk PDF:", error);
-      alert("PDF oluşturulurken bir hata oluştu.");
-    } finally {
-      setIsGeneratingBulk(false);
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Lütfen açılır pencerelere (pop-up) izin verin.");
+      return;
     }
+
+    const pagesHtml = Array.from(letters).map(letter => `
+      <div class="page">
+        ${letter.innerHTML}
+      </div>
+    `).join('');
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Toplu Mektup Yazdır</title>
+          <meta charset="utf-8">
+          <style>
+            /* Reset */
+            html, body {
+              margin: 0;
+              padding: 0;
+              background: white;
+              width: 100%;
+              height: 100%;
+            }
+            
+            /* Tell the printer to use A4 paper and remove default browser margins */
+            @page { 
+              size: A4; 
+              margin: 0; 
+            }
+
+            /* The A4 Page Container */
+            .page { 
+              width: 210mm;
+              min-height: 297mm;
+              padding: 45mm 25mm 25mm 25mm;
+              margin: 0 auto;
+              box-sizing: border-box;
+              page-break-after: always;
+              
+              /* Typography */
+              font-family: 'Georgia', serif; 
+              color: black;
+              font-size: 12pt;
+              line-height: 1.6;
+              text-align: justify;
+              text-justify: inter-word;
+            }
+
+            /* Enforce strict word wrapping rules */
+            .page * {
+              box-sizing: border-box;
+              max-width: 100%;
+              /* 1. Allow text to wrap normally at spaces */
+              white-space: normal !important;
+              /* 2. Break words ONLY if a single word is longer than the entire line */
+              overflow-wrap: break-word !important;
+              word-wrap: break-word !important;
+              /* 3. NEVER break a normal word in the middle */
+              word-break: normal !important;
+              /* 4. Disable automatic hyphenation */
+              hyphens: none !important;
+            }
+
+            /* Paragraph spacing */
+            p { 
+              margin-top: 0 !important; 
+              margin-bottom: 1.2em !important; 
+              text-align: justify !important; 
+            }
+
+            /* Preserve Quill alignments */
+            .ql-align-center { text-align: center !important; }
+            .ql-align-right { text-align: right !important; }
+            .ql-align-justify { text-align: justify !important; }
+
+            h1, h2, h3 { margin-top: 1em; margin-bottom: 0.5em; font-weight: bold; }
+            ul, ol { margin-bottom: 1em; padding-left: 2em; }
+            strong { font-weight: bold; }
+            em { font-style: italic; }
+            u { text-decoration: underline; }
+          </style>
+        </head>
+        <body>
+          ${pagesHtml}
+          <script>
+            window.onload = () => {
+              setTimeout(() => {
+                window.print();
+                window.close();
+              }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   const handleMarkBulkAsSent = async () => {
@@ -1093,7 +1383,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
   });
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-slate-50 overflow-hidden">
+    <div className="flex-1 flex flex-col h-full bg-slate-50">
       {/* Tab Navigation & Top Bar */}
       <div className="bg-white border-b border-slate-200 px-6 pt-4 shrink-0 flex justify-between items-end">
         <div className="flex gap-6">
@@ -1158,12 +1448,15 @@ ${JSON.stringify(selectedGuests.map(g => ({
               <option value="all">Tümü</option>
               <option value="has_comment">Yorum Yapanlar</option>
               <option value="no_comment">Sessiz Misafirler (Yorum Yok)</option>
-              <option value="analyzed">Duygu Analizi Yapılanlar</option>
+              <option value="analyzed">Derin Analiz Yapılanlar</option>
               <option value="high_sentiment">Yüksek Memnuniyet (Score &gt; %80)</option>
               <option value="low_sentiment">Riskli Misafirler (Score &lt; %50)</option>
               <option value="survey_sent">Anket/Mektup Gönderilenler</option>
               <option value="no_welcome_call">Welcome Call Yapılmayanlar</option>
-              <option value="has_request">Talebi Olan Misafirler</option>
+              <option value="welcome_call_done">Welcome Call Yapılanlar (Tümü)</option>
+              <option value="welcome_call_all_good">↳ Memnun Olanlar</option>
+              <option value="welcome_call_has_request">↳ Talebi Olanlar</option>
+              <option value="welcome_call_no_answer">↳ Ulaşılamayanlar</option>
             </select>
           </div>
           <button 
@@ -1194,14 +1487,6 @@ ${JSON.stringify(selectedGuests.map(g => ({
           {selectedGuestIds.length > 0 && (
             <div className="flex items-center gap-2">
               <button
-                onClick={() => openBulkAnalysisModal('sentiment')}
-                disabled={isBulkResetting}
-                className="px-4 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4 disabled:opacity-50"
-              >
-                <Brain size={14} />
-                Toplu Duygu Analizi
-              </button>
-              <button
                 onClick={() => openBulkAnalysisModal('deep')}
                 disabled={isBulkResetting}
                 className="px-4 py-1.5 bg-purple-50 text-purple-700 hover:bg-purple-100 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4 disabled:opacity-50"
@@ -1230,6 +1515,14 @@ ${JSON.stringify(selectedGuests.map(g => ({
                 Toplu Şablon Üret ({selectedGuestIds.length} Misafir)
               </button>
               <button
+                onClick={() => setIsBulkLabelModalOpen(true)}
+                disabled={isBulkResetting}
+                className="px-4 py-1.5 bg-blue-100 text-blue-700 hover:bg-blue-200 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4 disabled:opacity-50"
+              >
+                <LayoutGrid size={14} />
+                Toplu Etiket ({selectedGuestIds.length} Misafir)
+              </button>
+              <button
                 onClick={handleGenerateBulkReport}
                 disabled={isBulkResetting}
                 className="px-4 py-1.5 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 text-xs font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 animate-in fade-in slide-in-from-right-4 disabled:opacity-50"
@@ -1244,7 +1537,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
 
       {/* Table Container - Data Grid */}
       <div className="flex-1 overflow-auto p-6">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden min-w-[1000px]">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm min-w-[1000px]">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider sticky top-0 z-10">
@@ -1494,7 +1787,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                               animate={{ height: "auto", opacity: 1 }}
                               exit={{ height: 0, opacity: 0 }}
                               transition={{ duration: 0.2, ease: "easeInOut" }}
-                              className="overflow-hidden"
+                              className=""
                             >
                               <div className="p-6 border-t border-b border-slate-200 shadow-inner bg-slate-50">
                                 <div className="w-[95%] max-w-[1600px] mx-auto">
@@ -1613,7 +1906,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                                     </h5>
                                     
                                     {/* Action Dropdown Container */}
-                                    <div className="relative action-dropdown-container">
+                                    <div className="relative action-dropdown-container z-50">
                                       <button
                                         onClick={() => openActionDropdown(guest)}
                                         className="flex items-center gap-1.5 px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors text-sm font-medium shadow-md"
@@ -1624,7 +1917,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
 
                                       {/* Dropdown Menu */}
                                       {isActionDropdownOpen && selectedGuestForAction?.RESID === guest.RESID && (
-                                        <div className="absolute right-0 mt-2 w-72 bg-white rounded-xl shadow-2xl border border-slate-100 z-50 animate-in fade-in zoom-in duration-200 origin-top-right">
+                                        <div className="absolute right-0 top-full mt-2 w-72 bg-white rounded-xl shadow-2xl border border-slate-100 z-[100] animate-in fade-in zoom-in duration-200 origin-top-right">
                                           <div className="p-2 space-y-1">
                                             <button 
                                               onClick={() => {
@@ -1698,7 +1991,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                                     <TimelineView 
                                       actions={guest.timelineActions || []} 
                                       onDeleteAction={handleDeleteAction} 
-                                      onPreviewAction={setSelectedPreviewAction} 
+                                      onPreviewAction={(action) => setSelectedPreviewAction({ action, guest })} 
                                     />
                                   </div>
                                 </div>
@@ -1789,12 +2082,12 @@ ${JSON.stringify(selectedGuests.map(g => ({
                 İptal
               </button>
               <button
-                onClick={handleSavePdf}
+                onClick={handlePrintLetter}
                 disabled={isGeneratingLetter || !generatedLetterContent}
                 className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
               >
-                <LogOut size={16} className="rotate-90" />
-                PDF Kaydet
+                <Printer size={16} />
+                Yazdır
               </button>
               <button
                 onClick={handleMarkAsSent}
@@ -1888,9 +2181,6 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   {bulkGeneratedLetters.map((item, index) => (
                     <React.Fragment key={index}>
                       <div className="letter-container bg-white p-12 shadow-sm border border-slate-200 min-h-[297mm] relative ql-snow">
-                        <div className="absolute top-4 right-4 text-xs font-sans font-bold text-slate-400 border border-slate-200 px-2 py-1 rounded bg-slate-50 z-10">
-                          {item.guest.GUESTNAMES} ({item.guest.NATIONALITY || 'Bilinmiyor'})
-                        </div>
                         <div 
                           className="ql-editor font-serif text-slate-800 text-base"
                           style={{ minHeight: '100%', padding: 0 }}
@@ -1919,12 +2209,12 @@ ${JSON.stringify(selectedGuests.map(g => ({
                 İptal
               </button>
               <button
-                onClick={handleSaveBulkPdf}
+                onClick={handlePrintBulkLetters}
                 disabled={bulkGeneratedLetters.length === 0}
                 className="px-4 py-2 bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 text-sm font-medium rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
               >
-                <LogOut size={16} className="rotate-90" />
-                Tümünü PDF Olarak Kaydet
+                <Printer size={16} />
+                Tümünü Yazdır
               </button>
               <button
                 onClick={handleMarkBulkAsSent}
@@ -1961,7 +2251,11 @@ ${JSON.stringify(selectedGuests.map(g => ({
                 Hoş Geldiniz Araması
               </h3>
               <button 
-                onClick={() => setIsWelcomeCallModalOpen(false)}
+                onClick={() => {
+                  setIsWelcomeCallModalOpen(false);
+                  setSelectedText('');
+                  setSelectionPosition(null);
+                }}
                 className="p-2 text-slate-400 hover:bg-slate-200 hover:text-slate-600 rounded-lg transition-colors"
               >
                 <LogOut size={20} />
@@ -1984,7 +2278,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                 <label className="block text-sm font-semibold text-slate-700">Arama Durumu</label>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div 
-                    onClick={() => setCallStatus('answered_all_good')}
+                    onClick={() => setCallStatus(callStatus === 'answered_all_good' ? 'not_called' : 'answered_all_good')}
                     className={`cursor-pointer p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center gap-2 ${
                       callStatus === 'answered_all_good' 
                         ? 'border-emerald-500 bg-emerald-50 text-emerald-700' 
@@ -1998,7 +2292,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   </div>
 
                   <div 
-                    onClick={() => setCallStatus('answered_has_request')}
+                    onClick={() => setCallStatus(callStatus === 'answered_has_request' ? 'not_called' : 'answered_has_request')}
                     className={`cursor-pointer p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center gap-2 ${
                       callStatus === 'answered_has_request' 
                         ? 'border-amber-500 bg-amber-50 text-amber-700' 
@@ -2012,7 +2306,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   </div>
 
                   <div 
-                    onClick={() => setCallStatus('no_answer')}
+                    onClick={() => setCallStatus(callStatus === 'no_answer' ? 'not_called' : 'no_answer')}
                     className={`cursor-pointer p-4 rounded-xl border-2 transition-all flex flex-col items-center text-center gap-2 ${
                       callStatus === 'no_answer' 
                         ? 'border-red-500 bg-red-50 text-red-700' 
@@ -2028,21 +2322,54 @@ ${JSON.stringify(selectedGuests.map(g => ({
               </div>
 
               {callStatus === 'answered_has_request' && (
-                <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-2 relative">
                   <label className="block text-sm font-semibold text-slate-700">Talepler / Notlar</label>
                   <textarea
                     value={callNotes}
                     onChange={(e) => setCallNotes(e.target.value)}
+                    onMouseUp={handleTextSelection}
+                    onKeyUp={handleTextSelection}
                     placeholder="Misafirin ekstra havlu, geç çıkış vb. taleplerini buraya yazın..."
                     className="w-full h-32 px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none"
                   />
+
+                  {/* Floating WhatsApp Button */}
+                  <AnimatePresence>
+                    {selectedText && selectionPosition && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                        style={{
+                          position: 'fixed',
+                          left: selectionPosition.x,
+                          top: selectionPosition.y,
+                          transform: 'translate(-50%, -100%)',
+                          zIndex: 9999
+                        }}
+                        className="bg-slate-900 text-white shadow-xl rounded-xl p-1.5 flex items-center gap-1 border border-slate-700"
+                      >
+                        <button
+                          onClick={() => setIsWhatsAppModalOpen(true)}
+                          className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors"
+                        >
+                          <MessageSquare size={14} className="text-emerald-400" />
+                          WhatsApp ile İlet
+                        </button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
                 </div>
               )}
             </div>
             
             <div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
               <button
-                onClick={() => setIsWelcomeCallModalOpen(false)}
+                onClick={() => {
+                  setIsWelcomeCallModalOpen(false);
+                  setSelectedText('');
+                  setSelectionPosition(null);
+                }}
                 className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
               >
                 İptal
@@ -2064,6 +2391,82 @@ ${JSON.stringify(selectedGuests.map(g => ({
         </motion.div>
       )}
       </AnimatePresence>
+
+      {/* WhatsApp Routing Modal */}
+      {isWhatsAppModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50">
+              <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+                <MessageSquare size={18} className="text-emerald-500" />
+                WhatsApp Departman Yönlendirme
+              </h3>
+              <button onClick={() => setIsWhatsAppModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-6">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">İlgili Departman / Kişi</label>
+                <select
+                  value={selectedContactId}
+                  onChange={(e) => setSelectedContactId(e.target.value)}
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all bg-white text-sm"
+                >
+                  <option value="">Seçiniz...</option>
+                  {phonebook.map(contact => (
+                    <option key={contact.id} value={contact.id}>
+                      {contact.department} - {contact.fullName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedText && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Vurgulanan Metin</label>
+                  <div className="p-3 bg-emerald-50 border border-emerald-100 rounded-xl text-emerald-900 text-sm italic">
+                    "{selectedText}"
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Mesaj Önizleme</label>
+                <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono whitespace-pre-wrap text-slate-600">
+                  {`🚨 *Misafir Talebi (${
+                    selectedPreviewAction?.action 
+                      ? (selectedPreviewAction.action.type === 'welcome_call' ? 'Hoş Geldiniz Araması' :
+                         selectedPreviewAction.action.type === 'manual' ? 'Manuel Not' :
+                         selectedPreviewAction.action.type === 'ai_letter' ? 'AI Mektup' :
+                         selectedPreviewAction.action.type === 'template' ? 'Şablon Mektup' :
+                         selectedPreviewAction.action.type === 'elektra' ? 'Elektra Yorumu' : 'İçerik Önizleme')
+                      : 'Hoş Geldiniz Araması'
+                  })* 🚨\n*Oda:* ${(selectedPreviewAction?.guest || selectedGuestForCall)?.ROOMNO || 'N/A'}\n*Misafir:* ${(selectedPreviewAction?.guest || selectedGuestForCall)?.GUESTNAMES || 'Misafir'}\n*Departman:* ${phonebook.find(c => c.id === selectedContactId)?.department || '...'}\n\n📌 *Talep Detayı:*\n"_${selectedText || '...'}_"`}
+                </div>
+              </div>
+            </div>
+
+            <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
+              <button
+                onClick={() => setIsWhatsAppModalOpen(false)}
+                className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900"
+              >
+                İptal
+              </button>
+              <button
+                onClick={handleSendWhatsApp}
+                disabled={!selectedContactId}
+                className="px-6 py-2 text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                <Send size={16} />
+                Gönder ve Kaydet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* AI Letter Modal */}
       {isAILetterModalOpen && (
@@ -2300,17 +2703,55 @@ ${JSON.stringify(selectedGuests.map(g => ({
                 <FileText size={18} className="text-blue-500" />
                 İçerik Önizleme
               </h3>
-              <button onClick={() => setSelectedPreviewAction(null)} className="text-slate-400 hover:text-slate-600 p-1">
+              <button 
+                onClick={() => {
+                  setSelectedPreviewAction(null);
+                  setSelectedText('');
+                  setSelectionPosition(null);
+                }} 
+                className="text-slate-400 hover:text-slate-600 p-1"
+              >
                 <X size={20} />
               </button>
             </div>
             <div className="flex-1 overflow-y-auto p-6">
-              <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 ql-snow">
+              <div 
+                className="bg-slate-50 p-6 rounded-xl border border-slate-200 ql-snow relative"
+                onMouseUp={handleTextSelection}
+                onKeyUp={handleTextSelection}
+              >
                 <div 
                   className="ql-editor text-slate-700 text-sm"
                   style={{ padding: 0 }}
-                  dangerouslySetInnerHTML={{ __html: formatHtmlContent(selectedPreviewAction.content) }} 
+                  dangerouslySetInnerHTML={{ __html: formatHtmlContent(selectedPreviewAction.action.content) }} 
                 />
+                
+                {/* Floating WhatsApp Button */}
+                <AnimatePresence>
+                  {selectedText && selectionPosition && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                      style={{
+                        position: 'fixed',
+                        left: selectionPosition.x,
+                        top: selectionPosition.y,
+                        transform: 'translate(-50%, -100%)',
+                        zIndex: 9999
+                      }}
+                      className="bg-slate-900 text-white shadow-xl rounded-xl p-1.5 flex items-center gap-1 border border-slate-700"
+                    >
+                      <button
+                        onClick={() => setIsWhatsAppModalOpen(true)}
+                        className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        <MessageSquare size={14} className="text-emerald-400" />
+                        WhatsApp ile İlet
+                      </button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
           </div>
@@ -2410,13 +2851,66 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   </button>
                   <button
                     onClick={() => {
-                      // PDF indirme mantığı buraya eklenebilir
-                      alert("PDF indirme özelliği yakında eklenecektir.");
+                      const printWindow = window.open('', '_blank');
+                      if (!printWindow) {
+                        alert("Lütfen açılır pencerelere (pop-up) izin verin.");
+                        return;
+                      }
+                      
+                      const formattedContent = bulkGeneratedReport.replace(/\n/g, '<br>');
+
+                      printWindow.document.write(`
+                        <html>
+                          <head>
+                            <title>Yönetim Raporu</title>
+                            <style>
+                              @page { size: A4; margin: 0; }
+                              body { 
+                                font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; 
+                                margin: 0; 
+                                padding: 20mm; 
+                                color: #1e293b;
+                                line-height: 1.6;
+                                font-size: 12pt;
+                                -webkit-print-color-adjust: exact;
+                                print-color-adjust: exact;
+                              }
+                              .document-container {
+                                width: 170mm; /* 210mm - 40mm margins */
+                                min-height: 257mm; /* 297mm - 40mm margins */
+                                margin: 0 auto;
+                                background: white;
+                              }
+                              h1, h2, h3 { color: #0f172a; margin-top: 1.5em; margin-bottom: 0.5em; }
+                              p { margin-bottom: 1em; }
+                              ul, ol { margin-bottom: 1em; padding-left: 2em; }
+                              li { margin-bottom: 0.5em; }
+                              strong { font-weight: 600; }
+                            </style>
+                          </head>
+                          <body>
+                            <div class="document-container">
+                              ${formattedContent}
+                            </div>
+                            <script>
+                              window.onload = function() {
+                                setTimeout(() => {
+                                  window.print();
+                                  setTimeout(() => {
+                                    window.close();
+                                  }, 500);
+                                }, 500);
+                              };
+                            </script>
+                          </body>
+                        </html>
+                      `);
+                      printWindow.document.close();
                     }}
                     className="px-6 py-2 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-colors flex items-center gap-2 shadow-sm"
                   >
-                    <Download size={18} />
-                    PDF İndir
+                    <Printer size={18} />
+                    Yazdır
                   </button>
                 </>
               )}
@@ -2425,6 +2919,13 @@ ${JSON.stringify(selectedGuests.map(g => ({
         </div>
       )}
 
+      {/* Bulk Label Modal */}
+      {isBulkLabelModalOpen && (
+        <BulkLabelModal
+          guests={processedData.filter(g => selectedGuestIds.includes(g.RESID))}
+          onClose={() => setIsBulkLabelModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
