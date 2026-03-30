@@ -522,6 +522,7 @@ ${JSON.stringify(timelineActions.map(a => ({
     const isHtml = /<\/?[a-z][\s\S]*>/i.test(content);
     const htmlContent = isHtml ? content : content.replace(/\n/g, '<br>');
 
+    // SIFIR HİLE, SADECE SAF HTML VE TARAYICININ DOĞAL METİN MOTORU
     printWindow.document.write(`
       <!DOCTYPE html>
       <html lang="tr">
@@ -529,87 +530,57 @@ ${JSON.stringify(timelineActions.map(a => ({
           <title>${title}</title>
           <meta charset="utf-8">
           <style>
-            /* 1. YAZICI KAĞIT AYARLARI */
+            /* 1. Sadece Kağıt Boyutunu Söylüyoruz */
             @page {
               size: A4 portrait;
               margin: 20mm;
             }
             
-            /* 2. EKRAN İÇİN TEMEL SIFIRLAMA */
+            /* 2. Sayfa Gövdesi: Hiçbir Flex veya Sabit Genişlik Yok! */
             body {
-              margin: 0;
-              padding: 0;
-              background-color: #525659; /* Ekranda PDF okuyucu hissi veren koyu arka plan */
-              display: flex;
-              justify-content: center;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
-
-            /* 3. A4 SAYFA SİMÜLASYONU */
-            .a4-container {
-              width: 210mm;
-              min-height: 297mm;
-              background: white;
-              box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-              margin: 20mm 0;
-              padding: 20mm; 
-              box-sizing: border-box;
               font-family: 'Times New Roman', Times, serif;
               font-size: 12pt;
               line-height: 1.5;
               color: black;
+              background: white;
+              margin: 0;
+              padding: 0;
             }
 
-            /* 4. YAZDIRMA (PRINT) ESNASINDA DEVREYE GİREN KURŞUNGEÇİRMEZ KURALLAR */
-            @media print {
-              body { 
-                background-color: white !important; 
-                display: block !important; /* DİKKAT: Flexbox Bug'ını ezen satır! */
-                margin: 0 !important;
-                padding: 0 !important;
-              }
-              .a4-container {
-                margin: 0 !important;
-                padding: 0 !important; 
-                box-shadow: none !important;
-                width: auto !important; /* Tarayıcının genişliği bozmasını engeller */
-                max-width: 100% !important;
-                min-height: auto !important;
-              }
+            /* 3. Metin Akışı: Tarayıcının 30 Yıllık Kusursuz Standartı */
+            .document-content {
+              width: 100%;
+              text-align: left !important;
             }
 
-            /* 5. KELİME KESİLMESİNİ VE YASLAMAYI %100 ENGELLEYEN MOTOR */
-            .a4-container, .a4-container * {
-              text-align: left !important; /* İki yana yaslamayı İPTAL ET, kesinlikle sola yasla */
-              text-justify: none !important; 
-              word-break: normal !important; /* Kelimeyi harfinden ASLA kesme */
-              word-wrap: normal !important; /* Kesmeyi engelle */
-              overflow-wrap: normal !important; /* Eski hatalı break-word komutunu normal'e çevirdik */
-              white-space: pre-wrap !important; /* HTML içindeki boşlukları ve enter'ları koru */
-              hyphens: none !important; /* Otomatik tirelemeyi yasakla */
+            /* Quill Editörden Gelen Hatalı Stilleri Eziyoruz */
+            .document-content * {
+              text-align: left !important; /* ASLA iki yana yaslama, daima sola yasla */
+              white-space: normal !important; /* Yazı kağıdın sonuna gelince DOĞAL OLARAK alt satıra geçsin */
+              word-break: normal !important; /* Kelimeyi ASLA ortasından bölme */
+              overflow-wrap: break-word !important; /* Sadece upuzun bir link gelirse sayfadan taşmasın diye böl */
             }
 
-            /* 6. PARAGRAF VE FORMATLAR */
-            .a4-container p { 
-              margin: 0 0 12pt 0 !important; 
-              padding: 0 !important; 
+            /* 4. Paragraf Boşlukları */
+            .document-content p {
+              margin: 0 0 12pt 0;
             }
-            .a4-container ul, .a4-container ol { margin-top: 0; margin-bottom: 12pt; padding-left: 24pt; }
-            .a4-container li { margin-bottom: 4pt; }
-            .a4-container h1, .a4-container h2, .a4-container h3 { margin: 16pt 0 8pt 0; font-weight: bold; }
-            .a4-container strong, .a4-container b { font-weight: bold; }
-            .a4-container em, .a4-container i { font-style: italic; }
+            .document-content ul, .document-content ol { 
+              margin: 0 0 12pt 0; 
+              padding-left: 24pt; 
+            }
           </style>
         </head>
         <body>
-          <div class="a4-container">
+          <div class="document-content">
             ${htmlContent}
           </div>
           <script>
+            // Tarayıcının metni doğal akışında çizmesi için kısa bir süre tanıyoruz
             window.onload = () => {
               setTimeout(() => {
                 window.print();
+                window.close(); // İşlem bitince o sekmeyi otomatik kapat, kalabalık yapmasın
               }, 300);
             };
           </script>
