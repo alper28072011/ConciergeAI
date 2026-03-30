@@ -521,30 +521,32 @@ ${JSON.stringify(timelineActions.map(a => ({
     // 2. İçeriği ve Kusursuz CSS'i İçeren HTML String'i Oluştur
     const htmlString = `
       <div id="pdf-content-wrapper" style="
-        width: 210mm; /* A4 Genişliği */
-        min-height: 297mm; /* A4 Yüksekliği */
-        padding: 25mm 20mm; /* Kurumsal Kenar Boşlukları (Margin) */
+        width: 800px; /* Sabit piksel genişliği, html2canvas'ın taşmayı engellemesi için şarttır */
+        padding: 80px; /* Kenar boşlukları */
         box-sizing: border-box;
         font-family: 'Times New Roman', Times, serif;
-        font-size: 12pt;
-        line-height: 1.6;
+        font-size: 16px;
+        line-height: 1.5;
         color: #000;
         background: #fff;
       ">
         <style>
-          /* Tüm metinleri zorunlu sola yasla ve kelime kesilmelerini engelle */
+          /* Metinlerin A4 sınırları içinde kalmasını ve doğal şekilde alt satıra geçmesini sağlar */
           #pdf-content-wrapper, #pdf-content-wrapper * {
             text-align: left !important;
-            white-space: pre-wrap !important; /* Boşlukları ve satır atlamalarını korur */
-            word-wrap: normal !important; /* Sadece kelime bittikten sonra alt satıra geçer */
-            overflow-wrap: normal !important; /* Kelimenin ortasından kopmasını yasaklar */
-            word-break: normal !important; /* Rastgele kesilmeleri iptal eder */
-            hyphens: none !important; /* Otomatik tireleme ve hecelemeyi kapatır */
+            white-space: normal !important; /* Metnin kutu sınırında otomatik alt satıra geçmesini sağlar */
+            word-wrap: break-word !important; /* Çok uzun kelimeleri taşmaması için böler */
+            overflow-wrap: break-word !important;
+            word-break: normal !important; /* Normal kelimeleri bölmez, boşluklardan alt satıra atar */
+            hyphens: none !important;
+            max-width: 100% !important;
+            box-sizing: border-box !important;
           }
           
           /* Paragraf boşluklarını belirginleştir */
           #pdf-content-wrapper p {
             margin: 0 0 1.2em 0 !important;
+            width: 100% !important;
           }
           
           /* Başlık ayarları */
@@ -552,12 +554,14 @@ ${JSON.stringify(timelineActions.map(a => ({
             margin: 1.5em 0 0.5em 0 !important;
             font-weight: bold !important;
             line-height: 1.3 !important;
+            width: 100% !important;
           }
 
           /* Liste ayarları */
           #pdf-content-wrapper ul, #pdf-content-wrapper ol {
             margin: 0 0 1.2em 0 !important;
             padding-left: 2em !important;
+            width: 100% !important;
           }
           #pdf-content-wrapper li {
             margin-bottom: 0.5em !important;
@@ -572,7 +576,7 @@ ${JSON.stringify(timelineActions.map(a => ({
       margin:       0, // Kenar boşluklarını yukarıdaki div'e verdik
       filename:     `${fileName}.pdf`,
       image:        { type: 'jpeg', quality: 1 },
-      html2canvas:  { scale: 2, useCORS: true, scrollY: 0 }, // scrollY: 0 sayfa kaydırıldığında oluşan beyaz sayfa hatasını çözer
+      html2canvas:  { scale: 2, useCORS: true, scrollY: 0, windowWidth: 800 }, // windowWidth ile sanal ekran genişliğini sabitliyoruz
       jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
     };
 
