@@ -1106,7 +1106,9 @@ ${JSON.stringify(timelineActions.map(a => ({
                       </button>
                     </div>
                   </div>
-                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+                  {/* Kelime kesilmesini (word-break) engelleyen ve sola yaslayan özel wrapper */}
+                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden" 
+                       style={{ textAlign: 'left', wordBreak: 'normal', overflowWrap: 'break-word', whiteSpace: 'pre-wrap' }}>
                     <ReactQuill
                       theme="snow"
                       value={showTranslation ? translatedLetter : generatedLetter}
@@ -1114,7 +1116,7 @@ ${JSON.stringify(timelineActions.map(a => ({
                         if (showTranslation) setTranslatedLetter(val);
                         else setGeneratedLetter(val);
                       }}
-                      className="h-[300px] pb-12 border-none font-serif"
+                      className="h-[300px] pb-12 border-none font-serif [&_.ql-editor]:text-left [&_.ql-editor]:break-words [&_.ql-editor_*]:!word-break-normal"
                       modules={{
                         toolbar: [
                           [{ 'header': [1, 2, 3, false] }],
