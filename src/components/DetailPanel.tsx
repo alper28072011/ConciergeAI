@@ -8,7 +8,6 @@ import { deleteCommentData } from '../services/firebaseService';
 import { generateAIContent, analyzeCommentComprehensive } from '../services/aiService';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
-import html2pdf from 'html2pdf.js';
 import { TimelineView } from './TimelineView';
 import { ActionEntryModal } from './ActionEntryModal';
 
@@ -513,75 +512,100 @@ ${JSON.stringify(timelineActions.map(a => ({
     window.print();
   };
 
-  const handleDownloadPDF = (content: string, fileName: string = 'Misafir_Mektubu') => {
-    // 1. Metin HTML değilse düzelt (Quill'den HTML gelecektir ama sigorta)
+  const handleDocumentOutput = (content: string, title: string = 'Misafir Mektubu') => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert("Lütfen açılır pencerelere (pop-up) izin verin.");
+      return;
+    }
+
     const isHtml = /<\/?[a-z][\s\S]*>/i.test(content);
     const htmlContent = isHtml ? content : content.replace(/\n/g, '<br>');
 
-    // 2. İçeriği ve Kusursuz CSS'i İçeren HTML String'i Oluştur
-    const htmlString = `
-      <div id="pdf-content-wrapper" style="
-        width: 800px; /* Sabit piksel genişliği, html2canvas'ın taşmayı engellemesi için şarttır */
-        padding: 80px; /* Kenar boşlukları */
-        box-sizing: border-box;
-        font-family: 'Times New Roman', Times, serif;
-        font-size: 16px;
-        line-height: 1.5;
-        color: #000;
-        background: #fff;
-      ">
-        <style>
-          /* Metinlerin A4 sınırları içinde kalmasını ve doğal şekilde alt satıra geçmesini sağlar */
-          #pdf-content-wrapper, #pdf-content-wrapper * {
-            text-align: left !important;
-            white-space: normal !important; /* Metnin kutu sınırında otomatik alt satıra geçmesini sağlar */
-            word-wrap: break-word !important; /* Çok uzun kelimeleri taşmaması için böler */
-            overflow-wrap: break-word !important;
-            word-break: normal !important; /* Normal kelimeleri bölmez, boşluklardan alt satıra atar */
-            hyphens: none !important;
-            max-width: 100% !important;
-            box-sizing: border-box !important;
-          }
-          
-          /* Paragraf boşluklarını belirginleştir */
-          #pdf-content-wrapper p {
-            margin: 0 0 1.2em 0 !important;
-            width: 100% !important;
-          }
-          
-          /* Başlık ayarları */
-          #pdf-content-wrapper h1, #pdf-content-wrapper h2, #pdf-content-wrapper h3 {
-            margin: 1.5em 0 0.5em 0 !important;
-            font-weight: bold !important;
-            line-height: 1.3 !important;
-            width: 100% !important;
-          }
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html lang="tr">
+        <head>
+          <title>${title}</title>
+          <meta charset="utf-8">
+          <style>
+            /* 1. YAZICI KAĞIT AYARLARI */
+            @page {
+              size: A4 portrait;
+              margin: 20mm; /* A4 Standart Kenar Boşluğu */
+            }
+            
+            /* 2. TEMEL SIFIRLAMA */
+            body {
+              margin: 0;
+              padding: 0;
+              background-color: #f8fafc; /* Ekranda görünürken arka plan */
+              display: flex;
+              justify-content: center;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
 
-          /* Liste ayarları */
-          #pdf-content-wrapper ul, #pdf-content-wrapper ol {
-            margin: 0 0 1.2em 0 !important;
-            padding-left: 2em !important;
-            width: 100% !important;
-          }
-          #pdf-content-wrapper li {
-            margin-bottom: 0.5em !important;
-          }
-        </style>
-        ${htmlContent}
-      </div>
-    `;
+            /* 3. A4 SAYFA SİMÜLASYONU (WORD GÖRÜNÜMÜ) */
+            .a4-container {
+              width: 210mm;
+              min-height: 297mm;
+              background: white;
+              box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+              margin: 20mm 0;
+              padding: 20mm; /* İç kenar boşlukları */
+              box-sizing: border-box;
+              font-family: 'Times New Roman', Times, serif;
+              font-size: 12pt;
+              line-height: 1.6;
+              color: black;
+            }
 
-    // 3. PDF Ayarları (Yüksek Kalite Render Motoru)
-    const opt = {
-      margin:       0, // Kenar boşluklarını yukarıdaki div'e verdik
-      filename:     `${fileName}.pdf`,
-      image:        { type: 'jpeg', quality: 1 },
-      html2canvas:  { scale: 2, useCORS: true, scrollY: 0, windowWidth: 800 }, // windowWidth ile sanal ekran genişliğini sabitliyoruz
-      jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
-    };
+            /* YAZDIRMA ANINDA GÖLGELERİ VE BOŞLUKLARI SİL (Sadece Kağıt Kalsın) */
+            @media print {
+              body { background-color: white; }
+              .a4-container {
+                margin: 0;
+                padding: 0; /* @page margin halledecek */
+                box-shadow: none;
+                width: 100%;
+                min-height: auto;
+              }
+            }
 
-    // 4. Üret ve İndir (html2pdf string'i kendi sanal DOM'unda işler)
-    html2pdf().set(opt).from(htmlString).save();
+            /* 4. HAYAT KURTARAN METİN AKIŞI VE YASLAMA KURALLARI */
+            .a4-container, .a4-container * {
+              text-align: left !important; /* İki yana yaslamayı KESİNLİKLE İPTAL ET (Sola yasla) */
+              word-break: normal !important; /* Kelimeyi ASLA ortasından kesme */
+              overflow-wrap: break-word !important; /* Çok uzun, boşluksuz metin gelirse satır atlat */
+              white-space: normal !important; /* Doğal paragraf akışına izin ver */
+            }
+
+            /* 5. PARAGRAF VE LİSTE FORMATLARI (Quill Editor Uyumlu) */
+            .a4-container p { margin: 0 0 12pt 0; padding: 0; }
+            .a4-container ul, .a4-container ol { margin-top: 0; margin-bottom: 12pt; padding-left: 24pt; }
+            .a4-container li { margin-bottom: 4pt; }
+            .a4-container h1, .a4-container h2, .a4-container h3 { margin: 16pt 0 8pt 0; font-weight: bold; }
+            .a4-container strong, .a4-container b { font-weight: bold; }
+            .a4-container em, .a4-container i { font-style: italic; }
+          </style>
+        </head>
+        <body>
+          <div class="a4-container">
+            ${htmlContent}
+          </div>
+          <script>
+            window.onload = () => {
+              // Tasarımın tam oturması için 300ms bekle ve yazdır/PDF kaydet diyaloğunu aç
+              setTimeout(() => {
+                window.print();
+              }, 300);
+            };
+          </script>
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
   };
 
   if (!comment) {
@@ -974,11 +998,11 @@ ${JSON.stringify(timelineActions.map(a => ({
                     Kopyala
                   </button>
                   <button
-                    onClick={() => handleDownloadPDF(generatedReport, `Vaka_Raporu_${comment?.ROOMNO || 'Bilinmiyor'}`)}
+                    onClick={() => handleDocumentOutput(generatedReport, `Vaka_Raporu_${comment?.ROOMNO || 'Bilinmiyor'}`)}
                     className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
                   >
-                    <Download size={16} />
-                    PDF İndir
+                    <Printer size={14} />
+                    Yazdır / PDF Kaydet
                   </button>
                   <button 
                     onClick={async () => {
@@ -1066,10 +1090,10 @@ ${JSON.stringify(timelineActions.map(a => ({
                       </button>
                       
                       <button 
-                        onClick={() => handleDownloadPDF(showTranslation ? translatedLetter : generatedLetter, `Misafir_Mektubu_${comment?.ROOMNO || 'Misafir'}`)}
+                        onClick={() => handleDocumentOutput(showTranslation ? translatedLetter : generatedLetter, `Misafir_Mektubu_${comment?.ROOMNO || 'Misafir'}`)}
                         className="flex items-center gap-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition-colors"
                       >
-                        <Download size={14} /> PDF İndir
+                        <Printer size={14} /> Yazdır / PDF Kaydet
                       </button>
                       <button 
                         onClick={async () => {
@@ -1320,10 +1344,10 @@ ${JSON.stringify(timelineActions.map(a => ({
                   </button>
                 )}
                 <button 
-                  onClick={() => handleDownloadPDF(selectedPreviewAction.content || '', 'Döküman_Önizleme')}
+                  onClick={() => handleDocumentOutput(selectedPreviewAction.content || '', 'Döküman_Önizleme')}
                   className="flex items-center gap-2 text-sm font-medium bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
                 >
-                  <Download size={14} /> PDF İndir
+                  <Printer size={14} /> Yazdır / PDF Kaydet
                 </button>
                 <button 
                   onClick={() => {
