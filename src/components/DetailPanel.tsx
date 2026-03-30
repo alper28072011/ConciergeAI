@@ -532,57 +532,69 @@ ${JSON.stringify(timelineActions.map(a => ({
             /* 1. YAZICI KAĞIT AYARLARI */
             @page {
               size: A4 portrait;
-              margin: 20mm; /* A4 Standart Kenar Boşluğu */
+              margin: 20mm;
             }
             
-            /* 2. TEMEL SIFIRLAMA */
+            /* 2. EKRAN İÇİN TEMEL SIFIRLAMA */
             body {
               margin: 0;
               padding: 0;
-              background-color: #f8fafc; /* Ekranda görünürken arka plan */
+              background-color: #525659; /* Ekranda PDF okuyucu hissi veren koyu arka plan */
               display: flex;
               justify-content: center;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
             }
 
-            /* 3. A4 SAYFA SİMÜLASYONU (WORD GÖRÜNÜMÜ) */
+            /* 3. A4 SAYFA SİMÜLASYONU */
             .a4-container {
               width: 210mm;
               min-height: 297mm;
               background: white;
-              box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+              box-shadow: 0 4px 20px rgba(0,0,0,0.5);
               margin: 20mm 0;
-              padding: 20mm; /* İç kenar boşlukları */
+              padding: 20mm; 
               box-sizing: border-box;
               font-family: 'Times New Roman', Times, serif;
               font-size: 12pt;
-              line-height: 1.6;
+              line-height: 1.5;
               color: black;
             }
 
-            /* YAZDIRMA ANINDA GÖLGELERİ VE BOŞLUKLARI SİL (Sadece Kağıt Kalsın) */
+            /* 4. YAZDIRMA (PRINT) ESNASINDA DEVREYE GİREN KURŞUNGEÇİRMEZ KURALLAR */
             @media print {
-              body { background-color: white; }
+              body { 
+                background-color: white !important; 
+                display: block !important; /* DİKKAT: Flexbox Bug'ını ezen satır! */
+                margin: 0 !important;
+                padding: 0 !important;
+              }
               .a4-container {
-                margin: 0;
-                padding: 0; /* @page margin halledecek */
-                box-shadow: none;
-                width: 100%;
-                min-height: auto;
+                margin: 0 !important;
+                padding: 0 !important; 
+                box-shadow: none !important;
+                width: auto !important; /* Tarayıcının genişliği bozmasını engeller */
+                max-width: 100% !important;
+                min-height: auto !important;
               }
             }
 
-            /* 4. HAYAT KURTARAN METİN AKIŞI VE YASLAMA KURALLARI */
+            /* 5. KELİME KESİLMESİNİ VE YASLAMAYI %100 ENGELLEYEN MOTOR */
             .a4-container, .a4-container * {
-              text-align: left !important; /* İki yana yaslamayı KESİNLİKLE İPTAL ET (Sola yasla) */
-              word-break: normal !important; /* Kelimeyi ASLA ortasından kesme */
-              overflow-wrap: break-word !important; /* Çok uzun, boşluksuz metin gelirse satır atlat */
-              white-space: normal !important; /* Doğal paragraf akışına izin ver */
+              text-align: left !important; /* İki yana yaslamayı İPTAL ET, kesinlikle sola yasla */
+              text-justify: none !important; 
+              word-break: normal !important; /* Kelimeyi harfinden ASLA kesme */
+              word-wrap: normal !important; /* Kesmeyi engelle */
+              overflow-wrap: normal !important; /* Eski hatalı break-word komutunu normal'e çevirdik */
+              white-space: pre-wrap !important; /* HTML içindeki boşlukları ve enter'ları koru */
+              hyphens: none !important; /* Otomatik tirelemeyi yasakla */
             }
 
-            /* 5. PARAGRAF VE LİSTE FORMATLARI (Quill Editor Uyumlu) */
-            .a4-container p { margin: 0 0 12pt 0; padding: 0; }
+            /* 6. PARAGRAF VE FORMATLAR */
+            .a4-container p { 
+              margin: 0 0 12pt 0 !important; 
+              padding: 0 !important; 
+            }
             .a4-container ul, .a4-container ol { margin-top: 0; margin-bottom: 12pt; padding-left: 24pt; }
             .a4-container li { margin-bottom: 4pt; }
             .a4-container h1, .a4-container h2, .a4-container h3 { margin: 16pt 0 8pt 0; font-weight: bold; }
@@ -596,7 +608,6 @@ ${JSON.stringify(timelineActions.map(a => ({
           </div>
           <script>
             window.onload = () => {
-              // Tasarımın tam oturması için 300ms bekle ve yazdır/PDF kaydet diyaloğunu aç
               setTimeout(() => {
                 window.print();
               }, 300);
