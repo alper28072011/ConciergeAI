@@ -919,63 +919,60 @@ CRITICAL INSTRUCTIONS:
       return;
     }
 
+    // EUREKA: METİN TEMİZLEME MOTORU (Kırılmaz boşlukları yok et)
+    let safeContent = element.innerHTML;
+    safeContent = safeContent.replace(/&nbsp;/g, ' '); 
+    safeContent = safeContent.replace(/\u200B/g, ''); 
+    safeContent = safeContent.replace(/&shy;/g, '');
+
     printWindow.document.write(`
       <!DOCTYPE html>
-      <html>
+      <html lang="tr">
         <head>
           <title>Mektup Yazdır</title>
+          <meta charset="utf-8">
           <style>
-            @page { 
-              size: A4; 
-              margin: 45mm 25mm 25mm 25mm; 
+            /* A4 Sayfa Boyutu ve Marginler */
+            @page {
+              size: A4 portrait;
+              margin: 70mm 20mm 20mm 20mm; /* Üstten 70mm, sağdan/alttan/soldan 20mm boşluk */
             }
-            body { 
-              margin: 0; 
-              padding: 0; 
-              font-family: 'Georgia', serif; 
-              background: white;
-              color: #1a1a1a;
+            
+            body {
+              font-family: 'Times New Roman', Times, serif;
               font-size: 12pt;
               line-height: 1.6;
-              text-align: justify;
+              color: black;
+              background: white;
+              margin: 0;
+              padding: 0;
             }
-            .page { 
-              page-break-after: always;
+
+            /* FİZİKSEL DUVAR: A4 genişliği (210mm) - Sağ/Sol Boşluk (40mm) = 170mm Net Yazı Alanı */
+            .document-content {
+              width: 170mm !important;
+              max-width: 170mm !important;
+              margin: 0 auto;
             }
-            /* Force natural text wrapping and prevent arbitrary word breaks */
-            .page * {
-              max-width: 100%;
-              word-break: normal !important;
-              overflow-wrap: normal !important;
+
+            /* Kelime Kesilmelerini %100 Engelleyen ve Sola Yaslayan Motor */
+            .document-content * {
+              text-align: left !important;
+              white-space: pre-wrap !important;
               word-wrap: normal !important;
-              white-space: normal !important;
+              overflow-wrap: normal !important;
+              word-break: normal !important;
               hyphens: none !important;
             }
-            /* Preserve Quill formatting */
-            .ql-align-center { text-align: center !important; }
-            .ql-align-right { text-align: right !important; }
-            .ql-align-justify { text-align: justify !important; }
-            p { margin-bottom: 1.2em; margin-top: 0; text-align: justify; }
-            h1, h2, h3 { margin-top: 1em; margin-bottom: 0.5em; font-weight: bold; }
-            ul, ol { margin-bottom: 1em; padding-left: 2em; }
-            ul { list-style-type: disc; }
-            ol { list-style-type: decimal; }
-            strong { font-weight: 600; }
-            em { font-style: italic; }
-            u { text-decoration: underline; }
+            p { margin-bottom: 12pt; }
           </style>
         </head>
         <body>
-          <div class="page">
-            ${element.innerHTML}
+          <div class="document-content">
+            ${safeContent}
           </div>
           <script>
-            window.onload = () => {
-              setTimeout(() => {
-                window.print();
-                window.close();
-              }, 300);
-            };
+            window.onload = () => { setTimeout(() => { window.print(); window.close(); }, 300); };
           </script>
         </body>
       </html>
@@ -1244,95 +1241,72 @@ ${JSON.stringify(selectedGuests.map(g => ({
       return;
     }
 
-    const pagesHtml = Array.from(letters).map(letter => `
-      <div class="page">
-        ${letter.innerHTML}
-      </div>
-    `).join('');
+    // TOPLU VERİ TEMİZLEME VE HTML BİRLEŞTİRME MOTORU
+    const pagesHtml = Array.from(letters).map(letter => {
+      let safeContent = letter.innerHTML;
+      safeContent = safeContent.replace(/&nbsp;/g, ' '); // Kırılmaz boşlukları sarılabilir boşluğa çevir
+      safeContent = safeContent.replace(/\u200B/g, ''); 
+      safeContent = safeContent.replace(/&shy;/g, ''); 
+      
+      return `
+        <div class="document-content">
+          ${safeContent}
+        </div>
+      `;
+    }).join('');
 
     printWindow.document.write(`
       <!DOCTYPE html>
-      <html>
+      <html lang="tr">
         <head>
           <title>Toplu Mektup Yazdır</title>
           <meta charset="utf-8">
           <style>
-            /* Reset */
-            html, body {
-              margin: 0;
-              padding: 0;
-              background: white;
-              width: 100%;
-              height: 100%;
+            /* A4 Sayfa Boyutu ve Marginler */
+            @page {
+              size: A4 portrait;
+              margin: 70mm 20mm 20mm 20mm; /* Üstten 70mm, sağdan/alttan/soldan 20mm boşluk */
             }
             
-            /* Tell the printer to use A4 paper and remove default browser margins */
-            @page { 
-              size: A4; 
-              margin: 0; 
-            }
-
-            /* The A4 Page Container */
-            .page { 
-              width: 210mm;
-              min-height: 297mm;
-              padding: 45mm 25mm 25mm 25mm;
-              margin: 0 auto;
-              box-sizing: border-box;
-              page-break-after: always;
-              
-              /* Typography */
-              font-family: 'Georgia', serif; 
-              color: black;
+            body {
+              font-family: 'Times New Roman', Times, serif;
               font-size: 12pt;
               line-height: 1.6;
-              text-align: justify;
-              text-justify: inter-word;
+              color: black;
+              background: white;
+              margin: 0;
+              padding: 0;
             }
 
-            /* Enforce strict word wrapping rules */
-            .page * {
-              box-sizing: border-box;
-              max-width: 100%;
-              /* 1. Allow text to wrap normally at spaces */
-              white-space: normal !important;
-              /* 2. Break words ONLY if a single word is longer than the entire line */
-              overflow-wrap: break-word !important;
-              word-wrap: break-word !important;
-              /* 3. NEVER break a normal word in the middle */
+            /* SAYFALANDIRMA (Page Break) VE A4 FİZİKSEL DUVARI */
+            .document-content {
+              width: 170mm !important;
+              max-width: 170mm !important;
+              margin: 0 auto;
+              page-break-after: always; /* Her mektup yeni bir A4 sayfasından başlasın */
+            }
+
+            /* Son mektuptan sonra boş kağıt çıkmasını engelle */
+            .document-content:last-child {
+              page-break-after: auto;
+            }
+
+            /* Kelime Kesilmelerini Engelleyen Sola Yaslı Kurallar */
+            .document-content * {
+              text-align: left !important;
+              white-space: pre-wrap !important;
+              word-wrap: normal !important;
+              overflow-wrap: normal !important;
               word-break: normal !important;
-              /* 4. Disable automatic hyphenation */
               hyphens: none !important;
             }
-
-            /* Paragraph spacing */
-            p { 
-              margin-top: 0 !important; 
-              margin-bottom: 1.2em !important; 
-              text-align: justify !important; 
-            }
-
-            /* Preserve Quill alignments */
-            .ql-align-center { text-align: center !important; }
-            .ql-align-right { text-align: right !important; }
-            .ql-align-justify { text-align: justify !important; }
-
-            h1, h2, h3 { margin-top: 1em; margin-bottom: 0.5em; font-weight: bold; }
-            ul, ol { margin-bottom: 1em; padding-left: 2em; }
-            strong { font-weight: bold; }
-            em { font-style: italic; }
-            u { text-decoration: underline; }
+            p { margin-bottom: 12pt; }
           </style>
         </head>
         <body>
           ${pagesHtml}
           <script>
-            window.onload = () => {
-              setTimeout(() => {
-                window.print();
-                window.close();
-              }, 500);
-            };
+            window.onload = () => { setTimeout(() => { window.print(); window.close(); }, 300); };
           </script>
         </body>
       </html>
