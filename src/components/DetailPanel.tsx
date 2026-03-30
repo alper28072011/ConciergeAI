@@ -519,10 +519,17 @@ ${JSON.stringify(timelineActions.map(a => ({
       return;
     }
 
-    const isHtml = /<\/?[a-z][\s\S]*>/i.test(content);
-    const htmlContent = isHtml ? content : content.replace(/\n/g, '<br>');
+    // 1. EUREKA: METİN TEMİZLEME MOTORU (Tüm Sorunun Kaynağı Burasıydı)
+    // ReactQuill ve AI'dan gelen "Kırılmaz Boşlukları" ve "Gizli Karakterleri" yokediyoruz.
+    // Bu sayede tarayıcı uzun bir cümleyi "tek bir dev kelime" sanmaktan kurtuluyor.
+    let safeContent = content.replace(/&nbsp;/g, ' '); // Kırılmaz boşlukları, sarılabilir normal boşluğa çevir!
+    safeContent = safeContent.replace(/\u200B/g, ''); // Sıfır genişlikli (zero-width) gizli karakterleri temizle
+    safeContent = safeContent.replace(/&shy;/g, ''); // Gizli heceleme tirelerini temizle
 
-    // SIFIR HİLE, SADECE SAF HTML VE TARAYICININ DOĞAL METİN MOTORU
+    const isHtml = /<\/?[a-z][\s\S]*>/i.test(safeContent);
+    const htmlContent = isHtml ? safeContent : safeContent.replace(/\n/g, '<br>');
+
+    // 2. TERTEMİZ, KATI A4 ŞABLONU
     printWindow.document.write(`
       <!DOCTYPE html>
       <html lang="tr">
@@ -530,45 +537,40 @@ ${JSON.stringify(timelineActions.map(a => ({
           <title>${title}</title>
           <meta charset="utf-8">
           <style>
-            /* 1. Sadece Kağıt Boyutunu Söylüyoruz */
+            /* A4 Sayfa Boyutu ve Marginler */
             @page {
               size: A4 portrait;
-              margin: 20mm;
+              margin: 70mm 20mm 20mm 20mm; /* Üstten 70mm, sağdan/alttan/soldan 20mm boşluk */
             }
             
-            /* 2. Sayfa Gövdesi: Hiçbir Flex veya Sabit Genişlik Yok! */
             body {
               font-family: 'Times New Roman', Times, serif;
               font-size: 12pt;
-              line-height: 1.5;
+              line-height: 1.6;
               color: black;
               background: white;
               margin: 0;
               padding: 0;
             }
 
-            /* 3. Metin Akışı: Tarayıcının 30 Yıllık Kusursuz Standartı */
+            /* FİZİKSEL DUVAR: A4 genişliği (210mm) - Sağ/Sol Boşluk (40mm) = 170mm Net Yazı Alanı */
             .document-content {
-              width: 100%;
-              text-align: left !important;
+              width: 170mm !important;
+              max-width: 170mm !important;
+              margin: 0 auto;
             }
 
-            /* Quill Editörden Gelen Hatalı Stilleri Eziyoruz */
+            /* SOLA YASLAMA VE DOĞAL KELİME AKIŞI */
             .document-content * {
-              text-align: left !important; /* ASLA iki yana yaslama, daima sola yasla */
-              white-space: normal !important; /* Yazı kağıdın sonuna gelince DOĞAL OLARAK alt satıra geçsin */
-              word-break: normal !important; /* Kelimeyi ASLA ortasından bölme */
-              overflow-wrap: break-word !important; /* Sadece upuzun bir link gelirse sayfadan taşmasın diye böl */
+              text-align: left !important; /* İki yana yaslama (justify) KESİNLİKLE İPTAL */
+              white-space: pre-wrap !important; /* Enter tuşlarını korur, satır sonuna gelince doğalca alt satıra sarar */
+              word-wrap: normal !important; /* Kelime bölmeyi iptal et */
+              overflow-wrap: normal !important; /* Taşan kelimeyi kesme */
+              word-break: normal !important; /* Kelime bütünlüğünü ASLA bozma */
+              hyphens: none !important; /* Otomatik tireleme yasak */
             }
 
-            /* 4. Paragraf Boşlukları */
-            .document-content p {
-              margin: 0 0 12pt 0;
-            }
-            .document-content ul, .document-content ol { 
-              margin: 0 0 12pt 0; 
-              padding-left: 24pt; 
-            }
+            p { margin-bottom: 12pt; }
           </style>
         </head>
         <body>
@@ -576,11 +578,10 @@ ${JSON.stringify(timelineActions.map(a => ({
             ${htmlContent}
           </div>
           <script>
-            // Tarayıcının metni doğal akışında çizmesi için kısa bir süre tanıyoruz
             window.onload = () => {
               setTimeout(() => {
                 window.print();
-                window.close(); // İşlem bitince o sekmeyi otomatik kapat, kalabalık yapmasın
+                window.close();
               }, 300);
             };
           </script>
