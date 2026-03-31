@@ -1,3 +1,23 @@
+export interface CaseAction {
+  id: string;
+  date: string; // ISO string
+  actionText: string;
+  performedBy: string; // İşlemi yapan kullanıcının adı/maili
+  type?: 'note' | 'letter' | 'status_change';
+  content?: string; // HTML content for letters
+}
+
+export interface CaseTracker {
+  id: string;
+  roomNumber: string;
+  guestName: string;
+  description: string; // Vakanın ilk tanımı (Örn: Klima Arızası)
+  status: 'open' | 'resolved';
+  createdAt: string;
+  createdBy: string;
+  actions: CaseAction[];
+}
+
 export interface UnifiedTopicAnalysis {
   mainCategory: string;
   subCategory: string;
@@ -154,7 +174,7 @@ export interface PhonebookContact {
   createdAt: string;
 }
 
-export type AIFeature = 'sentimentAnalysis' | 'letterGeneration' | 'translation' | 'deepAnalysis' | 'templateTranslation' | 'dashboardReport' | 'bulkReport';
+export type AIFeature = 'sentimentAnalysis' | 'letterGeneration' | 'translation' | 'deepAnalysis' | 'templateTranslation' | 'dashboardReport' | 'bulkReport' | 'caseSummary' | 'caseLetter';
 
 export interface ApiSettings {
   baseUrl: string;

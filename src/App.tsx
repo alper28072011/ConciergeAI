@@ -14,12 +14,23 @@ import { GuestListModule } from './modules/GuestListModule';
 import { TemplateModule } from './modules/TemplateModule';
 import { DashboardModule } from './modules/DashboardModule';
 import { PhonebookModule } from './modules/PhonebookModule';
+import { CaseTrackingModule } from './modules/CaseTrackingModule';
 import { motion, AnimatePresence } from 'framer-motion';
-import { BarChart3, PhoneCall } from 'lucide-react';
+import { BarChart3, PhoneCall, Briefcase } from 'lucide-react';
+import { listenToCases } from './services/firebaseService';
 
 export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [activeModule, setActiveModule] = useState<'dashboard' | 'letters' | 'guestlist' | 'templates' | 'phonebook'>('dashboard');
+  const [activeModule, setActiveModule] = useState<'dashboard' | 'letters' | 'guestlist' | 'templates' | 'phonebook' | 'cases'>('dashboard');
+  const [openCasesCount, setOpenCasesCount] = useState(0);
+
+  useEffect(() => {
+    const unsubscribe = listenToCases((cases) => {
+      const openCases = cases.filter(c => c.status === 'open');
+      setOpenCasesCount(openCases.length);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -142,6 +153,24 @@ export default function App() {
               Mektup Asistanı
             </span>
           </button>
+
+          <button 
+            onClick={() => setActiveModule('cases')}
+            className={`p-3 rounded-xl transition-all duration-200 group relative flex justify-center ${activeModule === 'cases' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-900/20' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'}`}
+            title="Vaka Takibi"
+          >
+            <div className="relative">
+              <Briefcase size={22} strokeWidth={activeModule === 'cases' ? 2.5 : 2} />
+              {openCasesCount > 0 && (
+                <span className="absolute -top-2 -right-2 bg-red-500 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-slate-950">
+                  {openCasesCount}
+                </span>
+              )}
+            </div>
+            <span className="absolute left-14 bg-slate-800 text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-50">
+              Vaka Takibi
+            </span>
+          </button>
           
           <button 
             onClick={() => setActiveModule('guestlist')}
@@ -197,7 +226,7 @@ export default function App() {
         <header className="bg-white h-16 flex items-center justify-between px-8 shrink-0 border-b border-slate-200 z-10">
           <div>
             <h1 className="font-bold text-xl text-slate-800 tracking-tight">
-              {activeModule === 'dashboard' ? 'İş Zekası & Analitik' : activeModule === 'letters' ? 'Misafir Mektubu Asistanı' : activeModule === 'guestlist' ? 'Misafir Listesi' : activeModule === 'templates' ? 'Şablon Yöneticisi' : 'Telefon Defteri & Departmanlar'}
+              {activeModule === 'dashboard' ? 'İş Zekası & Analitik' : activeModule === 'letters' ? 'Misafir Mektubu Asistanı' : activeModule === 'guestlist' ? 'Misafir Listesi' : activeModule === 'templates' ? 'Şablon Yöneticisi' : activeModule === 'cases' ? 'Vaka Takibi' : 'Telefon Defteri & Departmanlar'}
             </h1>
             <p className="text-xs text-slate-500 font-medium mt-0.5">Otel CRM Platformu</p>
           </div>
@@ -230,6 +259,7 @@ export default function App() {
               {activeModule === 'guestlist' && <GuestListModule />}
               {activeModule === 'templates' && <TemplateModule />}
               {activeModule === 'phonebook' && <PhonebookModule />}
+              {activeModule === 'cases' && <CaseTrackingModule />}
             </motion.div>
           </AnimatePresence>
         </main>
