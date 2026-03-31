@@ -476,7 +476,7 @@ CRITICAL INSTRUCTIONS:
 
       // Inject Required Fields for Guest
       if (guestPayload.Select && Array.isArray(guestPayload.Select)) {
-        const requiredFields = ['RESGUESTID', 'CONTACTGUESTID', 'CONTACTPHONE', 'CONTACTEMAIL', 'ROOMNO', 'CHECKIN', 'CHECKOUT', 'GUESTNAMES', 'RESID', 'NATIONALITY'];
+        const requiredFields = ['RESGUESTID', 'CONTACTGUESTID', 'CONTACTPHONE', 'CONTACTEMAIL', 'ROOMNO', 'CHECKIN', 'CHECKOUT', 'GUESTNAMES', 'RESID', 'NATIONALITY', 'ARRIVALTIME', 'DEPARTURETIME'];
         requiredFields.forEach(field => {
           if (!guestPayload.Select.includes(field)) guestPayload.Select.push(field);
         });
@@ -919,7 +919,7 @@ CRITICAL INSTRUCTIONS:
       return;
     }
 
-    // EUREKA: METİN TEMİZLEME MOTORU (Kırılmaz boşlukları yok et)
+    // VERİ TEMİZLEME (Kırılmaz Boşlukları ve Gizli Karakterleri Temizle)
     let safeContent = element.innerHTML;
     safeContent = safeContent.replace(/&nbsp;/g, ' '); 
     safeContent = safeContent.replace(/\u200B/g, ''); 
@@ -932,39 +932,36 @@ CRITICAL INSTRUCTIONS:
           <title>Mektup Yazdır</title>
           <meta charset="utf-8">
           <style>
-            /* A4 Sayfa Boyutu ve Marginler */
-            @page {
-              size: A4 portrait;
-              margin: 70mm 20mm 20mm 20mm; /* Üstten 70mm, sağdan/alttan/soldan 20mm boşluk */
-            }
+            @page { size: A4 portrait; margin: 20mm; }
+            body { font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1.5; color: black; background: white; margin: 0; padding: 0; }
             
-            body {
-              font-family: 'Times New Roman', Times, serif;
-              font-size: 12pt;
-              line-height: 1.6;
-              color: black;
-              background: white;
-              margin: 0;
-              padding: 0;
-            }
-
-            /* FİZİKSEL DUVAR: A4 genişliği (210mm) - Sağ/Sol Boşluk (40mm) = 170mm Net Yazı Alanı */
-            .document-content {
-              width: 170mm !important;
-              max-width: 170mm !important;
-              margin: 0 auto;
-            }
-
-            /* Kelime Kesilmelerini %100 Engelleyen ve Sola Yaslayan Motor */
+            .document-content { width: 170mm !important; max-width: 170mm !important; margin: 0 auto; text-align: left; }
+            
+            /* Kelime Kesilmesini Engelle (Ama Hizalamaya Dokunma!) */
             .document-content * {
-              text-align: left !important;
-              white-space: pre-wrap !important;
-              word-wrap: normal !important;
-              overflow-wrap: normal !important;
+              word-wrap: break-word !important;
+              overflow-wrap: break-word !important;
               word-break: normal !important;
               hyphens: none !important;
             }
-            p { margin-bottom: 12pt; }
+
+            /* DEV BOŞLUKLARI ENGELLEYEN PARAGRAF MOTORU */
+            .document-content p {
+              margin: 0 !important; /* Quill her satırı P yaptığı için margin SIFIR olmalı */
+              padding: 0 !important;
+              min-height: 1em; /* Boş enter satırlarının kaybolmaması için */
+            }
+
+            /* REACT QUILL HİZALAMA (ALIGN) DESTEĞİ */
+            .ql-align-center { text-align: center !important; }
+            .ql-align-right { text-align: right !important; }
+            .ql-align-justify { text-align: justify !important; }
+
+            /* Liste ve Girinti Desteği */
+            .ql-indent-1 { padding-left: 3em !important; }
+            .ql-indent-2 { padding-left: 6em !important; }
+            .document-content ul, .document-content ol { margin: 0 !important; padding-left: 24pt !important; }
+            .document-content li { margin-bottom: 2pt !important; }
           </style>
         </head>
         <body>
@@ -1241,10 +1238,9 @@ ${JSON.stringify(selectedGuests.map(g => ({
       return;
     }
 
-    // TOPLU VERİ TEMİZLEME VE HTML BİRLEŞTİRME MOTORU
     const pagesHtml = Array.from(letters).map(letter => {
       let safeContent = letter.innerHTML;
-      safeContent = safeContent.replace(/&nbsp;/g, ' '); // Kırılmaz boşlukları sarılabilir boşluğa çevir
+      safeContent = safeContent.replace(/&nbsp;/g, ' '); 
       safeContent = safeContent.replace(/\u200B/g, ''); 
       safeContent = safeContent.replace(/&shy;/g, ''); 
       
@@ -1262,45 +1258,43 @@ ${JSON.stringify(selectedGuests.map(g => ({
           <title>Toplu Mektup Yazdır</title>
           <meta charset="utf-8">
           <style>
-            /* A4 Sayfa Boyutu ve Marginler */
-            @page {
-              size: A4 portrait;
-              margin: 70mm 20mm 20mm 20mm; /* Üstten 70mm, sağdan/alttan/soldan 20mm boşluk */
-            }
-            
-            body {
-              font-family: 'Times New Roman', Times, serif;
-              font-size: 12pt;
-              line-height: 1.6;
-              color: black;
-              background: white;
-              margin: 0;
-              padding: 0;
-            }
+            @page { size: A4 portrait; margin: 20mm; }
+            body { font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1.5; color: black; background: white; margin: 0; padding: 0; }
 
-            /* SAYFALANDIRMA (Page Break) VE A4 FİZİKSEL DUVARI */
             .document-content {
               width: 170mm !important;
               max-width: 170mm !important;
               margin: 0 auto;
-              page-break-after: always; /* Her mektup yeni bir A4 sayfasından başlasın */
+              page-break-after: always;
+              text-align: left; /* Varsayılan Sola Yaslı */
             }
+            .document-content:last-child { page-break-after: auto; }
 
-            /* Son mektuptan sonra boş kağıt çıkmasını engelle */
-            .document-content:last-child {
-              page-break-after: auto;
-            }
-
-            /* Kelime Kesilmelerini Engelleyen Sola Yaslı Kurallar */
+            /* Kelime Kesilmesini Engelle */
             .document-content * {
-              text-align: left !important;
-              white-space: pre-wrap !important;
-              word-wrap: normal !important;
-              overflow-wrap: normal !important;
+              word-wrap: break-word !important;
+              overflow-wrap: break-word !important;
               word-break: normal !important;
               hyphens: none !important;
             }
-            p { margin-bottom: 12pt; }
+
+            /* DEV BOŞLUKLARI ENGELLEYEN PARAGRAF MOTORU */
+            .document-content p {
+              margin: 0 !important;
+              padding: 0 !important;
+              min-height: 1em;
+            }
+
+            /* REACT QUILL HİZALAMA (ALIGN) DESTEĞİ */
+            .ql-align-center { text-align: center !important; }
+            .ql-align-right { text-align: right !important; }
+            .ql-align-justify { text-align: justify !important; }
+
+            /* Liste ve Girinti Desteği */
+            .ql-indent-1 { padding-left: 3em !important; }
+            .ql-indent-2 { padding-left: 6em !important; }
+            .document-content ul, .document-content ol { margin: 0 !important; padding-left: 24pt !important; }
+            .document-content li { margin-bottom: 2pt !important; }
           </style>
         </head>
         <body>
@@ -1744,8 +1738,28 @@ ${JSON.stringify(selectedGuests.map(g => ({
                         {guest.ROOMNO}
                       </td>
                       <td className="p-4 text-sm text-slate-700 font-medium">{guest.GUESTNAMES}</td>
-                      <td className="p-4 text-sm text-slate-500">{formatTRDate(guest.CHECKIN)}</td>
-                      <td className="p-4 text-sm text-slate-500">{formatTRDate(guest.CHECKOUT)}</td>
+                      <td className="p-4 text-sm text-slate-500">
+                        <div className="flex flex-col">
+                          <span>{formatTRDate(guest.CHECKIN)}</span>
+                          {guest.ARRIVALTIME && guest.ARRIVALTIME.length >= 16 && (
+                            <span className="text-xs text-slate-400 flex items-center gap-1 mt-0.5" title="Giriş Saati">
+                              <Clock size={12} />
+                              {guest.ARRIVALTIME.substring(11, 16)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4 text-sm text-slate-500">
+                        <div className="flex flex-col">
+                          <span>{formatTRDate(guest.CHECKOUT)}</span>
+                          {activeTab === 'checkout' && guest.DEPARTURETIME && guest.DEPARTURETIME.length >= 16 && (
+                            <span className="text-xs text-slate-400 flex items-center gap-1 mt-0.5" title="Çıkış Saati">
+                              <Clock size={12} />
+                              {guest.DEPARTURETIME.substring(11, 16)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="p-4 text-sm text-slate-600">{guest.AGENCY || '-'}</td>
                       <td className="p-4 text-sm text-slate-600">{guest.ROOMTYPE}</td>
                       <td className="p-4 text-sm text-slate-600 font-medium">
@@ -1771,7 +1785,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                                   Rezervasyon Detayları
                                 </h4>
                               </div>
-                              <div className="grid grid-cols-4 gap-6 mb-6 text-sm">
+                              <div className="grid grid-cols-6 gap-6 mb-6 text-sm">
                                 <div>
                                   <span className="block text-xs text-slate-400 uppercase tracking-wider mb-1">Rezervasyon ID</span>
                                   <span className="font-mono text-slate-700">{guest.RESID}</span>
@@ -1788,6 +1802,20 @@ ${JSON.stringify(selectedGuests.map(g => ({
                                   <span className="block text-xs text-slate-400 uppercase tracking-wider mb-1">Uyruk</span>
                                   <span className="text-slate-700 font-medium">{guest.NATIONALITY || '-'}</span>
                                 </div>
+                                <div>
+                                  <span className="block text-xs text-slate-400 uppercase tracking-wider mb-1">Giriş Saati</span>
+                                  <span className="text-slate-700 font-medium">
+                                    {guest.ARRIVALTIME && guest.ARRIVALTIME.length >= 16 ? guest.ARRIVALTIME.substring(11, 16) : '-'}
+                                  </span>
+                                </div>
+                                {activeTab === 'checkout' && (
+                                  <div>
+                                    <span className="block text-xs text-slate-400 uppercase tracking-wider mb-1">Çıkış Saati</span>
+                                    <span className="text-slate-700 font-medium">
+                                      {guest.DEPARTURETIME && guest.DEPARTURETIME.length >= 16 ? guest.DEPARTURETIME.substring(11, 16) : '-'}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
 
                               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 mt-8 pt-6 border-t border-slate-200">

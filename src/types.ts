@@ -123,6 +123,8 @@ export interface GuestData {
   CONTACTPHONE?: string;
   CONTACTEMAIL?: string;
   NATIONALITY?: string;
+  ARRIVALTIME?: string;
+  DEPARTURETIME?: string;
   hasComment?: boolean;
   comments?: GroupedCommentDetail[];
   surveySent?: boolean;
