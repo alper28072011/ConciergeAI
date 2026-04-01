@@ -706,9 +706,9 @@ export function DashboardModule() {
     if (exportOptions.includeComments) {
       const containerEl = clone.querySelector('#html-export-comments-container');
       if (containerEl) {
-        let allCommentsHtml = '';
+        let allCommentsHtml = '<div id="active-filter-bar" class="bg-indigo-50 border border-indigo-100 p-3 rounded-xl mb-4 flex justify-between items-center text-sm font-bold text-indigo-700 hidden"> <span id="active-filter-text">Filtre: Alman</span> <button id="clear-filter-btn" class="text-xs bg-white px-2 py-1 rounded shadow-sm hover:bg-indigo-100 cursor-pointer">Filtreyi Temizle</button> </div>';
         if (filteredAnalytics.length === 0) {
-          allCommentsHtml = '<div class="flex flex-col items-center justify-center py-20 text-slate-400 opacity-50"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><p class="text-xs font-bold">Yorum Bulunamadı</p></div>';
+          allCommentsHtml += '<div class="flex flex-col items-center justify-center py-20 text-slate-400 opacity-50"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><p class="text-xs font-bold">Yorum Bulunamadı</p></div>';
         } else {
           filteredAnalytics.forEach((commentData) => {
             const localText = commentData.comment || commentData.rawText || commentData.COMMENT || '';
@@ -738,11 +738,10 @@ export function DashboardModule() {
             }
 
             allCommentsHtml += `<div class="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group comment-card" 
-                data-category="${categories}" 
-                data-subcategory="${subCategories}" 
-                data-nationality="${nationality}" 
                 data-source="${source}" 
-                data-sentiment="${sentiment}"
+                data-nationality="${nationality}" 
+                data-overall-score="${commentData.overallScore || 0}"
+                data-topics="${subCategories}"
                 style="display: block;">
                 <div class="flex items-center justify-between mb-2">
                     <div class="flex items-center gap-2">
@@ -894,86 +893,57 @@ export function DashboardModule() {
             ` : ''}
 
             ${exportOptions.includeComments ? `
-            // --- B. Global Filtreleme Motoru ---
-            const clickableElements = document.querySelectorAll('.html-export-clickable');
-            const titleEl = document.getElementById('html-export-drilldown-title');
-            const clearBtn = document.getElementById('html-export-drilldown-clear');
-            const countEl = document.getElementById('html-export-comments-count');
+            // --- B. Omni-Filtre Motoru ---
+            const triggers = document.querySelectorAll('.interactive-filter-trigger');
             const commentCards = document.querySelectorAll('.comment-card');
+            const filterBar = document.getElementById('active-filter-bar');
+            const filterText = document.getElementById('active-filter-text');
+            const clearBtn = document.getElementById('clear-filter-btn');
 
-            function applyFilter(type, value) {
-                let visibleCount = 0;
+            // Görsel Geri Bildirim İçin CSS Ekleme
+            const style = document.createElement('style');
+            style.textContent = '.interactive-filter-trigger { cursor: pointer; transition: all 0.2s; } .interactive-filter-trigger:hover { background-color: #f1f5f9; transform: scale(1.01); }';
+            document.head.appendChild(style);
 
-                commentCards.forEach(card => {
-                    let isMatch = true;
-                    if (type !== 'all') {
-                        if (type === 'category') {
-                            const cats = card.getAttribute('data-category') || '';
-                            const subCats = card.getAttribute('data-subcategory') || '';
-                            isMatch = cats.split(',').includes(value) || subCats.split(',').includes(value);
-                        } else if (type === 'source') {
-                            isMatch = card.getAttribute('data-source') === value;
-                        } else if (type === 'nationality') {
-                            isMatch = card.getAttribute('data-nationality') === value;
-                        }
-                    }
-
-                    if (isMatch) {
-                        card.style.display = 'block';
-                        visibleCount++;
-                    } else {
-                        card.style.display = 'none';
-                    }
-                });
-
-                if (titleEl) {
-                    titleEl.textContent = type === 'all' ? 'Tüm Filtrelenmiş Yorumlar' : value + ' Analizi';
-                }
-                if (clearBtn) {
-                    if (type === 'all') {
-                        clearBtn.classList.add('hidden');
-                    } else {
-                        clearBtn.classList.remove('hidden');
-                    }
-                }
-                if (countEl) {
-                    countEl.textContent = 'Toplam ' + visibleCount + ' Yorum Listeleniyor';
-                }
-            }
-
-            clickableElements.forEach(el => {
-                el.addEventListener('click', function(e) {
-                    // Remove active highlight from all
-                    clickableElements.forEach(c => c.classList.remove('active-filter-highlight'));
-                    
-                    let target = e.target;
-                    while (target && target !== document.body && !target.classList.contains('html-export-clickable')) {
-                        target = target.parentElement;
-                    }
-                    if (!target) target = e.currentTarget;
-
-                    const type = target.getAttribute('data-filter-type');
-                    const value = target.getAttribute('data-filter-value');
-                    
-                    if (type && value) {
-                        target.classList.add('active-filter-highlight');
-                        applyFilter(type, value);
-                        
-                        // Scroll to comments section
-                        const commentsSection = document.getElementById('html-export-drilldown-title');
-                        if (commentsSection) {
-                            commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }
-                    }
-                });
-            });
+            // Tüm yorumları göster fonksiyonu
+            const resetFilters = () => {
+              commentCards.forEach(card => card.style.display = 'block');
+              if (filterBar) filterBar.style.display = 'none';
+            };
 
             if (clearBtn) {
-                clearBtn.addEventListener('click', function() {
-                    clickableElements.forEach(c => c.classList.remove('active-filter-highlight'));
-                    applyFilter('all', 'all');
-                });
+              clearBtn.addEventListener('click', resetFilters);
             }
+
+            // Filtreleme Motoru
+            triggers.forEach(trigger => {
+              trigger.addEventListener('click', (e) => {
+                const type = trigger.getAttribute('data-filter-type');
+                const value = trigger.getAttribute('data-filter-value');
+                if (!type || !value) return;
+
+                // UI Güncellemesi
+                if (filterText) filterText.textContent = \`Filtreleniyor: \${value}\`;
+                if (filterBar) filterBar.style.display = 'flex';
+
+                // Yorumları Eşleştir
+                commentCards.forEach(card => {
+                  let isMatch = false;
+                  if (type === 'topic') {
+                    const topics = card.getAttribute('data-topics') || '';
+                    isMatch = topics.includes(value);
+                  } else {
+                    const cardValue = card.getAttribute(\`data-\${type}\`);
+                    isMatch = (cardValue === value);
+                  }
+                  
+                  card.style.display = isMatch ? 'block' : 'none';
+                });
+                
+                // Mobilde veya uzun sayfada yorumların başına kaydır (smooth scroll)
+                if (filterBar) filterBar.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              });
+            });
             ` : ''}
         });
     </script>
@@ -1536,7 +1506,7 @@ export function DashboardModule() {
                   ].map((kpi, idx) => (
                     <div 
                       key={idx} 
-                      className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden group cursor-pointer hover:border-indigo-300 transition-all html-export-clickable"
+                      className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden group cursor-pointer hover:border-indigo-300 transition-all interactive-filter-trigger"
                       onClick={() => {
                         if (kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı') {
                           setDrillDownFilter({ type: 'category', value: kpi.value });
@@ -1782,8 +1752,8 @@ export function DashboardModule() {
                               <Cell 
                                 key={`cell-${index}`} 
                                 fill={entry.isSub ? '#818cf8' : '#4f46e5'} 
-                                className="html-export-clickable cursor-pointer"
-                                data-filter-type="category"
+                                className="interactive-filter-trigger cursor-pointer"
+                                data-filter-type="topic"
                                 data-filter-value={entry.name}
                               />
                             ))}
@@ -1806,8 +1776,8 @@ export function DashboardModule() {
                           {hierarchicalCategoryData.map((group, gIdx) => (
                             <React.Fragment key={gIdx}>
                               <tr 
-                                className="hover:bg-slate-50 transition-colors group cursor-pointer html-export-clickable"
-                                data-filter-type="category"
+                                className="hover:bg-slate-50 transition-colors group cursor-pointer interactive-filter-trigger"
+                                data-filter-type="topic"
                                 data-filter-value={group.name}
                                 onClick={() => setDrillDownFilter({ type: 'category', value: group.name })}
                               >
@@ -1849,9 +1819,9 @@ export function DashboardModule() {
                               {group.subCategories.map((sub, sIdx) => (
                                 <tr
                                   key={`${gIdx}-${sIdx}`}
-                                  className={`bg-slate-50/50 hover:bg-indigo-50 transition-colors cursor-pointer border-l-2 border-indigo-200 html-export-clickable subtopic-row ${showSubCategories ? '' : 'hidden'}`}
+                                  className={`bg-slate-50/50 hover:bg-indigo-50 transition-colors cursor-pointer border-l-2 border-indigo-200 interactive-filter-trigger subtopic-row ${showSubCategories ? '' : 'hidden'}`}
                                   data-parent-category={group.name}
-                                  data-filter-type="category"
+                                  data-filter-type="topic"
                                   data-filter-value={sub.subCategory}
                                   onClick={() => setDrillDownFilter({ type: 'category', value: sub.subCategory })}
                                 >
@@ -1925,7 +1895,7 @@ export function DashboardModule() {
                               <Cell 
                                 key={`cell-${index}`} 
                                 fill={COLORS[index % COLORS.length]} 
-                                className="html-export-clickable cursor-pointer"
+                                className="interactive-filter-trigger cursor-pointer"
                                 data-filter-type="source"
                                 data-filter-value={entry.name}
                               />
@@ -1966,7 +1936,7 @@ export function DashboardModule() {
                           {dashboardData.sourceAnalysis.map((item, idx) => (
                             <tr 
                               key={idx} 
-                              className="hover:bg-slate-50 transition-colors cursor-pointer html-export-clickable"
+                              className="hover:bg-slate-50 transition-colors cursor-pointer interactive-filter-trigger"
                               data-filter-type="source"
                               data-filter-value={item.name}
                               onClick={() => setDrillDownFilter({ type: 'source', value: item.name })}
@@ -2132,7 +2102,7 @@ export function DashboardModule() {
                               <Cell 
                                 key={`cell-${index}`} 
                                 fill={entry.avgScore >= 80 ? '#10b981' : entry.avgScore >= 60 ? '#4f46e5' : entry.avgScore >= 40 ? '#f59e0b' : '#ef4444'} 
-                                className="html-export-clickable cursor-pointer"
+                                className="interactive-filter-trigger cursor-pointer"
                                 data-filter-type="nationality"
                                 data-filter-value={entry.name}
                               />
@@ -2160,7 +2130,7 @@ export function DashboardModule() {
                             return (
                               <tr 
                                 key={idx} 
-                                className="hover:bg-slate-50 transition-colors cursor-pointer group html-export-clickable"
+                                className="hover:bg-slate-50 transition-colors cursor-pointer group interactive-filter-trigger"
                                 data-filter-type="nationality"
                                 data-filter-value={item.name}
                                 onClick={() => setDrillDownFilter({ type: 'nationality', value: item.name })}
@@ -2322,9 +2292,9 @@ export function DashboardModule() {
                             {dashboardData.mostMentioned.map((item, idx) => (
                               <tr 
                                 key={idx} 
-                                className={`hover:bg-slate-50/80 transition-all group cursor-pointer html-export-clickable ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllMostMentioned && idx >= 10) ? 'hidden' : ''}`}
+                                className={`hover:bg-slate-50/80 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllMostMentioned && idx >= 10) ? 'hidden' : ''}`}
                                 onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
-                                data-filter-type="category"
+                                data-filter-type="topic"
                                 data-filter-value={item.subCategory}
                               >
                                 <td className="py-4 px-4">
@@ -2453,9 +2423,9 @@ export function DashboardModule() {
                             {dashboardData.topPositive.map((item, idx) => (
                               <tr 
                                 key={idx} 
-                                className={`hover:bg-slate-50/80 transition-all group cursor-pointer html-export-clickable ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopPositive && idx >= 10) ? 'hidden' : ''}`}
+                                className={`hover:bg-slate-50/80 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopPositive && idx >= 10) ? 'hidden' : ''}`}
                                 onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
-                                data-filter-type="category"
+                                data-filter-type="topic"
                                 data-filter-value={item.subCategory}
                               >
                                 <td className="py-4 px-4">
@@ -2584,9 +2554,9 @@ export function DashboardModule() {
                             {dashboardData.topNegative.map((item, idx) => (
                               <tr 
                                 key={idx} 
-                                className={`hover:bg-rose-50/30 transition-all group cursor-pointer html-export-clickable ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopNegative && idx >= 10) ? 'hidden' : ''}`}
+                                className={`hover:bg-rose-50/30 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopNegative && idx >= 10) ? 'hidden' : ''}`}
                                 onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
-                                data-filter-type="category"
+                                data-filter-type="topic"
                                 data-filter-value={item.subCategory}
                               >
                                 <td className="py-4 px-4">
