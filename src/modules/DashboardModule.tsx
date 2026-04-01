@@ -702,6 +702,64 @@ export function DashboardModule() {
       }
     });
 
+    // --- INJECT ALL COMMENTS INTO HTML ---
+    if (exportOptions.includeComments) {
+      const containerEl = clone.querySelector('#html-export-comments-container');
+      if (containerEl) {
+        let allCommentsHtml = '';
+        if (filteredAnalytics.length === 0) {
+          allCommentsHtml = '<div class="flex flex-col items-center justify-center py-20 text-slate-400 opacity-50"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><p class="text-xs font-bold">Yorum Bulunamadı</p></div>';
+        } else {
+          filteredAnalytics.forEach((commentData) => {
+            const localText = commentData.comment || commentData.rawText || commentData.COMMENT || '';
+            const dateStr = new Date(commentData.date || commentData.createdAt).toLocaleDateString('tr-TR');
+            
+            // Generate data attributes
+            const categories = commentData.topics?.map(t => t.mainCategory).join(',') || '';
+            const subCategories = commentData.topics?.map(t => t.subCategory).join(',') || '';
+            const nationality = commentData.nationality || 'Bilinmiyor';
+            const source = commentData.source || 'Bilinmiyor';
+            const sentiment = commentData.sentiment || 'neutral';
+
+            let topicsHtml = '';
+            if (commentData.topics && commentData.topics.length > 0) {
+                topicsHtml = '<div class="mt-3 pt-3 border-t border-slate-50 flex flex-wrap gap-1">';
+                commentData.topics.forEach(topic => {
+                    topicsHtml += '<span class="text-[8px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase">' + topic.subCategory + '</span>';
+                });
+                topicsHtml += '</div>';
+            }
+
+            let textHtml = '';
+            if (localText) {
+                textHtml = '<p class="text-xs text-slate-700 leading-relaxed italic">"' + localText + '"</p>';
+            } else {
+                textHtml = '<p class="text-xs text-slate-400 italic animate-pulse">Metin senkronize ediliyor...</p>';
+            }
+
+            allCommentsHtml += `<div class="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group comment-card" 
+                data-category="${categories}" 
+                data-subcategory="${subCategories}" 
+                data-nationality="${nationality}" 
+                data-source="${source}" 
+                data-sentiment="${sentiment}"
+                style="display: block;">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">${source}</span>
+                        <span class="text-[10px] font-bold text-slate-400">${dateStr}</span>
+                    </div>
+                    <div class="text-xs font-black text-slate-600">${commentData.overallScore || 0}/100</div>
+                </div>
+                <div class="relative">${textHtml}</div>
+                ${topicsHtml}
+            </div>`;
+          });
+        }
+        containerEl.innerHTML = allCommentsHtml;
+      }
+    }
+
     const content = clone.innerHTML;
     
     const dateRangeLabel = dateFilter === 'today' ? 'Bugün' :
@@ -732,7 +790,12 @@ export function DashboardModule() {
         .recharts-label, .recharts-label-list text { font-size: 12px !important; font-weight: 900 !important; }
         .recharts-text { font-family: 'Inter', sans-serif !important; font-size: 12px !important; }
         .recharts-legend-wrapper { position: relative !important; bottom: auto !important; left: auto !important; right: auto !important; top: auto !important; width: 100% !important; height: auto !important; }
+        
+        /* New Styles for Interactive Export */
         .comment-card { border-left: 4px solid #6366f1; }
+        .subtopic-row { transition: all 0.3s ease; }
+        .active-filter-highlight { outline: 2px solid #6366f1; outline-offset: 2px; border-radius: 4px; }
+        
         @media print {
             .no-print { display: none; }
             body { background-color: white; padding: 0; }
@@ -773,148 +836,38 @@ export function DashboardModule() {
         </footer>
     </div>
 
-    ${exportOptions.includeComments ? `
-    <script>
-        const allComments = ${JSON.stringify(filteredAnalytics)};
-        
-        document.addEventListener('DOMContentLoaded', () => {
-            const clickableElements = document.querySelectorAll('.html-export-clickable');
-            const titleEl = document.getElementById('html-export-drilldown-title');
-            const clearBtn = document.getElementById('html-export-drilldown-clear');
-            const containerEl = document.getElementById('html-export-comments-container');
-            const countEl = document.getElementById('html-export-comments-count');
-
-            let currentFilter = { type: 'all', value: 'all' };
-            let expandedComments = {};
-
-            function renderComments(comments) {
-                if (!containerEl) return;
-                
-                if (comments.length === 0) {
-                    containerEl.innerHTML = '<div class="flex flex-col items-center justify-center py-20 text-slate-400 opacity-50"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><p class="text-xs font-bold">Yorum Bulunamadı</p></div>';
-                    return;
-                }
-
-                let html = '';
-                comments.forEach((commentData, idx) => {
-                    const localText = commentData.comment || commentData.rawText || commentData.COMMENT || '';
-                    const isExpanded = !!expandedComments[commentData.commentId];
-                    const isLong = localText.length > 150;
-                    const displayedText = isExpanded ? localText : localText.slice(0, 150);
-                    const dateStr = new Date(commentData.date || commentData.createdAt).toLocaleDateString('tr-TR');
-                    
-                    let topicsHtml = '';
-                    if (commentData.topics && commentData.topics.length > 0) {
-                        topicsHtml = '<div class="mt-3 pt-3 border-t border-slate-50 flex flex-wrap gap-1">';
-                        commentData.topics.forEach(topic => {
-                            topicsHtml += '<span class="text-[8px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase">' + topic.subCategory + '</span>';
-                        });
-                        topicsHtml += '</div>';
-                    }
-
-                    let textHtml = '';
-                    if (localText) {
-                        textHtml = '<p class="text-xs text-slate-700 leading-relaxed italic">"' + displayedText + (!isExpanded && isLong ? '...' : '') + '"</p>';
-                        if (isLong) {
-                            textHtml += '<button onclick="window.toggleComment(\\'' + commentData.commentId + '\\')" class="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 mt-1 uppercase">' + (isExpanded ? 'Daha Az Göster' : 'Devamını Oku') + '</button>';
-                        }
-                    } else {
-                        textHtml = '<p class="text-xs text-slate-400 italic animate-pulse">Metin senkronize ediliyor...</p>';
-                    }
-
-                    html += '<div class="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group">' +
-                                '<div class="flex items-center justify-between mb-2">' +
-                                    '<div class="flex items-center gap-2">' +
-                                        '<span class="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">' + (commentData.source || 'Bilinmiyor') + '</span>' +
-                                        '<span class="text-[10px] font-bold text-slate-400">' + dateStr + '</span>' +
-                                    '</div>' +
-                                    '<div class="text-xs font-black text-slate-600">' + (commentData.overallScore || 0) + '/100</div>' +
-                                '</div>' +
-                                '<div class="relative">' + textHtml + '</div>' +
-                                topicsHtml +
-                            '</div>';
-                });
-                containerEl.innerHTML = html;
-            }
-
-            window.toggleComment = function(commentId) {
-                expandedComments[commentId] = !expandedComments[commentId];
-                applyFilter();
-            };
-
-            function applyFilter() {
-                let filtered = allComments;
-                if (currentFilter.type !== 'all') {
-                    filtered = allComments.filter(item => {
-                        if (currentFilter.type === 'category') {
-                            return item.topics && item.topics.some(t => t.subCategory === currentFilter.value || t.mainCategory === currentFilter.value);
-                        }
-                        if (currentFilter.type === 'source') return item.source === currentFilter.value;
-                        if (currentFilter.type === 'nationality') return item.nationality === currentFilter.value;
-                        return true;
-                    });
-                }
-
-                if (titleEl) {
-                    titleEl.textContent = currentFilter.type === 'all' ? 'Tüm Filtrelenmiş Yorumlar' : currentFilter.value + ' Analizi';
-                }
-                if (clearBtn) {
-                    if (currentFilter.type === 'all') {
-                        clearBtn.classList.add('hidden');
-                    } else {
-                        clearBtn.classList.remove('hidden');
-                    }
-                }
-                if (countEl) {
-                    countEl.textContent = 'Toplam ' + filtered.length + ' Yorum Listeleniyor';
-                }
-                
-                renderComments(filtered);
-            }
-
-            clickableElements.forEach(el => {
-                el.addEventListener('click', function(e) {
-                    // For SVG elements, we might need to find the closest element with the data attributes
-                    let target = e.target;
-                    while (target && target !== document.body && !target.classList.contains('html-export-clickable')) {
-                        target = target.parentElement;
-                    }
-                    if (!target) target = e.currentTarget;
-
-                    const type = target.getAttribute('data-filter-type');
-                    const value = target.getAttribute('data-filter-value');
-                    if (type && value) {
-                        currentFilter = { type: type, value: value };
-                        expandedComments = {}; // reset expansion on filter change
-                        applyFilter();
-                        
-                        // Scroll to comments section
-                        const commentsSection = document.getElementById('html-export-drilldown-title');
-                        if (commentsSection) {
-                            commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                        }
-                    }
-                });
-            });
-
-            if (clearBtn) {
-                clearBtn.addEventListener('click', function() {
-                    currentFilter = { type: 'all', value: 'all' };
-                    expandedComments = {};
-                    applyFilter();
-                });
-            }
-
-            // Initial render
-            applyFilter();
-        });
-    </script>
-    ` : ''}
-
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             ${exportOptions.interactive ? `
-            // Handle "Show All" toggles
+            // --- A. Accordion (Göster/Gizle) Motoru ---
+            const toggleSubtopicsBtn = document.getElementById('toggle-subtopics-btn');
+            if (toggleSubtopicsBtn) {
+                toggleSubtopicsBtn.addEventListener('click', function() {
+                    const isShowing = this.getAttribute('data-showing') === 'true';
+                    const subtopicRows = document.querySelectorAll('.subtopic-row');
+                    
+                    subtopicRows.forEach(row => {
+                        if (isShowing) {
+                            row.classList.add('hidden');
+                        } else {
+                            row.classList.remove('hidden');
+                        }
+                    });
+                    
+                    this.setAttribute('data-showing', !isShowing);
+                    this.title = isShowing ? 'Alt Konuları Göster' : 'Alt Konuları Gizle';
+                    
+                    if (isShowing) {
+                        this.classList.remove('bg-indigo-600', 'text-white', 'shadow-lg', 'shadow-indigo-100');
+                        this.classList.add('bg-slate-100', 'text-slate-600');
+                    } else {
+                        this.classList.remove('bg-slate-100', 'text-slate-600');
+                        this.classList.add('bg-indigo-600', 'text-white', 'shadow-lg', 'shadow-indigo-100');
+                    }
+                });
+            }
+
+            // Handle "Show All" toggles for Most Mentioned / Top Positive / Top Negative
             const toggleButtons = document.querySelectorAll('[data-toggle-btn]');
             toggleButtons.forEach(btn => {
                 const sectionId = btn.getAttribute('data-toggle-btn');
@@ -938,6 +891,89 @@ export function DashboardModule() {
                     btn.innerHTML = isExpanded ? 'Daha Az Göster <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block ml-1"><polyline points="18 15 12 9 6 15"></polyline></svg>' : 'Tümünü Gör (' + count + ') <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block ml-1"><polyline points="6 9 12 15 18 9"></polyline></svg>';
                 });
             });
+            ` : ''}
+
+            ${exportOptions.includeComments ? `
+            // --- B. Global Filtreleme Motoru ---
+            const clickableElements = document.querySelectorAll('.html-export-clickable');
+            const titleEl = document.getElementById('html-export-drilldown-title');
+            const clearBtn = document.getElementById('html-export-drilldown-clear');
+            const countEl = document.getElementById('html-export-comments-count');
+            const commentCards = document.querySelectorAll('.comment-card');
+
+            function applyFilter(type, value) {
+                let visibleCount = 0;
+
+                commentCards.forEach(card => {
+                    let isMatch = true;
+                    if (type !== 'all') {
+                        if (type === 'category') {
+                            const cats = card.getAttribute('data-category') || '';
+                            const subCats = card.getAttribute('data-subcategory') || '';
+                            isMatch = cats.split(',').includes(value) || subCats.split(',').includes(value);
+                        } else if (type === 'source') {
+                            isMatch = card.getAttribute('data-source') === value;
+                        } else if (type === 'nationality') {
+                            isMatch = card.getAttribute('data-nationality') === value;
+                        }
+                    }
+
+                    if (isMatch) {
+                        card.style.display = 'block';
+                        visibleCount++;
+                    } else {
+                        card.style.display = 'none';
+                    }
+                });
+
+                if (titleEl) {
+                    titleEl.textContent = type === 'all' ? 'Tüm Filtrelenmiş Yorumlar' : value + ' Analizi';
+                }
+                if (clearBtn) {
+                    if (type === 'all') {
+                        clearBtn.classList.add('hidden');
+                    } else {
+                        clearBtn.classList.remove('hidden');
+                    }
+                }
+                if (countEl) {
+                    countEl.textContent = 'Toplam ' + visibleCount + ' Yorum Listeleniyor';
+                }
+            }
+
+            clickableElements.forEach(el => {
+                el.addEventListener('click', function(e) {
+                    // Remove active highlight from all
+                    clickableElements.forEach(c => c.classList.remove('active-filter-highlight'));
+                    
+                    let target = e.target;
+                    while (target && target !== document.body && !target.classList.contains('html-export-clickable')) {
+                        target = target.parentElement;
+                    }
+                    if (!target) target = e.currentTarget;
+
+                    const type = target.getAttribute('data-filter-type');
+                    const value = target.getAttribute('data-filter-value');
+                    
+                    if (type && value) {
+                        target.classList.add('active-filter-highlight');
+                        applyFilter(type, value);
+                        
+                        // Scroll to comments section
+                        const commentsSection = document.getElementById('html-export-drilldown-title');
+                        if (commentsSection) {
+                            commentsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        }
+                    }
+                });
+            });
+
+            if (clearBtn) {
+                clearBtn.addEventListener('click', function() {
+                    clickableElements.forEach(c => c.classList.remove('active-filter-highlight'));
+                    applyFilter('all', 'all');
+                });
+            }
             ` : ''}
         });
     </script>
@@ -1660,6 +1696,8 @@ export function DashboardModule() {
                       <p className="text-xs text-slate-500">Ana ve alt kategorilerdeki misafir deneyim puanları</p>
                     </div>
                     <button
+                      id="toggle-subtopics-btn"
+                      data-showing={showSubCategories}
                       onClick={() => setShowSubCategories(!showSubCategories)}
                       title={showSubCategories ? 'Alt Konuları Gizle' : 'Alt Konuları Göster'}
                       className={`flex items-center justify-center w-8 h-8 rounded-lg transition-all ${
@@ -1808,48 +1846,43 @@ export function DashboardModule() {
                                   </div>
                                 </td>
                               </tr>
-                              <AnimatePresence>
-                                {showSubCategories && group.subCategories.map((sub, sIdx) => (
-                                  <motion.tr
-                                    key={`${gIdx}-${sIdx}`}
-                                    initial={{ opacity: 0, x: -10 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    exit={{ opacity: 0, x: -10 }}
-                                    transition={{ duration: 0.2, delay: sIdx * 0.03 }}
-                                    className="bg-slate-50/50 hover:bg-indigo-50 transition-colors cursor-pointer border-l-2 border-indigo-200 html-export-clickable"
-                                    data-filter-type="category"
-                                    data-filter-value={sub.subCategory}
-                                    onClick={() => setDrillDownFilter({ type: 'category', value: sub.subCategory })}
-                                  >
-                                    <td className="py-2 px-4 pl-8">
-                                      <span className="text-xs font-medium text-slate-600">
-                                        ↳ {sub.subCategory}
-                                      </span>
-                                    </td>
-                                    <td className="py-2 px-4 text-xs text-slate-400 text-center font-mono">
-                                      {sub.count}
-                                    </td>
-                                    <td className="py-2 px-4">
-                                      <div className="flex items-center gap-3">
-                                        <div className="flex-1 h-1 bg-slate-200 rounded-full overflow-hidden min-w-[100px]">
-                                          <div 
-                                            className={`h-full rounded-full ${
-                                              sub.avgScore >= 80 ? 'bg-emerald-400' :
-                                              sub.avgScore >= 60 ? 'bg-blue-400' :
-                                              sub.avgScore >= 40 ? 'bg-amber-400' :
-                                              'bg-red-400'
-                                            }`}
-                                            style={{ width: `${sub.avgScore}%` }}
-                                          />
-                                        </div>
-                                        <span className="text-[10px] font-bold text-slate-500 w-10">
-                                          %{sub.avgScore}
-                                        </span>
+                              {group.subCategories.map((sub, sIdx) => (
+                                <tr
+                                  key={`${gIdx}-${sIdx}`}
+                                  className={`bg-slate-50/50 hover:bg-indigo-50 transition-colors cursor-pointer border-l-2 border-indigo-200 html-export-clickable subtopic-row ${showSubCategories ? '' : 'hidden'}`}
+                                  data-parent-category={group.name}
+                                  data-filter-type="category"
+                                  data-filter-value={sub.subCategory}
+                                  onClick={() => setDrillDownFilter({ type: 'category', value: sub.subCategory })}
+                                >
+                                  <td className="py-2 px-4 pl-8">
+                                    <span className="text-xs font-medium text-slate-600">
+                                      ↳ {sub.subCategory}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-4 text-xs text-slate-400 text-center font-mono">
+                                    {sub.count}
+                                  </td>
+                                  <td className="py-2 px-4">
+                                    <div className="flex items-center gap-3">
+                                      <div className="flex-1 h-1 bg-slate-200 rounded-full overflow-hidden min-w-[100px]">
+                                        <div 
+                                          className={`h-full rounded-full ${
+                                            sub.avgScore >= 80 ? 'bg-emerald-400' :
+                                            sub.avgScore >= 60 ? 'bg-blue-400' :
+                                            sub.avgScore >= 40 ? 'bg-amber-400' :
+                                            'bg-red-400'
+                                          }`}
+                                          style={{ width: `${sub.avgScore}%` }}
+                                        />
                                       </div>
-                                    </td>
-                                  </motion.tr>
-                                ))}
-                              </AnimatePresence>
+                                      <span className="text-[10px] font-bold text-slate-500 w-10">
+                                        %{sub.avgScore}
+                                      </span>
+                                    </div>
+                                  </td>
+                                </tr>
+                              ))}
                             </React.Fragment>
                           ))}
                         </tbody>
