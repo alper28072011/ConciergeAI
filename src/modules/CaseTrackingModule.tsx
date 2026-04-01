@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Plus, Filter, MessageSquare, Clock, CheckCircle2, AlertCircle, Send, X, User, Briefcase, FileText, Printer, Save, Trash2, Edit3, ArrowUp, ArrowDown } from 'lucide-react';
+import { Search, Plus, Filter, MessageSquare, Clock, CheckCircle2, AlertCircle, Send, X, User, Briefcase, FileText, Printer, Save, Trash2, Edit3, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react';
 import { CaseTracker, CaseAction, GuestData, ApiSettings } from '../types';
 import { listenToCases, createCase, updateCaseStatus, addCaseAction } from '../services/firebaseService';
 import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { generateAIContent } from '../services/aiService';
 import { executeElektraQuery } from '../services/api';
-import { buildDynamicPayload, formatTRDate } from '../utils';
+import { buildDynamicPayload, formatTRDate, formatHtmlContent } from '../utils';
 import { auth, db } from '../firebase';
 import ReactQuillModule from 'react-quill-new';
 const ReactQuill = (ReactQuillModule as any).default || ReactQuillModule;
@@ -40,12 +40,23 @@ export function CaseTrackingModule() {
   const [editActionDate, setEditActionDate] = useState('');
   const [editActionTime, setEditActionTime] = useState('');
   const [editActionText, setEditActionText] = useState('');
+  const [editActionContent, setEditActionContent] = useState('');
+
+  // Edit Initial Case State
+  const [isEditingInitialCase, setIsEditingInitialCase] = useState(false);
+  const [editInitialCaseDesc, setEditInitialCaseDesc] = useState('');
 
   // AI State
   const [isGeneratingSummary, setIsGeneratingSummary] = useState(false);
   const [caseSummary, setCaseSummary] = useState('');
+  const [isAILetterFormOpen, setIsAILetterFormOpen] = useState(false);
+  const [targetLanguage, setTargetLanguage] = useState('Turkish');
+  const [extraNotes, setExtraNotes] = useState('');
   const [isGeneratingAILetter, setIsGeneratingAILetter] = useState(false);
   const [generatedAILetter, setGeneratedAILetter] = useState('');
+  const [translatedAILetter, setTranslatedAILetter] = useState('');
+  const [showAITranslation, setShowAITranslation] = useState(false);
+  const [isTranslatingAILetter, setIsTranslatingAILetter] = useState(false);
   const [isSavingLetter, setIsSavingLetter] = useState(false);
   const [selectedPreviewAction, setSelectedPreviewAction] = useState<CaseAction | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
@@ -204,20 +215,45 @@ export function CaseTrackingModule() {
     setEditActionDate(localDate);
     setEditActionTime(dateObj.toTimeString().split(' ')[0].slice(0, 5));
     setEditActionText(action.actionText);
+    setEditActionContent(action.content || '');
   };
 
   const handleSaveEditAction = async () => {
     if (!selectedCase || !editingAction) return;
     try {
       const newDate = new Date(`${editActionDate}T${editActionTime}`).toISOString();
-      const updatedActions = selectedCase.actions.map(a => 
-        a.id === editingAction.id ? { ...a, date: newDate, actionText: editActionText } : a
-      );
+      const updatedActions = selectedCase.actions.map(a => {
+        if (a.id === editingAction.id) {
+          const updatedAction = { ...a, date: newDate, actionText: editActionText };
+          if (a.type === 'letter') {
+            updatedAction.content = editActionContent;
+          }
+          return updatedAction;
+        }
+        return a;
+      });
       await updateDoc(doc(db, 'cases', selectedCase.id), { actions: updatedActions });
       setEditingAction(null);
     } catch (error) {
       console.error('Error updating action:', error);
       alert('Aksiyon güncellenirken hata oluştu.');
+    }
+  };
+
+  const openEditInitialCaseModal = () => {
+    if (!selectedCase) return;
+    setEditInitialCaseDesc(selectedCase.description);
+    setIsEditingInitialCase(true);
+  };
+
+  const handleSaveInitialCase = async () => {
+    if (!selectedCase) return;
+    try {
+      await updateDoc(doc(db, 'cases', selectedCase.id), { description: editInitialCaseDesc });
+      setIsEditingInitialCase(false);
+    } catch (error) {
+      console.error('Error updating initial case:', error);
+      alert('Vaka açıklaması güncellenirken hata oluştu.');
     }
   };
 
@@ -263,23 +299,57 @@ ${selectedCase.actions?.map(a => `- ${new Date(a.date).toLocaleString('tr-TR')}:
     if (!selectedCase) return;
     setIsGeneratingAILetter(true);
     setGeneratedAILetter('');
+    setTranslatedAILetter('');
+    setShowAITranslation(false);
     try {
-      const prompt = `Sen 5 yıldızlı bir otelin Misafir İlişkileri Müdürüsün. Aşağıdaki vakaya istinaden misafire profesyonel, empatik ve çözüm odaklı bir özür/bilgilendirme mektubu yaz.
-Misafir: ${selectedCase.guestName}
-Oda: ${selectedCase.roomNumber}
-Vaka Detayı: ${selectedCase.description}
-Yapılan İşlemler:
-${selectedCase.actions?.map(a => `- ${a.actionText}`).join('\n') || 'İşlem yapılmadı.'}
+      const prompt = `You are a professional 5-star hotel Guest Relations Manager / Concierge. Write a polite, empathetic, and solution-oriented letter to a guest regarding a recent case/issue.
+Guest Name: ${selectedCase.guestName}
+Room Number: ${selectedCase.roomNumber}
+Case Description: ${selectedCase.description}
+Actions Taken:
+${selectedCase.actions?.map(a => `- ${a.actionText}`).join('\n') || 'No actions taken yet.'}
+Extra Notes/Instructions: ${extraNotes}
+Target Language: ${targetLanguage}
 
-Mektup Türkçe olmalı. Sadece mektup metnini yaz, açıklama ekleme. HTML formatında (<b>, <br>, vb.) şık bir şekilde formatla.`;
+CRITICAL INSTRUCTIONS:
+1. Start the letter by addressing the guest by their name (e.g., "Dear ${selectedCase.guestName}," translated to the Target Language).
+2. Acknowledge the issue (${selectedCase.description}) and apologize for any inconvenience caused.
+3. Briefly mention the actions taken to resolve the issue, but DO NOT list them hour-by-hour or use timestamps. Summarize them professionally.
+4. At the end of the letter, include a sentence stating that they can contact the Guest Relations team in any situation, translated to the Target Language.
+5. Sign off the letter with "Guest Relations Team" translated to the Target Language.
+6. The tone must be highly professional, empathetic, and solution-oriented. Make the guest feel we genuinely care about their comfort.
+7. Do not include placeholders, write the final letter. Format with appropriate HTML paragraphs (<p>, <br>, <b>).`;
       
       const letter = await generateAIContent(prompt, 'Vaka Mektubu', 'caseLetter');
-      setGeneratedAILetter(letter || 'Mektup oluşturulamadı.');
+      const formattedText = letter ? letter.replace(/\n/g, '<br>') : 'Mektup oluşturulamadı (Boş yanıt).';
+      setGeneratedAILetter(formattedText);
     } catch (error: any) {
       console.error('Error generating letter:', error);
       setGeneratedAILetter('Mektup oluşturulurken hata oluştu: ' + error.message);
     } finally {
       setIsGeneratingAILetter(false);
+    }
+  };
+
+  const handleTranslateAILetter = async () => {
+    if (translatedAILetter) {
+      setShowAITranslation(!showAITranslation);
+      return;
+    }
+
+    setIsTranslatingAILetter(true);
+    try {
+      const plainText = generatedAILetter.replace(/<[^>]*>?/gm, '\n');
+      const prompt = `Translate the following hotel guest letter to Turkish. Maintain the professional, 5-star hotel concierge tone.\n\n${plainText}`;
+      const text = await generateAIContent(prompt, 'Mektup Çevirisi', 'translation');
+      const formattedText = text ? text.replace(/\n/g, '<br>') : 'Çeviri yapılamadı.';
+      setTranslatedAILetter(formattedText);
+      setShowAITranslation(true);
+    } catch (error) {
+      console.error('Translation error:', error);
+      alert('Çeviri sırasında bir hata oluştu.');
+    } finally {
+      setIsTranslatingAILetter(false);
     }
   };
 
@@ -308,7 +378,7 @@ Mektup Türkçe olmalı. Sadece mektup metnini yaz, açıklama ekleme. HTML form
     const printWindow = window.open('', '_blank');
     if (printWindow) {
       // VERİ TEMİZLEME (Kırılmaz Boşlukları ve Gizli Karakterleri Temizle)
-      let safeContent = content;
+      let safeContent = formatHtmlContent(content);
       safeContent = safeContent.replace(/&nbsp;/g, ' '); 
       safeContent = safeContent.replace(/\u200B/g, ''); 
       safeContent = safeContent.replace(/&shy;/g, '');
@@ -320,7 +390,7 @@ Mektup Türkçe olmalı. Sadece mektup metnini yaz, açıklama ekleme. HTML form
             <title>Mektup Yazdır</title>
             <meta charset="utf-8">
             <style>
-              @page { size: A4 portrait; margin: 20mm; }
+              @page { size: A4 portrait; margin: 70mm 20mm 20mm 20mm; }
               body { font-family: 'Times New Roman', Times, serif; font-size: 12pt; line-height: 1.5; color: black; background: white; margin: 0; padding: 0; }
               
               .document-content { width: 170mm !important; max-width: 170mm !important; margin: 0 auto; text-align: left; }
@@ -533,11 +603,10 @@ Mektup Türkçe olmalı. Sadece mektup metnini yaz, açıklama ekleme. HTML form
                       Özetle
                     </button>
                     <button 
-                      onClick={handleGenerateAILetter}
-                      disabled={isGeneratingAILetter}
-                      className="flex-1 px-3 py-2 bg-blue-50 text-blue-700 text-xs font-bold rounded-lg hover:bg-blue-100 transition-colors border border-blue-100 flex items-center justify-center gap-1.5 disabled:opacity-50"
+                      onClick={() => setIsAILetterFormOpen(!isAILetterFormOpen)}
+                      className={`flex-1 px-3 py-2 text-xs font-bold rounded-lg transition-colors border flex items-center justify-center gap-1.5 ${isAILetterFormOpen ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-100'}`}
                     >
-                      {isGeneratingAILetter ? <span className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span> : <MessageSquare size={14} />}
+                      <MessageSquare size={14} />
                       AI Mektup
                     </button>
                   </div>
@@ -546,7 +615,7 @@ Mektup Türkçe olmalı. Sadece mektup metnini yaz, açıklama ekleme. HTML form
 
               {/* AI Outputs */}
               <AnimatePresence>
-                {(caseSummary || generatedAILetter) && (
+                {(caseSummary || isAILetterFormOpen) && (
                   <motion.div 
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: 'auto' }}
@@ -560,46 +629,123 @@ Mektup Türkçe olmalı. Sadece mektup metnini yaz, açıklama ekleme. HTML form
                         <div className="text-sm text-purple-900 leading-relaxed" dangerouslySetInnerHTML={{ __html: caseSummary }} />
                       </div>
                     )}
-                    {generatedAILetter && (
-                      <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-4 relative">
-                        <button onClick={() => setGeneratedAILetter('')} className="absolute top-2 right-2 text-blue-400 hover:text-blue-600 z-10"><X size={16} /></button>
-                        <h4 className="text-xs font-bold text-blue-800 uppercase tracking-wider mb-2 flex items-center gap-1.5"><MessageSquare size={14} /> AI Özür/Bilgi Mektubu</h4>
+                    {isAILetterFormOpen && (
+                      <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-6 relative">
+                        <button onClick={() => { setIsAILetterFormOpen(false); setGeneratedAILetter(''); }} className="absolute top-4 right-4 text-blue-400 hover:text-blue-600 z-10"><X size={16} /></button>
+                        <h4 className="text-sm font-bold text-blue-800 uppercase tracking-wider mb-4 flex items-center gap-1.5"><MessageSquare size={16} /> AI Özür/Bilgi Mektubu Asistanı</h4>
                         
-                        <div className="bg-white rounded-lg border border-blue-100 overflow-hidden">
-                          <ReactQuill 
-                            theme="snow" 
-                            value={generatedAILetter} 
-                            onChange={setGeneratedAILetter}
-                            className="h-[200px] mb-12"
-                            modules={{
-                              toolbar: [
-                                [{ 'header': [1, 2, false] }],
-                                ['bold', 'italic', 'underline', 'strike', 'blockquote'],
-                                [{'list': 'ordered'}, {'list': 'bullet'}, {'indent': '-1'}, {'indent': '+1'}],
-                                ['link', 'image'],
-                                ['clean']
-                              ],
-                            }}
-                          />
-                        </div>
-                        
-                        <div className="mt-4 flex justify-end gap-3">
-                          <button 
-                            onClick={() => handlePrintLetter(generatedAILetter)}
-                            className="px-4 py-2 bg-white text-blue-600 border border-blue-200 text-sm font-bold rounded-lg hover:bg-blue-50 transition-colors flex items-center gap-2 shadow-sm"
-                          >
-                            <Printer size={16} />
-                            Yazdır
-                          </button>
-                          <button 
-                            onClick={handleSaveLetter}
-                            disabled={isSavingLetter}
-                            className="px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
-                          >
-                            {isSavingLetter ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : <Save size={16} />}
-                            Kaydet
-                          </button>
-                        </div>
+                        {!generatedAILetter ? (
+                          <div className="space-y-4">
+                            <div className="flex gap-4">
+                              <div className="flex-1">
+                                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Hedef Dil</label>
+                                <select
+                                  value={targetLanguage}
+                                  onChange={(e) => setTargetLanguage(e.target.value)}
+                                  className="w-full px-4 py-2 border border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm bg-white"
+                                >
+                                  <option value="English">İngilizce (English)</option>
+                                  <option value="Turkish">Türkçe (Turkish)</option>
+                                  <option value="German">Almanca (Deutsch)</option>
+                                  <option value="Russian">Rusça (Русский)</option>
+                                  <option value="French">Fransızca (Français)</option>
+                                  <option value="Arabic">Arapça (العربية)</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Ekstra Talimatlar (Opsiyonel)</label>
+                              <textarea
+                                value={extraNotes}
+                                onChange={(e) => setExtraNotes(e.target.value)}
+                                placeholder="Örn: Odaya meyve sepeti ve şarap gönderildiğini de belirt..."
+                                className="w-full px-4 py-3 border border-blue-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none h-20 text-sm bg-white"
+                              />
+                            </div>
+                            <div className="flex justify-end pt-2">
+                              <button 
+                                onClick={handleGenerateAILetter}
+                                disabled={isGeneratingAILetter}
+                                className="px-6 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-xl hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+                              >
+                                {isGeneratingAILetter ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : <MessageSquare size={16} />}
+                                Mektubu Oluştur
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            <div className="flex justify-between items-center">
+                              <h4 className="font-medium text-slate-800 text-sm">Üretilen Mektup</h4>
+                              <button
+                                onClick={handleTranslateAILetter}
+                                disabled={isTranslatingAILetter}
+                                className="text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1.5"
+                              >
+                                {isTranslatingAILetter ? (
+                                  <div className="w-3 h-3 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                                ) : (
+                                  <RefreshCw size={12} />
+                                )}
+                                {showAITranslation ? 'Orijinali Göster' : 'Türkçe Çeviriyi Gör'}
+                              </button>
+                            </div>
+                            
+                            <div className="bg-white rounded-xl border border-blue-200 overflow-hidden">
+                              <div 
+                                className="p-4 bg-slate-50 border-b border-slate-200 text-sm text-slate-600 italic ql-snow"
+                                style={{ display: showAITranslation ? 'block' : 'none' }}
+                              >
+                                <div 
+                                  className="ql-editor"
+                                  style={{ padding: 0 }}
+                                  dangerouslySetInnerHTML={{ __html: formatHtmlContent(translatedAILetter) }} 
+                                />
+                              </div>
+                              <div style={{ display: showAITranslation ? 'none' : 'block' }}>
+                                <ReactQuill 
+                                  theme="snow" 
+                                  value={generatedAILetter} 
+                                  onChange={setGeneratedAILetter}
+                                  className="h-[300px] mb-12"
+                                  modules={{
+                                    toolbar: [
+                                      [{ 'header': [1, 2, false] }],
+                                      ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+                                      [{'list': 'ordered'}, {'list': 'bullet'}, {'indent': '-1'}, {'indent': '+1'}],
+                                      ['link', 'image'],
+                                      ['clean']
+                                    ],
+                                  }}
+                                />
+                              </div>
+                            </div>
+                            
+                            <div className="mt-4 flex justify-end gap-3">
+                              <button 
+                                onClick={() => { setGeneratedAILetter(''); setTranslatedAILetter(''); setShowAITranslation(false); }}
+                                className="px-4 py-2 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-200 transition-colors"
+                              >
+                                Yeniden Oluştur
+                              </button>
+                              <button 
+                                onClick={() => handlePrintLetter(showAITranslation ? translatedAILetter : generatedAILetter)}
+                                className="px-4 py-2 bg-white text-blue-600 border border-blue-200 text-sm font-bold rounded-lg hover:bg-blue-50 transition-colors flex items-center gap-2 shadow-sm"
+                              >
+                                <Printer size={16} />
+                                Yazdır
+                              </button>
+                              <button 
+                                onClick={handleSaveLetter}
+                                disabled={isSavingLetter}
+                                className="px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+                              >
+                                {isSavingLetter ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : <Save size={16} />}
+                                Kaydet
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </motion.div>
@@ -616,12 +762,23 @@ Mektup Türkçe olmalı. Sadece mektup metnini yaz, açıklama ekleme. HTML form
                     <div className="absolute -left-[11px] top-1 w-5 h-5 rounded-full bg-slate-200 border-4 border-slate-50 flex items-center justify-center">
                       <div className="w-2 h-2 rounded-full bg-slate-400"></div>
                     </div>
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Vaka Açıldı</span>
-                        <span className="text-xs text-slate-400 font-medium">{new Date(selectedCase.createdAt).toLocaleString('tr-TR')}</span>
+                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm group transition-all hover:shadow-md">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Vaka Açıldı</span>
+                          <span className="text-xs text-slate-400 font-medium">{new Date(selectedCase.createdAt).toLocaleString('tr-TR')}</span>
+                        </div>
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={openEditInitialCaseModal}
+                            className="p-1 text-slate-400 hover:text-blue-600 transition-colors"
+                            title="Düzenle"
+                          >
+                            <Edit3 size={14} />
+                          </button>
+                        </div>
                       </div>
-                      <p className="text-sm text-slate-700">{selectedCase.description}</p>
+                      <p className="text-sm text-slate-700 whitespace-pre-wrap">{selectedCase.description}</p>
                       <div className="mt-3 text-[10px] text-slate-400 font-medium flex items-center gap-1">
                         <User size={12} /> {selectedCase.createdBy}
                       </div>
@@ -907,7 +1064,7 @@ Mektup Türkçe olmalı. Sadece mektup metnini yaz, açıklama ekleme. HTML form
                   <div 
                     className="ql-editor text-slate-700 text-sm"
                     style={{ padding: 0 }}
-                    dangerouslySetInnerHTML={{ __html: selectedPreviewAction.content || '' }} 
+                    dangerouslySetInnerHTML={{ __html: formatHtmlContent(selectedPreviewAction.content || '') }} 
                   />
                 </div>
               </div>
@@ -934,6 +1091,67 @@ Mektup Türkçe olmalı. Sadece mektup metnini yaz, açıklama ekleme. HTML form
           </div>
         )}
       </AnimatePresence>
+      {/* Edit Initial Case Modal */}
+      <AnimatePresence>
+        {isEditingInitialCase && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden flex flex-col max-h-[90vh]"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center">
+                    <Edit3 size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-800">Vaka Tanımını Düzenle</h3>
+                    <p className="text-sm text-slate-500">İlk vaka açıklamasını güncelleyin</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsEditingInitialCase(false)}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-200 hover:text-slate-600 transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">İçerik</label>
+                  <textarea 
+                    value={editInitialCaseDesc}
+                    onChange={(e) => setEditInitialCaseDesc(e.target.value)}
+                    rows={5}
+                    className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none bg-slate-50"
+                  />
+                </div>
+              </div>
+
+              <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">
+                <button 
+                  onClick={() => setIsEditingInitialCase(false)}
+                  className="px-6 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors"
+                >
+                  İptal
+                </button>
+                <button 
+                  onClick={handleSaveInitialCase}
+                  disabled={!editInitialCaseDesc.trim()}
+                  className="px-6 py-2.5 text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  <Save size={16} />
+                  Kaydet
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Edit Action Modal */}
       <AnimatePresence>
         {editingAction && (
@@ -985,14 +1203,39 @@ Mektup Türkçe olmalı. Sadece mektup metnini yaz, açıklama ekleme. HTML form
                 </div>
                 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">İçerik</label>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    {editingAction.type === 'letter' ? 'Mektup Başlığı / Not' : 'İçerik'}
+                  </label>
                   <textarea 
                     value={editActionText}
                     onChange={(e) => setEditActionText(e.target.value)}
-                    rows={5}
+                    rows={editingAction.type === 'letter' ? 2 : 5}
                     className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none bg-slate-50"
                   />
                 </div>
+                
+                {editingAction.type === 'letter' && (
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Mektup İçeriği</label>
+                    <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+                      <ReactQuill 
+                        theme="snow" 
+                        value={editActionContent} 
+                        onChange={setEditActionContent}
+                        className="h-[200px] mb-12"
+                        modules={{
+                          toolbar: [
+                            [{ 'header': [1, 2, false] }],
+                            ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+                            [{'list': 'ordered'}, {'list': 'bullet'}, {'indent': '-1'}, {'indent': '+1'}],
+                            ['link', 'image'],
+                            ['clean']
+                          ],
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="p-6 border-t border-slate-100 bg-slate-50/50 flex justify-end gap-3">

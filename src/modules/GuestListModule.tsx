@@ -58,6 +58,7 @@ export function GuestListModule() {
   const [selectedGuestForCall, setSelectedGuestForCall] = useState<GuestData | null>(null);
   const [callStatus, setCallStatus] = useState<'not_called' | 'answered_all_good' | 'answered_has_request' | 'no_answer'>('not_called');
   const [callNotes, setCallNotes] = useState('');
+  const [isTranslatingCallNotes, setIsTranslatingCallNotes] = useState(false);
   const [isSavingCall, setIsSavingCall] = useState(false);
 
   // WhatsApp State for Welcome Call
@@ -706,6 +707,23 @@ CRITICAL INSTRUCTIONS:
     setCallStatus(guest.welcomeCallStatus || 'not_called');
     setCallNotes(guest.welcomeCallNotes || '');
     setIsWelcomeCallModalOpen(true);
+  };
+
+  const handleTranslateCallNotes = async () => {
+    if (!callNotes.trim()) return;
+    setIsTranslatingCallNotes(true);
+    try {
+      const prompt = `Translate the following guest request/note to Turkish. Only return the translated text without any extra explanation or formatting.\n\n${callNotes}`;
+      const translatedText = await generateAIContent(prompt, 'Talep Çevirisi', 'translation');
+      if (translatedText) {
+        setCallNotes(translatedText);
+      }
+    } catch (error) {
+      console.error('Translation error:', error);
+      alert('Çeviri sırasında bir hata oluştu.');
+    } finally {
+      setIsTranslatingCallNotes(false);
+    }
   };
 
   const handleSaveWelcomeCall = async () => {
@@ -2326,14 +2344,29 @@ ${JSON.stringify(selectedGuests.map(g => ({
               {callStatus === 'answered_has_request' && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2 relative">
                   <label className="block text-sm font-semibold text-slate-700">Talepler / Notlar</label>
-                  <textarea
-                    value={callNotes}
-                    onChange={(e) => setCallNotes(e.target.value)}
-                    onMouseUp={handleTextSelection}
-                    onKeyUp={handleTextSelection}
-                    placeholder="Misafirin ekstra havlu, geç çıkış vb. taleplerini buraya yazın..."
-                    className="w-full h-32 px-4 py-3 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none"
-                  />
+                  <div className="relative">
+                    <textarea
+                      value={callNotes}
+                      onChange={(e) => setCallNotes(e.target.value)}
+                      onMouseUp={handleTextSelection}
+                      onKeyUp={handleTextSelection}
+                      placeholder="Misafirin ekstra havlu, geç çıkış vb. taleplerini buraya yazın..."
+                      className="w-full h-32 px-4 py-3 pb-10 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none"
+                    />
+                    <button
+                      onClick={handleTranslateCallNotes}
+                      disabled={isTranslatingCallNotes || !callNotes.trim()}
+                      className="absolute bottom-2 right-2 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-1.5 text-xs font-medium border border-blue-100 shadow-sm"
+                      title="Türkçeye Çevir (Yapay Zeka)"
+                    >
+                      {isTranslatingCallNotes ? (
+                        <div className="w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        <Sparkles size={14} />
+                      )}
+                      Çevir
+                    </button>
+                  </div>
 
                   {/* Floating WhatsApp Button */}
                   <AnimatePresence>
