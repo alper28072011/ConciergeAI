@@ -23,6 +23,7 @@ import {
   LineChart, Line, PieChart, Pie, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
 } from 'recharts';
 import { getDashboardData } from '../utils/biEngine';
+import { buildUnifiedTimeline } from '../utils';
 
 enum OperationType {
   CREATE = 'create',
@@ -181,10 +182,7 @@ const AVAILABLE_MODULES = [
 ];
 
 const getGuaranteedUserId = () => {
-  // 1. Firebase'de oturum varsa onu kullan
   if (auth.currentUser?.uid) return auth.currentUser.uid;
-  
-  // 2. Yoksa tarayıcıya özel kalıcı bir cihaz kimliği üret/kullan
   let localUid = localStorage.getItem('crm_device_uid');
   if (!localUid) {
     localUid = 'device_' + Math.random().toString(36).substr(2, 11);
@@ -195,6 +193,7 @@ const getGuaranteedUserId = () => {
 
 export function DashboardModule() {
   const [analytics, setAnalytics] = useState<CommentAnalytics[]>([]);
+  const [commentActions, setCommentActions] = useState<Record<string, any[]>>({});
   const [taxonomy, setTaxonomy] = useState<HotelTaxonomy | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const dashboardRef = useRef<HTMLDivElement>(null);
@@ -223,9 +222,10 @@ export function DashboardModule() {
   const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string }>({ type: 'all', value: 'all' });
   const [timelineGranularity, setTimelineGranularity] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
+  const [expandedActions, setExpandedActions] = useState<Record<string, boolean>>({});
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   
-  // Show All Toggles for Analytics Sections
+  // Show All Toggles
   const [showAllMostMentioned, setShowAllMostMentioned] = useState(false);
   const [showAllTopPositive, setShowAllTopPositive] = useState(false);
   const [showAllTopNegative, setShowAllTopNegative] = useState(false);
@@ -251,28 +251,11 @@ export function DashboardModule() {
     title: `Otel CRM Kokpit Raporu - ${new Date().toLocaleDateString('tr-TR')}`
   });
 
-  // Load User Preferences
   useEffect(() => {
     const initPreferences = async () => {
       const uid = getGuaranteedUserId();
       setUserId(uid);
       
-      const defaultState = {
-        modulesOrder: AVAILABLE_MODULES.map(m => m.id),
-        activeModules: ['kpi_cards', 'satisfaction_timeline', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda'],
-        globalViewMode: 'chart',
-        dateFilter: '30days',
-        customStartDate: '',
-        customEndDate: '',
-        selectedMainCategory: 'all',
-        selectedSubCategory: 'all',
-        selectedNationalities: [],
-        selectedSources: [],
-        isSourceExpanded: false,
-        isNationalityExpanded: false,
-        isDateExpanded: true,
-      };
-
       try {
         const docRef = doc(db, 'user_preferences', uid);
         const docSnap = await getDoc(docRef);
@@ -308,12 +291,10 @@ export function DashboardModule() {
       }
     };
 
-    // Firebase Auth tetiklense de tetiklenmese de bizim init fonksiyonumuz çalışacak
     const unsubscribe = onAuthStateChanged(auth, () => {
       initPreferences();
     });
     
-    // Auth state'in çok yavaş olması ihtimaline karşı bir sigorta:
     const timeoutId = setTimeout(initPreferences, 1000);
 
     return () => {
@@ -322,9 +303,8 @@ export function DashboardModule() {
     };
   }, []);
 
-  // Save User Preferences Function
   const handleSavePreferences = async () => {
-    const uid = getGuaranteedUserId(); // %100 bir ID dönecek
+    const uid = getGuaranteedUserId();
     
     setIsSaving(true);
     setSaveStatus('saving');
@@ -373,28 +353,24 @@ export function DashboardModule() {
     setModulesOrder(newOrder);
   };
 
-  // Otonom Yorum Senkronizasyonu (Silent Background Sync)
   useEffect(() => {
     const syncMissingComments = async () => {
       try {
-        // 1. Eksik metinli yorumları tespit et
-        const missingComments = analytics.filter(c => !c.comment || c.comment.trim() === '' || c.comment === 'Yorum metni sistemde bulunamadı.');
-        if (missingComments.length === 0) return; // Eksik yoksa dur.
+        const missingComments = analytics.filter(c => !c.comment || c.comment.trim() === '' || c.comment === 'Yorum metni sistemde bulunamadı.' || c.answer === undefined);
+        if (missingComments.length === 0) return;
 
         const missingIds = missingComments.map(c => Number(c.commentId)).filter(id => !isNaN(id));
         if (missingIds.length === 0) return;
 
-        // 2. API Ayarlarını çek
         const savedSettings = localStorage.getItem('hotelApiSettings');
         if (!savedSettings) return;
         const settings = JSON.parse(savedSettings);
         if (!settings.commentPayloadTemplate) return;
 
-        // 3. Elektra IN operatörü ile toplu sorgu hazırla
         const basePayload = JSON.parse(settings.commentPayloadTemplate);
         const payload = {
           ...basePayload,
-          Select: ["ID", "COMMENT"],
+          Select: ["ID", "COMMENT", "ANSWER"],
           Where: [
             ...((basePayload.Where && Array.isArray(basePayload.Where)) ? basePayload.Where : []),
             { Column: "ID", Operator: "IN", Value: missingIds }
@@ -402,15 +378,19 @@ export function DashboardModule() {
           Paging: { Current: 1, ItemsPerPage: 5000 }
         };
 
-        // 4. Arka planda sessizce çek
         const response = await executeElektraQuery(payload);
         
-        // 5. Firebase'i sessizce güncelle (onSnapshot sayesinde UI otomatik yenilenecek)
         if (response && Array.isArray(response)) {
           response.forEach(async (item: any) => {
-            if (item.ID && item.COMMENT) {
+            if (item.ID) {
               const docRef = doc(db, 'comment_analytics', String(item.ID));
-              await updateDoc(docRef, { comment: item.COMMENT }).catch(e => console.warn("Sessiz güncelleme atlandı:", e));
+              const updateData: any = {};
+              if (item.COMMENT) updateData.comment = item.COMMENT;
+              if (item.ANSWER !== undefined) updateData.answer = item.ANSWER || '';
+              
+              if (Object.keys(updateData).length > 0) {
+                await updateDoc(docRef, updateData).catch(e => console.warn("Sessiz güncelleme atlandı:", e));
+              }
             }
           });
         }
@@ -419,7 +399,6 @@ export function DashboardModule() {
       }
     };
 
-    // Sayfa yüklenmesini engellememek için 2 saniye gecikmeli (debounce) çalıştır
     const timeoutId = setTimeout(() => {
       syncMissingComments();
     }, 2000);
@@ -430,7 +409,6 @@ export function DashboardModule() {
   useEffect(() => {
     setIsLoading(true);
     
-    // Fetch Taxonomy
     const fetchTaxonomy = async () => {
       try {
         const docRef = doc(db, 'system_memory', 'taxonomy');
@@ -444,7 +422,6 @@ export function DashboardModule() {
     };
     fetchTaxonomy();
 
-    // Fetch Analytics
     const unsubscribe = onSnapshot(collection(db, 'comment_analytics'), (querySnapshot) => {
       const data: CommentAnalytics[] = [];
       querySnapshot.forEach((doc) => {
@@ -458,7 +435,29 @@ export function DashboardModule() {
       handleFirestoreError(error, OperationType.GET, 'comment_analytics');
     });
 
-    return () => unsubscribe();
+    const unsubscribeActions = onSnapshot(collection(db, 'comment_actions'), (querySnapshot) => {
+      const actionsMap: Record<string, any[]> = {};
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        const commentId = data.commentId;
+        if (!actionsMap[commentId]) {
+          actionsMap[commentId] = [];
+        }
+        actionsMap[commentId].push({ id: doc.id, ...data });
+      });
+      Object.keys(actionsMap).forEach(key => {
+        actionsMap[key].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      });
+      setCommentActions(actionsMap);
+    }, (error) => {
+      console.error("Error fetching comment_actions:", error);
+      handleFirestoreError(error, OperationType.GET, 'comment_actions');
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeActions();
+    };
   }, []);
 
   useEffect(() => {
@@ -542,7 +541,6 @@ export function DashboardModule() {
         itemDate = parseDate(item.createdAt);
       }
       
-      // Category & SubCategory Filter
       if (selectedMainCategory !== 'all') {
         const hasCategory = item.topics?.some(t => t.mainCategory === selectedMainCategory);
         if (!hasCategory) return;
@@ -553,17 +551,14 @@ export function DashboardModule() {
         }
       }
 
-      // Nationality Filter
       if (selectedNationalities.length > 0) {
         if (!selectedNationalities.includes(item.nationality || 'Bilinmiyor')) return;
       }
 
-      // Source Filter
       if (selectedSources.length > 0) {
         if (!selectedSources.includes(item.source || 'Bilinmiyor')) return;
       }
 
-      // Date Filter
       if (itemDate >= currentStart && itemDate <= currentEnd) {
         current.push(item);
       } else if (isCompareActive && itemDate >= previousStart && itemDate <= previousEnd) {
@@ -579,7 +574,12 @@ export function DashboardModule() {
     
     return filteredAnalytics.filter(item => {
       if (drillDownFilter.type === 'category') {
-        return item.topics?.some(t => t.subCategory === drillDownFilter.value || t.mainCategory === drillDownFilter.value);
+        if (drillDownFilter.value.includes('|')) {
+          const [main, sub] = drillDownFilter.value.split('|');
+          return item.topics?.some(t => t.mainCategory === main && t.subCategory === sub);
+        } else {
+          return item.topics?.some(t => t.subCategory === drillDownFilter.value || t.mainCategory === drillDownFilter.value);
+        }
       }
       if (drillDownFilter.type === 'source') return item.source === drillDownFilter.value;
       if (drillDownFilter.type === 'nationality') return item.nationality === drillDownFilter.value;
@@ -654,14 +654,12 @@ export function DashboardModule() {
 
     const clone = dashboardRef.current.cloneNode(true) as HTMLElement;
     
-    // Remove scrollbars and extra padding for export
+    // Gereksiz scrollbar ve boşlukları temizle
     clone.classList.remove('overflow-y-auto', 'pr-4', 'custom-scrollbar', 'pb-20');
     
-    // Remove any elements that shouldn't be exported
     const noExportElements = clone.querySelectorAll('.no-export');
     noExportElements.forEach(el => el.remove());
 
-    // Make interactive buttons visible if interactive is selected
     if (exportOptions.interactive) {
       const interactiveOnlyElements = clone.querySelectorAll('.interactive-only');
       interactiveOnlyElements.forEach(el => {
@@ -672,11 +670,10 @@ export function DashboardModule() {
       interactiveOnlyElements.forEach(el => el.remove());
     }
 
-    // Fix SVG dimensions in the clone for better export rendering
+    // SVG düzeltmeleri
     const svgs = clone.querySelectorAll('svg');
     svgs.forEach(svg => {
       if (svg.classList.contains('recharts-surface')) {
-        // Ensure viewBox is set correctly if it's missing or zero
         const viewBox = svg.getAttribute('viewBox');
         if (!viewBox || viewBox === '0 0 0 0') {
           const width = svg.getAttribute('width') || svg.getBoundingClientRect().width || '1000';
@@ -691,7 +688,6 @@ export function DashboardModule() {
       }
     });
 
-    // Fix parent container heights for responsive charts
     const responsiveContainers = clone.querySelectorAll('.recharts-responsive-container');
     responsiveContainers.forEach(container => {
       const parent = container.parentElement;
@@ -702,65 +698,109 @@ export function DashboardModule() {
       }
     });
 
-    // --- INJECT ALL COMMENTS INTO HTML ---
-    if (exportOptions.includeComments) {
-      const containerEl = clone.querySelector('#html-export-comments-container');
-      if (containerEl) {
-        let allCommentsHtml = '<div id="active-filter-bar" class="bg-indigo-50 border border-indigo-100 p-3 rounded-xl mb-4 flex justify-between items-center text-sm font-bold text-indigo-700 hidden"> <span id="active-filter-text">Filtre: Alman</span> <button id="clear-filter-btn" class="text-xs bg-white px-2 py-1 rounded shadow-sm hover:bg-indigo-100 cursor-pointer">Filtreyi Temizle</button> </div>';
-        if (filteredAnalytics.length === 0) {
-          allCommentsHtml += '<div class="flex flex-col items-center justify-center py-20 text-slate-400 opacity-50"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><p class="text-xs font-bold">Yorum Bulunamadı</p></div>';
-        } else {
-          filteredAnalytics.forEach((commentData) => {
-            const localText = commentData.comment || commentData.rawText || commentData.COMMENT || '';
-            const dateStr = new Date(commentData.date || commentData.createdAt).toLocaleDateString('tr-TR');
-            
-            // Generate data attributes
-            const categories = commentData.topics?.map(t => t.mainCategory).join(',') || '';
-            const subCategories = commentData.topics?.map(t => t.subCategory).join(',') || '';
-            const nationality = commentData.nationality || 'Bilinmiyor';
-            const source = commentData.source || 'Bilinmiyor';
-            const sentiment = commentData.sentiment || 'neutral';
-
-            let topicsHtml = '';
-            if (commentData.topics && commentData.topics.length > 0) {
-                topicsHtml = '<div class="mt-3 pt-3 border-t border-slate-50 flex flex-wrap gap-1">';
-                commentData.topics.forEach(topic => {
-                    topicsHtml += '<span class="text-[8px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase">' + topic.subCategory + '</span>';
-                });
-                topicsHtml += '</div>';
-            }
-
-            let textHtml = '';
-            if (localText) {
-                textHtml = '<p class="text-xs text-slate-700 leading-relaxed italic">"' + localText + '"</p>';
-            } else {
-                textHtml = '<p class="text-xs text-slate-400 italic animate-pulse">Metin senkronize ediliyor...</p>';
-            }
-
-            allCommentsHtml += `<div class="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group comment-card" 
-                data-source="${source}" 
-                data-nationality="${nationality}" 
-                data-overall-score="${commentData.overallScore || 0}"
-                data-topics="${subCategories}"
-                style="display: block;">
-                <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2">
-                        <span class="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">${source}</span>
-                        <span class="text-[10px] font-bold text-slate-400">${dateStr}</span>
-                    </div>
-                    <div class="text-xs font-black text-slate-600">${commentData.overallScore || 0}/100</div>
-                </div>
-                <div class="relative">${textHtml}</div>
-                ${topicsHtml}
-            </div>`;
-          });
-        }
-        containerEl.innerHTML = allCommentsHtml;
-      }
-    }
-
     const content = clone.innerHTML;
     
+    // --- EUREKA: YORUMLARI DOĞRUDAN HTML OLARAK ÜRETİP DIŞARIYA ENJEKTE EDİYORUZ ---
+    let commentsSidebarHtml = '';
+    if (exportOptions.includeComments) {
+      // Aktif Filtre Çubuğu
+      let allCommentsHtml = `
+        <div id="active-filter-bar" class="bg-indigo-50 border border-indigo-200 p-4 rounded-xl mb-4 flex justify-between items-center text-sm font-bold text-indigo-800 shadow-sm" style="display: none;"> 
+          <span id="active-filter-text">Filtre: </span> 
+          <button id="clear-filter-btn" class="text-xs bg-white px-3 py-1.5 rounded-lg shadow-sm hover:bg-indigo-100 cursor-pointer border border-indigo-200 transition-colors">
+            Tümünü Göster
+          </button> 
+        </div>`;
+      
+      if (filteredAnalytics.length === 0) {
+        allCommentsHtml += '<div class="flex flex-col items-center justify-center py-20 text-slate-400 opacity-50"><p class="text-sm font-bold">Bu döneme ait yorum bulunamadı</p></div>';
+      } else {
+        filteredAnalytics.forEach((commentData) => {
+          const localText = commentData.comment || (commentData as any).rawText || (commentData as any).COMMENT || '';
+          const dateStr = new Date(commentData.date || commentData.createdAt).toLocaleDateString('tr-TR');
+          
+          // Akıllı Filtre Etiketleri (Data Attributes)
+          const categories = commentData.topics?.map(t => t.mainCategory).join(',') || '';
+          const subCategories = commentData.topics?.map(t => t.subCategory).join(',') || '';
+          const compositeTopics = commentData.topics?.map(t => `${t.mainCategory}|${t.subCategory}`).join(',') || '';
+          const nationality = commentData.nationality || 'Bilinmiyor';
+          const source = commentData.source || 'Bilinmiyor';
+
+          let topicsHtml = '';
+          if (commentData.topics && commentData.topics.length > 0) {
+              topicsHtml = '<div class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-1.5">';
+              commentData.topics.forEach(topic => {
+                  topicsHtml += `<span class="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-1 rounded shadow-sm uppercase">${topic.subCategory}</span>`;
+              });
+              topicsHtml += '</div>';
+          }
+
+          let textHtml = '';
+          if (localText) {
+              textHtml = `<p class="text-sm text-slate-700 leading-relaxed">"${localText}"</p>`;
+          } else {
+              textHtml = '<p class="text-sm text-slate-400 italic">Metin bulunamadı.</p>';
+          }
+
+          const firebaseActions = commentActions[String(commentData.commentId)] || [];
+          const unifiedActions = buildUnifiedTimeline(commentData.answer, firebaseActions);
+          
+          let actionsHtml = '';
+          if (unifiedActions.length > 0) {
+            actionsHtml = `
+              <div class="mt-4 pt-4 border-t border-slate-100">
+                <button class="text-[10px] font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-800 transition-colors uppercase" onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('svg').classList.toggle('rotate-180')">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform"><path d="m6 9 6 6 6-6"/></svg>
+                  Alınan Aksiyonlar (${unifiedActions.length})
+                </button>
+                <div class="hidden mt-3 space-y-3 pl-2 border-l-2 border-indigo-100">
+                  ${unifiedActions.map(action => `
+                    <div class="relative pl-4">
+                      <div class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-indigo-400 border-2 border-white"></div>
+                      <div class="text-[9px] font-bold text-slate-400 mb-0.5">${action.date ? new Date(action.date).toLocaleString('tr-TR') : 'Tarih Belirtilmemiş'}</div>
+                      <div class="text-xs text-slate-700">${action.description}</div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `;
+          }
+
+          allCommentsHtml += `<div class="p-5 rounded-2xl border border-slate-200 bg-white shadow-sm hover:border-indigo-400 transition-all mb-4 comment-card" 
+              data-source="${source}" 
+              data-nationality="${nationality}" 
+              data-topics="${compositeTopics},${subCategories},${categories}"
+              style="display: block;">
+              <div class="flex items-center justify-between mb-3">
+                  <div class="flex items-center gap-3">
+                      <span class="text-[10px] font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100 uppercase">${source}</span>
+                      <span class="text-xs font-bold text-slate-400">${dateStr}</span>
+                  </div>
+                  <div class="text-sm font-black text-slate-700 bg-slate-50 px-2 py-1 rounded-lg">${commentData.overallScore || 0}/100</div>
+              </div>
+              <div class="relative">${textHtml}</div>
+              ${topicsHtml}
+              ${actionsHtml}
+          </div>`;
+        });
+      }
+
+      // Yorumları kendi tasarım sütununa oturtuyoruz
+      commentsSidebarHtml = `
+        <aside class="w-full xl:w-[450px] shrink-0 mt-8 xl:mt-0 relative">
+          <div class="bg-slate-50 rounded-2xl border border-slate-200 p-6 shadow-sm sticky top-8 max-h-[calc(100vh-4rem)] overflow-y-auto custom-scrollbar flex flex-col">
+            <h3 class="text-base font-black text-slate-900 uppercase tracking-widest mb-6 border-b border-slate-200 pb-4 flex items-center gap-2 shrink-0">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+              Yorum Detayları
+            </h3>
+            <div id="comments-wrapper" class="flex flex-col flex-1">
+              ${allCommentsHtml}
+            </div>
+          </div>
+        </aside>
+      `;
+    }
+
     const dateRangeLabel = dateFilter === 'today' ? 'Bugün' :
                            dateFilter === 'yesterday' ? 'Dün' :
                            dateFilter === '7days' ? 'Son 7 Gün' :
@@ -778,8 +818,9 @@ export function DashboardModule() {
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
     <style>
-        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; color: #1e293b; margin: 0; padding: 40px 0; display: flex; justify-content: center; }
-        .report-container { width: 210mm; background: white; min-height: 297mm; padding: 12mm 15mm; box-shadow: 0 10px 25px rgba(0,0,0,0.1); border-radius: 4px; }
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; color: #1e293b; margin: 0; padding: 40px 0; display: flex; justify-content: center; }
+        /* Geniş ekran monitörler için konteyneri büyüttük */
+        .report-container { width: 95%; max-width: 1600px; background: white; min-height: 297mm; padding: 40px; box-shadow: 0 20px 40px -10px rgba(0,0,0,0.1); border-radius: 16px; border: 1px solid #e2e8f0; }
         .recharts-responsive-container { width: 100% !important; height: auto !important; min-height: unset !important; }
         .recharts-responsive-container > div { width: 100% !important; height: auto !important; position: relative !important; }
         .recharts-wrapper { width: 100% !important; height: auto !important; padding-bottom: 20px !important; }
@@ -790,48 +831,53 @@ export function DashboardModule() {
         .recharts-text { font-family: 'Inter', sans-serif !important; font-size: 12px !important; }
         .recharts-legend-wrapper { position: relative !important; bottom: auto !important; left: auto !important; right: auto !important; top: auto !important; width: 100% !important; height: auto !important; }
         
-        /* New Styles for Interactive Export */
-        .comment-card { border-left: 4px solid #6366f1; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
+
         .subtopic-row { transition: all 0.3s ease; }
-        .active-filter-highlight { outline: 2px solid #6366f1; outline-offset: 2px; border-radius: 4px; }
+        .active-filter-highlight { outline: 2px solid #6366f1; outline-offset: 2px; border-radius: 4px; background-color: #f8fafc; }
         
         @media print {
             .no-print { display: none; }
             body { background-color: white; padding: 0; }
-            .report-container { width: 100%; box-shadow: none; border: none; padding: 0; }
-            .shadow-xl, .shadow-lg, .shadow-md { shadow: none !important; border: 1px solid #e2e8f0; }
+            .report-container { width: 100%; max-width: 100%; box-shadow: none; border: none; padding: 0; }
         }
     </style>
 </head>
 <body>
     <div class="report-container">
-        <header class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+        <header class="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
             <div>
-                <h1 class="text-3xl font-black text-slate-900 tracking-tight">${exportOptions.title || 'Yönetim Raporu'}</h1>
-                <p class="text-slate-500 font-medium mt-1">Oluşturulma Tarihi: ${new Date().toLocaleString('tr-TR')}</p>
-                <div class="flex items-center gap-3 mt-3">
-                    <span class="px-3 py-1 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-full border border-indigo-100">
+                <h1 class="text-4xl font-black text-slate-900 tracking-tight">${exportOptions.title || 'Yönetim Raporu'}</h1>
+                <p class="text-slate-500 font-medium mt-2">Oluşturulma Tarihi: ${new Date().toLocaleString('tr-TR')}</p>
+                <div class="flex items-center gap-3 mt-4">
+                    <span class="px-4 py-1.5 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-full border border-indigo-100">
                         Dönem: ${dateRangeLabel}
                     </span>
-                    <span class="px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full border border-emerald-100">
+                    <span class="px-4 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full border border-emerald-100">
                         Kaynak: ${selectedSources.length === 0 ? 'Tümü' : selectedSources.join(', ')}
                     </span>
                 </div>
             </div>
-            <div class="no-print flex gap-2">
-                <button onclick="window.print()" class="px-4 py-2 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all flex items-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+            <div class="no-print flex gap-3">
+                <button onclick="window.print()" class="px-6 py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all flex items-center gap-2 shadow-lg shadow-slate-200">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
                     Yazdır / PDF
                 </button>
             </div>
         </header>
 
-        <main id="report-body" class="flex flex-col gap-6">
-            ${content}
-        </main>
+        <div class="flex flex-col xl:flex-row gap-10">
+            <main id="report-body" class="flex-1 flex flex-col gap-8 min-w-0">
+                ${content}
+            </main>
+            
+            ${commentsSidebarHtml}
+        </div>
 
-        <footer class="mt-12 py-8 border-t border-slate-200 text-center">
-            <p class="text-slate-400 text-sm font-bold tracking-widest uppercase">Elektra AI Dashboard &copy; 2026</p>
+        <footer class="mt-16 py-8 border-t border-slate-200 text-center">
+            <p class="text-slate-400 text-xs font-bold tracking-widest uppercase">Concierge AI Dashboard &copy; 2026</p>
         </footer>
     </div>
 
@@ -866,82 +912,82 @@ export function DashboardModule() {
                 });
             }
 
-            // Handle "Show All" toggles for Most Mentioned / Top Positive / Top Negative
             const toggleButtons = document.querySelectorAll('[data-toggle-btn]');
             toggleButtons.forEach(btn => {
                 const sectionId = btn.getAttribute('data-toggle-btn');
                 const rows = document.querySelectorAll(\`[data-section="\${sectionId}"] .toggleable-row\`);
-                
-                // Initial state
                 let isExpanded = btn.getAttribute('data-expanded') === 'true';
                 
                 btn.addEventListener('click', () => {
                     isExpanded = !isExpanded;
                     rows.forEach(row => {
-                        if (isExpanded) {
-                            row.classList.remove('hidden');
-                        } else {
-                            row.classList.add('hidden');
-                        }
+                        if (isExpanded) row.classList.remove('hidden');
+                        else row.classList.add('hidden');
                     });
-                    
                     btn.setAttribute('data-expanded', isExpanded);
                     const count = btn.getAttribute('data-count');
-                    btn.innerHTML = isExpanded ? 'Daha Az Göster <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block ml-1"><polyline points="18 15 12 9 6 15"></polyline></svg>' : 'Tümünü Gör (' + count + ') <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="inline-block ml-1"><polyline points="6 9 12 15 18 9"></polyline></svg>';
+                    btn.innerHTML = isExpanded ? 'Daha Az Göster' : 'Tümünü Gör (' + count + ')';
                 });
             });
             ` : ''}
 
             ${exportOptions.includeComments ? `
-            // --- B. Omni-Filtre Motoru ---
+            // --- B. OMNI-FİLTRE (Tüm Yorumları Filtreleme) MOTORU ---
             const triggers = document.querySelectorAll('.interactive-filter-trigger');
             const commentCards = document.querySelectorAll('.comment-card');
             const filterBar = document.getElementById('active-filter-bar');
             const filterText = document.getElementById('active-filter-text');
             const clearBtn = document.getElementById('clear-filter-btn');
 
-            // Görsel Geri Bildirim İçin CSS Ekleme
+            // Görsel Hover Efektleri İçin CSS Enjeksiyonu
             const style = document.createElement('style');
-            style.textContent = '.interactive-filter-trigger { cursor: pointer; transition: all 0.2s; } .interactive-filter-trigger:hover { background-color: #f1f5f9; transform: scale(1.01); }';
+            style.textContent = '.interactive-filter-trigger { cursor: pointer; transition: all 0.2s; } .interactive-filter-trigger:hover { background-color: #f1f5f9 !important; outline: 2px solid #cbd5e1; outline-offset: -2px; }';
             document.head.appendChild(style);
 
-            // Tüm yorumları göster fonksiyonu
             const resetFilters = () => {
               commentCards.forEach(card => card.style.display = 'block');
               if (filterBar) filterBar.style.display = 'none';
+              triggers.forEach(t => t.classList.remove('active-filter-highlight'));
             };
 
-            if (clearBtn) {
-              clearBtn.addEventListener('click', resetFilters);
-            }
+            if (clearBtn) clearBtn.addEventListener('click', resetFilters);
 
-            // Filtreleme Motoru
             triggers.forEach(trigger => {
               trigger.addEventListener('click', (e) => {
                 const type = trigger.getAttribute('data-filter-type');
                 const value = trigger.getAttribute('data-filter-value');
-                if (!type || !value) return;
+                if (!type || !value || value === 'all') {
+                  resetFilters();
+                  return;
+                }
 
-                // UI Güncellemesi
+                // Önceden seçili olanı temizle
+                triggers.forEach(t => t.classList.remove('active-filter-highlight'));
+                trigger.classList.add('active-filter-highlight');
+
                 if (filterText) filterText.textContent = \`Filtreleniyor: \${value}\`;
                 if (filterBar) filterBar.style.display = 'flex';
 
-                // Yorumları Eşleştir
+                let visibleCount = 0;
+
                 commentCards.forEach(card => {
                   let isMatch = false;
                   if (type === 'topic') {
                     const topics = card.getAttribute('data-topics') || '';
-                    isMatch = topics.includes(value);
+                    // Alt konu veya ana konu kelimesini arar
+                    isMatch = topics.split(',').includes(value); 
                   } else {
                     const cardValue = card.getAttribute(\`data-\${type}\`);
                     isMatch = (cardValue === value);
                   }
                   
-                  card.style.display = isMatch ? 'block' : 'none';
+                  if (isMatch) {
+                      card.style.display = 'block';
+                      visibleCount++;
+                  } else {
+                      card.style.display = 'none';
+                  }
                 });
-                
-                // Mobilde veya uzun sayfada yorumların başına kaydır (smooth scroll)
-                if (filterBar) filterBar.scrollIntoView({ behavior: 'smooth', block: 'start' });
               });
             });
             ` : ''}
@@ -955,7 +1001,7 @@ export function DashboardModule() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${exportOptions.title || 'elektra-rapor'}-${new Date().toISOString().split('T')[0]}.html`;
+    a.download = `${exportOptions.title || 'concierge-ai-rapor'}-${new Date().toISOString().split('T')[0]}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1692,7 +1738,14 @@ export function DashboardModule() {
                           data={categoryChartData} 
                           margin={{ left: 10, right: 60, top: 10, bottom: 10 }}
                           onClick={(data: any) => {
-                            if (data && data.activeLabel) {
+                            if (data && data.activePayload && data.activePayload[0]) {
+                              const payload = data.activePayload[0].payload;
+                              if (payload.isMain === false && payload.parent) {
+                                setDrillDownFilter({ type: 'category', value: `${payload.parent}|${payload.name}` });
+                              } else {
+                                setDrillDownFilter({ type: 'category', value: payload.name });
+                              }
+                            } else if (data && data.activeLabel) {
                               setDrillDownFilter({ type: 'category', value: data.activeLabel });
                             }
                           }}
@@ -1822,8 +1875,8 @@ export function DashboardModule() {
                                   className={`bg-slate-50/50 hover:bg-indigo-50 transition-colors cursor-pointer border-l-2 border-indigo-200 interactive-filter-trigger subtopic-row ${showSubCategories ? '' : 'hidden'}`}
                                   data-parent-category={group.name}
                                   data-filter-type="topic"
-                                  data-filter-value={sub.subCategory}
-                                  onClick={() => setDrillDownFilter({ type: 'category', value: sub.subCategory })}
+                                  data-filter-value={`${group.name}|${sub.subCategory}`}
+                                  onClick={() => setDrillDownFilter({ type: 'category', value: `${group.name}|${sub.subCategory}` })}
                                 >
                                   <td className="py-2 px-4 pl-8">
                                     <span className="text-xs font-medium text-slate-600">
@@ -2231,7 +2284,10 @@ export function DashboardModule() {
                             data={showAllMostMentioned ? dashboardData.mostMentioned : dashboardData.mostMentioned.slice(0, 10)} 
                             margin={{ left: 20, right: 80, top: 10, bottom: 10 }}
                             onClick={(data: any) => {
-                              if (data && data.activeLabel) {
+                              if (data && data.activePayload && data.activePayload[0]) {
+                                const payload = data.activePayload[0].payload;
+                                setDrillDownFilter({ type: 'category', value: `${payload.mainCategory}|${payload.subCategory}` });
+                              } else if (data && data.activeLabel) {
                                 setDrillDownFilter({ type: 'category', value: data.activeLabel });
                               }
                             }}
@@ -2293,9 +2349,9 @@ export function DashboardModule() {
                               <tr 
                                 key={idx} 
                                 className={`hover:bg-slate-50/80 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllMostMentioned && idx >= 10) ? 'hidden' : ''}`}
-                                onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                                onClick={() => setDrillDownFilter({ type: 'category', value: `${item.mainCategory}|${item.subCategory}` })}
                                 data-filter-type="topic"
-                                data-filter-value={item.subCategory}
+                                data-filter-value={`${item.mainCategory}|${item.subCategory}`}
                               >
                                 <td className="py-4 px-4">
                                   <span className="text-sm font-bold text-slate-800 group-hover:text-indigo-600 transition-colors">{item.subCategory}</span>
@@ -2362,7 +2418,10 @@ export function DashboardModule() {
                             data={showAllTopPositive ? dashboardData.topPositive : dashboardData.topPositive.slice(0, 10)} 
                             margin={{ left: 20, right: 100, top: 10, bottom: 10 }}
                             onClick={(data: any) => {
-                              if (data && data.activeLabel) {
+                              if (data && data.activePayload && data.activePayload[0]) {
+                                const payload = data.activePayload[0].payload;
+                                setDrillDownFilter({ type: 'category', value: `${payload.mainCategory}|${payload.subCategory}` });
+                              } else if (data && data.activeLabel) {
                                 setDrillDownFilter({ type: 'category', value: data.activeLabel });
                               }
                             }}
@@ -2424,9 +2483,9 @@ export function DashboardModule() {
                               <tr 
                                 key={idx} 
                                 className={`hover:bg-slate-50/80 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopPositive && idx >= 10) ? 'hidden' : ''}`}
-                                onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                                onClick={() => setDrillDownFilter({ type: 'category', value: `${item.mainCategory}|${item.subCategory}` })}
                                 data-filter-type="topic"
-                                data-filter-value={item.subCategory}
+                                data-filter-value={`${item.mainCategory}|${item.subCategory}`}
                               >
                                 <td className="py-4 px-4">
                                   <span className="text-sm font-bold text-slate-800 group-hover:text-emerald-600 transition-colors">{item.subCategory}</span>
@@ -2493,7 +2552,10 @@ export function DashboardModule() {
                             data={showAllTopNegative ? dashboardData.topNegative : dashboardData.topNegative.slice(0, 10)} 
                             margin={{ left: 20, right: 100, top: 10, bottom: 10 }}
                             onClick={(data: any) => {
-                              if (data && data.activeLabel) {
+                              if (data && data.activePayload && data.activePayload[0]) {
+                                const payload = data.activePayload[0].payload;
+                                setDrillDownFilter({ type: 'category', value: `${payload.mainCategory}|${payload.subCategory}` });
+                              } else if (data && data.activeLabel) {
                                 setDrillDownFilter({ type: 'category', value: data.activeLabel });
                               }
                             }}
@@ -2555,9 +2617,9 @@ export function DashboardModule() {
                               <tr 
                                 key={idx} 
                                 className={`hover:bg-rose-50/30 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopNegative && idx >= 10) ? 'hidden' : ''}`}
-                                onClick={() => setDrillDownFilter({ type: 'category', value: item.subCategory })}
+                                onClick={() => setDrillDownFilter({ type: 'category', value: `${item.mainCategory}|${item.subCategory}` })}
                                 data-filter-type="topic"
-                                data-filter-value={item.subCategory}
+                                data-filter-value={`${item.mainCategory}|${item.subCategory}`}
                               >
                                 <td className="py-4 px-4">
                                   <span className="text-sm font-bold text-slate-800 group-hover:text-rose-600 transition-colors">{item.subCategory}</span>
@@ -2681,6 +2743,37 @@ export function DashboardModule() {
                           </span>
                         ))}
                       </div>
+                      
+                      {(() => {
+                        const firebaseActions = commentActions[String(commentData.commentId)] || [];
+                        const unifiedActions = buildUnifiedTimeline(commentData.answer, firebaseActions);
+                        
+                        if (unifiedActions.length === 0) return null;
+                        
+                        return (
+                          <div className="mt-3 pt-3 border-t border-slate-50">
+                            <button 
+                              onClick={() => setExpandedActions(prev => ({ ...prev, [commentData.commentId]: !prev[commentData.commentId] }))}
+                              className="text-[10px] font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-800 transition-colors uppercase"
+                            >
+                              <ChevronDown className={`w-3 h-3 transition-transform ${expandedActions[commentData.commentId] ? 'rotate-180' : ''}`} />
+                              Alınan Aksiyonlar ({unifiedActions.length})
+                            </button>
+                            
+                            {expandedActions[commentData.commentId] && (
+                              <div className="mt-3 space-y-3 pl-2 border-l-2 border-indigo-100">
+                                {unifiedActions.map((action, aidx) => (
+                                  <div key={aidx} className="relative pl-4">
+                                    <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-indigo-400 border-2 border-white"></div>
+                                    <div className="text-[9px] font-bold text-slate-400 mb-0.5">{action.date ? new Date(action.date).toLocaleString('tr-TR') : 'Tarih Belirtilmemiş'}</div>
+                                    <div className="text-xs text-slate-700">{action.description}</div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 })

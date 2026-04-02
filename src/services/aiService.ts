@@ -217,6 +217,7 @@ ${comment.COMMENT || ''}`;
       nationality: comment.NATIONALITY || 'Bilinmiyor',
       overallScore: result.overallScore || 0,
       comment: comment.COMMENT || '',
+      answer: comment.ANSWER || '',
       topics: topics,
       createdAt: new Date().toISOString()
     };

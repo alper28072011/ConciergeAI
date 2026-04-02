@@ -33,6 +33,7 @@ export interface CommentAnalytics {
   nationality: string;
   overallScore: number;
   comment?: string;
+  answer?: string;
   topics: UnifiedTopicAnalysis[];
   createdAt: string;
 }
