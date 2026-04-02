@@ -768,13 +768,13 @@ export function DashboardModule() {
           if (unifiedActions.length > 0) {
             actionsHtml = `
               <div class="mt-4 pt-4 border-t border-slate-100">
-                <button class="text-[10px] font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-800 transition-colors uppercase" onclick="this.nextElementSibling.classList.toggle('hidden'); this.querySelector('svg').classList.toggle('rotate-180')">
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform"><path d="m6 9 6 6 6-6"/></svg>
+                <button class="text-[10px] font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-800 transition-colors uppercase" onclick="const content = this.nextElementSibling; const icon = this.querySelector('svg'); content.classList.toggle('expanded'); icon.classList.toggle('rotated');">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="accordion-icon"><path d="m6 9 6 6 6-6"/></svg>
                   Alınan Aksiyonlar (${unifiedActions.length})
                 </button>
-                <div class="hidden mt-3 space-y-3 pl-2 border-l-2 border-indigo-100">
+                <div class="accordion-content pl-2 border-l-2 border-indigo-100">
                   ${unifiedActions.map(action => `
-                    <div class="relative pl-4">
+                    <div class="relative pl-4 mb-3 last:mb-0">
                       <div class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-indigo-400 border-2 border-white"></div>
                       <div class="text-[9px] font-bold text-slate-400 mb-0.5">${action.date ? new Date(action.date).toLocaleString('tr-TR') : 'Tarih Belirtilmemiş'}</div>
                       <div class="text-xs text-slate-700">${action.description}</div>
@@ -785,11 +785,11 @@ export function DashboardModule() {
             `;
           }
 
-          allCommentsHtml += `<div class="p-5 rounded-2xl border border-slate-200 bg-white shadow-sm hover:border-indigo-400 transition-all mb-4 comment-card" 
+          allCommentsHtml += `<div class="p-5 rounded-2xl border border-slate-200 bg-white shadow-sm hover:border-indigo-400 transition-all mb-4 comment-card visible-card" 
               data-source="${source}" 
               data-nationality="${nationality}" 
               data-topics="${compositeTopics},${subCategories},${categories}"
-              style="display: block;">
+              style="animation-delay: ${Math.min(filteredAnalytics.indexOf(commentData) * 0.05, 0.5)}s;">
               <div class="flex items-center justify-between mb-3">
                   <div class="flex items-center gap-3">
                       <span class="text-[10px] font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100 uppercase">${source}</span>
@@ -856,6 +856,79 @@ export function DashboardModule() {
 
         .subtopic-row { transition: all 0.3s ease; }
         .active-filter-highlight { outline: 2px solid #6366f1; outline-offset: 2px; border-radius: 4px; background-color: #f8fafc; }
+        
+        /* --- ANIMASYONLAR --- */
+        @keyframes fadeInSlideUp {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .comment-card {
+            transition: opacity 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
+                        transform 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
+                        max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1), 
+                        margin 0.4s cubic-bezier(0.4, 0, 0.2, 1), 
+                        padding 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+                        border-width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            transform-origin: top center;
+            overflow: hidden;
+            animation: fadeInSlideUp 0.6s ease-out forwards;
+            animation-fill-mode: both;
+        }
+        
+        .comment-card.hidden-card {
+            opacity: 0;
+            transform: scale(0.95) translateY(-10px);
+            max-height: 0;
+            margin-bottom: 0 !important;
+            padding-top: 0 !important;
+            padding-bottom: 0 !important;
+            border-width: 0 !important;
+            pointer-events: none;
+        }
+        
+        .comment-card.visible-card {
+            opacity: 1;
+            transform: scale(1) translateY(0);
+            max-height: 2000px; /* Yeterince büyük bir değer */
+            pointer-events: auto;
+        }
+
+        /* Accordion animasyonu */
+        .accordion-content {
+            transition: max-height 0.5s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.4s ease, margin 0.4s ease;
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            margin-top: 0;
+        }
+        
+        .accordion-content.expanded {
+            max-height: 1000px;
+            opacity: 1;
+            margin-top: 0.75rem; /* mt-3 */
+        }
+        
+        .accordion-icon {
+            transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .accordion-icon.rotated {
+            transform: rotate(180deg);
+        }
+
+        #active-filter-bar {
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            opacity: 0;
+            transform: translateY(-10px);
+            display: none;
+        }
+        
+        #active-filter-bar.visible {
+            display: flex;
+            opacity: 1;
+            transform: translateY(0);
+        }
         
         @media print {
             .no-print { display: none; }
@@ -964,8 +1037,14 @@ export function DashboardModule() {
             document.head.appendChild(style);
 
             const resetFilters = () => {
-              commentCards.forEach(card => card.style.display = 'block');
-              if (filterBar) filterBar.style.display = 'none';
+              commentCards.forEach(card => {
+                card.classList.remove('hidden-card');
+                card.classList.add('visible-card');
+              });
+              if (filterBar) {
+                filterBar.classList.remove('visible');
+                setTimeout(() => { if (!filterBar.classList.contains('visible')) filterBar.style.display = 'none'; }, 300);
+              }
               triggers.forEach(t => t.classList.remove('active-filter-highlight'));
             };
 
@@ -985,7 +1064,12 @@ export function DashboardModule() {
                 trigger.classList.add('active-filter-highlight');
 
                 if (filterText) filterText.textContent = \`Filtreleniyor: \${value}\`;
-                if (filterBar) filterBar.style.display = 'flex';
+                if (filterBar) {
+                  filterBar.style.display = 'flex';
+                  // Force reflow
+                  void filterBar.offsetWidth;
+                  filterBar.classList.add('visible');
+                }
 
                 let visibleCount = 0;
 
@@ -1001,10 +1085,12 @@ export function DashboardModule() {
                   }
                   
                   if (isMatch) {
-                      card.style.display = 'block';
+                      card.classList.remove('hidden-card');
+                      card.classList.add('visible-card');
                       visibleCount++;
                   } else {
-                      card.style.display = 'none';
+                      card.classList.remove('visible-card');
+                      card.classList.add('hidden-card');
                   }
                 });
               });
