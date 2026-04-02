@@ -368,31 +368,49 @@ export function DashboardModule() {
         if (!settings.commentPayloadTemplate) return;
 
         const basePayload = JSON.parse(settings.commentPayloadTemplate);
-        const payload = {
-          ...basePayload,
-          Select: ["ID", "COMMENT", "ANSWER"],
-          Where: [
-            ...((basePayload.Where && Array.isArray(basePayload.Where)) ? basePayload.Where : []),
-            { Column: "ID", Operator: "IN", Value: missingIds }
-          ],
-          Paging: { Current: 1, ItemsPerPage: 5000 }
-        };
-
-        const response = await executeElektraQuery(payload);
         
-        if (response && Array.isArray(response)) {
-          response.forEach(async (item: any) => {
-            if (item.ID) {
-              const docRef = doc(db, 'comment_analytics', String(item.ID));
-              const updateData: any = {};
-              if (item.COMMENT) updateData.comment = item.COMMENT;
-              if (item.ANSWER !== undefined) updateData.answer = item.ANSWER || '';
-              
-              if (Object.keys(updateData).length > 0) {
-                await updateDoc(docRef, updateData).catch(e => console.warn("Sessiz güncelleme atlandı:", e));
+        // Chunk IDs to prevent API 500 errors (too many parameters in IN clause)
+        const chunkSize = 100;
+        for (let i = 0; i < missingIds.length; i += chunkSize) {
+          const chunk = missingIds.slice(i, i + chunkSize);
+          
+          const payload = {
+            ...basePayload,
+            // 1. DÜZELTME: ANSWER kolonunu da API'den istiyoruz!
+            Select: ["ID", "COMMENT", "ANSWER"],
+            Where: [
+              ...((basePayload.Where && Array.isArray(basePayload.Where)) ? basePayload.Where : []),
+              { Column: "ID", Operator: "IN", Value: chunk }
+            ],
+            Paging: { Current: 1, ItemsPerPage: 5000 }
+          };
+
+          try {
+            const response = await executeElektraQuery(payload);
+            
+            if (response && Array.isArray(response)) {
+              // Process chunk
+              for (const item of response) {
+                if (item.ID) {
+                  const docRef = doc(db, 'comment_analytics', String(item.ID));
+                  const updateData: any = {};
+                  
+                  if (item.COMMENT) updateData.comment = item.COMMENT;
+                  // 2. DÜZELTME: Gelen ANSWER verisini Firestore'a (answer adıyla) kaydediyoruz!
+                  if (item.ANSWER !== undefined) updateData.answer = item.ANSWER || '';
+
+                  if (Object.keys(updateData).length > 0) {
+                    await updateDoc(docRef, updateData).catch(e => console.warn("Sessiz güncelleme atlandı:", e));
+                  }
+                }
               }
             }
-          });
+          } catch (chunkError) {
+            console.error(`Chunk senkronizasyon hatası (${i}-${i+chunkSize}):`, chunkError);
+          }
+          
+          // Small delay between chunks to prevent rate limiting
+          await new Promise(resolve => setTimeout(resolve, 500));
         }
       } catch (error) {
         console.error("Arka plan yorum senkronizasyonu hatası:", error);
@@ -742,7 +760,7 @@ export function DashboardModule() {
               textHtml = '<p class="text-sm text-slate-400 italic">Metin bulunamadı.</p>';
           }
 
-          const localAnswer = commentData.answer || (commentData as any).ANSWER || (commentData as any).Answer || '';
+          const localAnswer = commentData.answer || (commentData as any).ANSWER || '';
           const firebaseActions = commentActions[String(commentData.commentId)] || [];
           const unifiedActions = buildUnifiedTimeline(localAnswer, firebaseActions);
           
@@ -2746,7 +2764,7 @@ export function DashboardModule() {
                       </div>
                       
                       {(() => {
-                        const localAnswer = commentData.answer || (commentData as any).ANSWER || (commentData as any).Answer || '';
+                        const localAnswer = commentData.answer || (commentData as any).ANSWER || '';
                         const firebaseActions = commentActions[String(commentData.commentId)] || [];
                         const unifiedActions = buildUnifiedTimeline(localAnswer, firebaseActions);
                         
