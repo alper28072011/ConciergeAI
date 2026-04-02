@@ -14,45 +14,48 @@ export const formatHtmlContent = (content: string | undefined | null) => {
     .replace(/<p>\s*<\/p>/g, '<div style="height: 1.5em;"></div>');
 };
 
-export const parseElektraActions = (answerString: string | undefined): UnifiedTimelineAction[] => {
-  if (!answerString) return [];
-
+export const parseElektraActions = (answerString: string | undefined | null): UnifiedTimelineAction[] => {
+  if (!answerString || typeof answerString !== 'string' || answerString.trim() === '') return [];
   const actions: UnifiedTimelineAction[] = [];
-  
-  // If the string doesn't contain ">", treat the whole string as a single action without a date
-  if (!answerString.includes('>')) {
+
+  // 1. Önce olası HTML etiketlerini tamamen temizliyoruz ki
+  // <p> veya <br> içindeki ">" algoritmayı bozmasın!
+  const cleanString = answerString.replace(/<[^>]*>?/gm, '');
+
+  // 2. Eğer metin ">" içermiyorsa, tek bir blok halinde aksiyon olarak kabul et.
+  if (!cleanString.includes('>')) {
     actions.push({
-      id: `elektra-0-fallback`,
+      id: 'elektra-0-fallback',
       date: '',
-      description: answerString.trim(),
+      description: cleanString.trim(),
       type: 'elektra',
       source: 'Elektraweb'
     });
     return actions;
   }
 
-  // Split by ">" and filter out empty strings
-  const parts = answerString.split('>').map(p => p.trim()).filter(p => p.length > 0);
+  // 3. ">" ile böl ve boş olanları temizle
+  const parts = cleanString.split('>').map(p => p.trim()).filter(p => p.length > 0);
 
   parts.forEach((part, index) => {
-    // Regex to match DD.MM.YYYY HH:MM at the beginning
-    const dateRegex = /^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})\s*-\s*(.*)/s;
+    // Regex: Tarih formatını çok daha esnek yakala (DD.MM.YYYY, DD/MM/YYYY, tek haneli günler vb.)
+    const dateRegex = /^\s*(\d{1,2})[\.\/]\s*(\d{1,2})[\.\/]\s*(\d{4})\s*[-:]?\s*(\d{1,2})?[:\.]?(\d{1,2})?\s*[-:]?\s*(.*)/s;
     const match = part.match(dateRegex);
 
     if (match) {
       const [_, day, month, year, hour, minute, description] = match;
-      // Convert to ISO string for sorting
-      const dateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), parseInt(hour), parseInt(minute));
+      const h = hour ? parseInt(hour) : 0;
+      const m = minute ? parseInt(minute) : 0;
+      const dateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day), h, m);
       
       actions.push({
         id: `elektra-${index}-${dateObj.getTime()}`,
         date: dateObj.toISOString(),
-        description: description.trim(),
+        description: description ? description.trim() : '',
         type: 'elektra',
         source: 'Elektraweb'
       });
     } else {
-      // If it doesn't match the format, just add it as a general note with an empty date
       actions.push({
         id: `elektra-${index}-fallback`,
         date: '',

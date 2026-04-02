@@ -356,7 +356,7 @@ export function DashboardModule() {
   useEffect(() => {
     const syncMissingComments = async () => {
       try {
-        const missingComments = analytics.filter(c => !c.comment || c.comment.trim() === '' || c.comment === 'Yorum metni sistemde bulunamadı.' || c.answer === undefined);
+        const missingComments = analytics.filter(c => !c.comment || c.comment.trim() === '' || c.comment === 'Yorum metni sistemde bulunamadı.' || c.answer == null);
         if (missingComments.length === 0) return;
 
         const missingIds = missingComments.map(c => Number(c.commentId)).filter(id => !isNaN(id));
@@ -742,8 +742,9 @@ export function DashboardModule() {
               textHtml = '<p class="text-sm text-slate-400 italic">Metin bulunamadı.</p>';
           }
 
+          const localAnswer = commentData.answer || (commentData as any).ANSWER || (commentData as any).Answer || '';
           const firebaseActions = commentActions[String(commentData.commentId)] || [];
-          const unifiedActions = buildUnifiedTimeline(commentData.answer, firebaseActions);
+          const unifiedActions = buildUnifiedTimeline(localAnswer, firebaseActions);
           
           let actionsHtml = '';
           if (unifiedActions.length > 0) {
@@ -2745,8 +2746,9 @@ export function DashboardModule() {
                       </div>
                       
                       {(() => {
+                        const localAnswer = commentData.answer || (commentData as any).ANSWER || (commentData as any).Answer || '';
                         const firebaseActions = commentActions[String(commentData.commentId)] || [];
-                        const unifiedActions = buildUnifiedTimeline(commentData.answer, firebaseActions);
+                        const unifiedActions = buildUnifiedTimeline(localAnswer, firebaseActions);
                         
                         if (unifiedActions.length === 0) return null;
                         
