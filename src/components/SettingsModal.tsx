@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ChevronDown, ChevronUp, Eye, EyeOff, Brain, DollarSign, Activity, Settings2, Database } from 'lucide-react';
-import { ApiSettings, AILog } from '../types';
-import { doc, setDoc, collection, getDocs } from "firebase/firestore";
+import { X, ChevronDown, ChevronUp, Eye, EyeOff, Brain, DollarSign, Activity, Settings2, Database, Plus, Trash2, DoorOpen } from 'lucide-react';
+import { ApiSettings, AILog, SubRoomMapping } from '../types';
+import { doc, setDoc, collection, getDocs, getDoc } from "firebase/firestore";
 import { db } from '../firebase';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -114,6 +114,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     featureModels: {}
   });
   
+  const [subRoomMappings, setSubRoomMappings] = useState<SubRoomMapping[]>([]);
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
@@ -123,7 +124,8 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
   const bookmarkletRef = useRef<HTMLAnchorElement>(null);
 
   useEffect(() => {
-    const loadSettings = () => {
+    const loadSettings = async () => {
+      // First load from localStorage for immediate UI update
       const saved = localStorage.getItem('hotelApiSettings');
       if (saved) {
         try {
@@ -153,9 +155,61 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           });
         } catch (e) {}
       }
+
+      const savedMappings = localStorage.getItem('subRoomMappings');
+      if (savedMappings) {
+        try {
+          const parsed = JSON.parse(savedMappings);
+          setSubRoomMappings(parsed.map((m: any) => ({ ...m, subRoomsInput: m.subRooms.join(', ') })));
+        } catch (e) {}
+      }
+
+      // Then fetch from Firestore to ensure cross-device sync
+      try {
+        const apiSettingsDoc = await getDoc(doc(db, "config", "api_settings"));
+        if (apiSettingsDoc.exists()) {
+          const data = apiSettingsDoc.data();
+          let commentTemplate = data.commentPayloadTemplate || DEFAULT_COMMENT_TEMPLATE;
+          if (commentTemplate.includes('"Value": "2024-01-01"')) {
+            commentTemplate = commentTemplate.replace(/"Value": "2024-01-01"/g, '"Value": "{{START_DATE}}"');
+          }
+          if (commentTemplate.includes('"Value": "2024-12-31"')) {
+            commentTemplate = commentTemplate.replace(/"Value": "2024-12-31"/g, '"Value": "{{END_DATE}}"');
+          }
+
+          const newSettings = {
+            baseUrl: data.baseUrl || '',
+            loginToken: data.loginToken || data.token || '',
+            hotelId: data.hotelId || '',
+            commentPayloadTemplate: commentTemplate,
+            commentDetailPayloadTemplate: data.commentDetailPayloadTemplate || DEFAULT_COMMENT_DETAIL_TEMPLATE,
+            inhousePayloadTemplate: data.inhousePayloadTemplate || DEFAULT_INHOUSE_TEMPLATE,
+            reservationPayloadTemplate: data.reservationPayloadTemplate || DEFAULT_RESERVATION_TEMPLATE,
+            checkoutPayloadTemplate: data.checkoutPayloadTemplate || DEFAULT_CHECKOUT_TEMPLATE,
+            geminiApiKey: data.geminiApiKey || '',
+            geminiModel: data.geminiModel || 'gemini-2.5-flash',
+            featureModels: data.featureModels || {}
+          };
+          setSettings(newSettings);
+          localStorage.setItem('hotelApiSettings', JSON.stringify(newSettings));
+        }
+
+        const subRoomMappingsDoc = await getDoc(doc(db, "config", "sub_room_mappings"));
+        if (subRoomMappingsDoc.exists()) {
+          const data = subRoomMappingsDoc.data();
+          if (data.mappings && Array.isArray(data.mappings)) {
+            setSubRoomMappings(data.mappings.map((m: any) => ({ ...m, subRoomsInput: m.subRooms.join(', ') })));
+            localStorage.setItem('subRoomMappings', JSON.stringify(data.mappings));
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching settings from Firestore:", error);
+      }
     };
 
-    loadSettings();
+    if (isOpen) {
+      loadSettings();
+    }
 
     window.addEventListener('hotelApiSettingsUpdated', loadSettings);
     return () => {
@@ -260,12 +314,27 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     if (!validateJson(settings.reservationPayloadTemplate || '{}', 'Rezervasyon Şablonu')) return;
     if (!validateJson(settings.checkoutPayloadTemplate || '{}', 'Ayrılanlar Şablonu')) return;
 
+    const processedMappings = subRoomMappings.map(mapping => {
+      const newMapping = { ...mapping };
+      if (newMapping.subRoomsInput !== undefined) {
+        newMapping.subRooms = newMapping.subRoomsInput.split(',').map(s => s.trim()).filter(s => s !== '');
+        delete newMapping.subRoomsInput;
+      }
+      return newMapping;
+    });
+
     localStorage.setItem('hotelApiSettings', JSON.stringify(settings));
+    localStorage.setItem('subRoomMappings', JSON.stringify(processedMappings));
     
     try {
       // Sync all settings to Firestore for centralized management
       await setDoc(doc(db, "config", "api_settings"), {
         ...settings,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      
+      await setDoc(doc(db, "config", "sub_room_mappings"), {
+        mappings: processedMappings,
         updatedAt: new Date().toISOString()
       }, { merge: true });
     } catch (error) {
@@ -364,6 +433,17 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
                 <Brain size={16} />
                 Yapay Zeka & FinOps
               </button>
+              <button
+                onClick={() => setActiveTab('rooms')}
+                className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
+                  activeTab === 'rooms' 
+                    ? 'bg-blue-100 text-blue-700' 
+                    : 'text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                <DoorOpen size={16} />
+                Alt Oda Yapılandırması
+              </button>
             </div>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
@@ -372,7 +452,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
         </div>
         
         <div className="p-6 space-y-6 overflow-y-auto flex-1">
-          {activeTab === 'api' ? (
+          {activeTab === 'api' && (
             <>
               {/* Basic Settings */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -440,7 +520,8 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
                 </div>
               </div>
             </>
-          ) : (
+          )}
+          {activeTab === 'ai' && (
             <div className="space-y-8">
               {/* AI Config */}
               <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
@@ -523,6 +604,34 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
                       <select
                         value={settings.featureModels?.deepAnalysis || ''}
                         onChange={(e) => handleFeatureModelChange('deepAnalysis', e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-white"
+                      >
+                        <option value="">Varsayılan Modeli Kullan</option>
+                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Vaka Özeti</label>
+                      <select
+                        value={settings.featureModels?.caseSummary || ''}
+                        onChange={(e) => handleFeatureModelChange('caseSummary', e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-white"
+                      >
+                        <option value="">Varsayılan Modeli Kullan</option>
+                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Vaka Mektubu</label>
+                      <select
+                        value={settings.featureModels?.caseLetter || ''}
+                        onChange={(e) => handleFeatureModelChange('caseLetter', e.target.value)}
                         className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-white"
                       >
                         <option value="">Varsayılan Modeli Kullan</option>
@@ -629,6 +738,67 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+          )}
+          {activeTab === 'rooms' && (
+            <div className="space-y-6">
+              <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 text-sm text-blue-800">
+                <p className="font-semibold mb-1">Alt Oda / Bağlantılı Oda Yapılandırması</p>
+                <p>Elektraweb'den gelen ana oda numaralarını, misafir notlarındaki (ALLNOTES) bilgilere göre alt odalara ayırmak için bu alanı kullanın. Örneğin ana oda "4401" ise ve notlarda "4500" geçiyorsa, sistem odayı otomatik olarak 4500 olarak çözümleyecektir.</p>
+              </div>
+
+              <div className="space-y-4">
+                {subRoomMappings.map((mapping, index) => (
+                  <div key={index} className="flex items-start gap-4 p-4 bg-white border border-slate-200 rounded-xl shadow-sm">
+                    <div className="flex-1">
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Ana Oda (Elektraweb)</label>
+                      <input 
+                        type="text" 
+                        value={mapping.mainRoom}
+                        onChange={(e) => {
+                          const newMappings = [...subRoomMappings];
+                          newMappings[index].mainRoom = e.target.value;
+                          setSubRoomMappings(newMappings);
+                        }}
+                        placeholder="Örn: 4401"
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm"
+                      />
+                    </div>
+                    <div className="flex-[2]">
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Alt Odalar (Virgülle ayırın)</label>
+                      <input 
+                        type="text" 
+                        value={mapping.subRoomsInput !== undefined ? mapping.subRoomsInput : mapping.subRooms.join(', ')}
+                        onChange={(e) => {
+                          const newMappings = [...subRoomMappings];
+                          newMappings[index].subRoomsInput = e.target.value;
+                          setSubRoomMappings(newMappings);
+                        }}
+                        placeholder="Örn: 4401, 4500, 4501"
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 text-sm"
+                      />
+                    </div>
+                    <button 
+                      onClick={() => {
+                        const newMappings = subRoomMappings.filter((_, i) => i !== index);
+                        setSubRoomMappings(newMappings);
+                      }}
+                      className="mt-6 p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                      title="Sil"
+                    >
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
+                ))}
+
+                <button
+                  onClick={() => setSubRoomMappings([...subRoomMappings, { mainRoom: '', subRooms: [], subRoomsInput: '' }])}
+                  className="w-full py-3 border-2 border-dashed border-slate-200 rounded-xl text-slate-500 hover:text-slate-700 hover:border-slate-300 hover:bg-slate-50 transition-all flex items-center justify-center gap-2 font-medium text-sm"
+                >
+                  <Plus size={18} />
+                  Yeni Eşleştirme Ekle
+                </button>
               </div>
             </div>
           )}

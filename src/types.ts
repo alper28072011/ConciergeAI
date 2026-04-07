@@ -3,7 +3,7 @@ export interface CaseAction {
   date: string; // ISO string
   actionText: string;
   performedBy: string; // İşlemi yapan kullanıcının adı/maili
-  type?: 'note' | 'letter' | 'status_change';
+  type?: 'note' | 'letter' | 'status_change' | 'summary';
   content?: string; // HTML content for letters
 }
 
@@ -78,6 +78,8 @@ export interface CommentData {
   EMAIL?: string;
   NATIONALITY?: string;
   ROOMNO?: string;
+  ALLNOTES?: string;
+  resolvedRoomNo?: string;
   GUESTID?: number;
   RESNAMEID_LOOKUP?: string;
   COMMENTSOURCEID_NAME?: string;
@@ -129,6 +131,12 @@ export interface GroupedCommentDetail {
   }[];
 }
 
+export interface SubRoomMapping {
+  mainRoom: string;
+  subRooms: string[];
+  subRoomsInput?: string;
+}
+
 export interface GuestData {
   RESID: string;
   ROOMNO: string;
@@ -138,6 +146,8 @@ export interface GuestData {
   AGENCY: string;
   ROOMTYPE: string;
   TOTALPRICE: number;
+  ALLNOTES?: string;
+  resolvedRoomNo?: string;
   RESGUESTID?: number;
   CONTACTGUESTID?: number;
   CONTACTPERSON?: string;

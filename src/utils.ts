@@ -1,4 +1,30 @@
-import { ApiSettings, GuestData, CommentData, CommentDetailData, GroupedCommentDetail, UnifiedTimelineAction } from './types';
+import { ApiSettings, GuestData, CommentData, CommentDetailData, GroupedCommentDetail, UnifiedTimelineAction, SubRoomMapping } from './types';
+
+export const resolveGuestRoom = (
+  originalRoom: string, 
+  allNotes: string | undefined | null, 
+  mappings: SubRoomMapping[]
+): string => {
+  if (!originalRoom) return "0000";
+  
+  const mapping = mappings.find(m => originalRoom.includes(m.mainRoom));
+  if (!mapping) return originalRoom; // Eşleşme yoksa orijinal odayı döndür
+
+  // Eşleşme var ama not yoksa, tüm alt odaları birleştirip döndür (Örn: "4401 - 4500 - 4501")
+  if (!allNotes || allNotes.trim() === '') {
+    return mapping.subRooms.join(" - ");
+  }
+
+  // Notlar içinde alt odalardan spesifik biri geçiyor mu kontrol et
+  for (const subRoom of mapping.subRooms) {
+    if (allNotes.includes(subRoom)) {
+      return subRoom; // Bulduğu ilk spesifik alt odayı döndür
+    }
+  }
+
+  // Not var ama içinde alt oda numarası geçmiyorsa yine tümünü döndür
+  return mapping.subRooms.join(" - ");
+};
 
 export const formatHtmlContent = (content: string | undefined | null) => {
   if (!content) return '';

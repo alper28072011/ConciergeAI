@@ -4,7 +4,7 @@ import { DetailPanel } from '../components/DetailPanel';
 import { BulkAnalysisModal } from '../components/BulkAnalysisModal';
 import { CommentData, ApiSettings } from '../types';
 import { executeElektraQuery } from '../services/api';
-import { buildDynamicPayload, groupCommentDetails } from '../utils';
+import { buildDynamicPayload, groupCommentDetails, resolveGuestRoom } from '../utils';
 import { collection, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { deleteCommentData } from '../services/firebaseService';
@@ -25,6 +25,7 @@ export function LetterModule() {
 
   const [agendaNotes, setAgendaNotes] = useState<Record<string, any>>({});
   const [commentAnalytics, setCommentAnalytics] = useState<Record<string, any>>({});
+  const [commentActions, setCommentActions] = useState<Record<string, any[]>>({});
 
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   const [bulkType, setBulkType] = useState<'deep' | 'sentiment'>('deep');
@@ -63,9 +64,24 @@ export function LetterModule() {
       setCommentAnalytics(analytics);
     });
 
+    const unsubActions = onSnapshot(collection(db, 'comment_actions'), (snapshot) => {
+      const actionsByComment: Record<string, any[]> = {};
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.commentId) {
+          if (!actionsByComment[data.commentId]) {
+            actionsByComment[data.commentId] = [];
+          }
+          actionsByComment[data.commentId].push({ id: doc.id, ...data });
+        }
+      });
+      setCommentActions(actionsByComment);
+    });
+
     return () => {
       unsubAgenda();
       unsubAnalytics();
+      unsubActions();
     };
   }, []);
 
@@ -124,12 +140,13 @@ export function LetterModule() {
       // Remove any existing COMMENTDATE filters to avoid duplicates
       payload.Where = payload.Where.filter((w: any) => w.Column !== 'COMMENTDATE');
 
-      // Ensure RESNAMEID_LOOKUP is in Select
+      // Ensure RESNAMEID_LOOKUP and ALLNOTES are in Select
       if (!payload.Select) {
         payload.Select = [];
       }
-      if (Array.isArray(payload.Select) && !payload.Select.includes('RESNAMEID_LOOKUP')) {
-        payload.Select.push('RESNAMEID_LOOKUP');
+      if (Array.isArray(payload.Select)) {
+        if (!payload.Select.includes('RESNAMEID_LOOKUP')) payload.Select.push('RESNAMEID_LOOKUP');
+        if (!payload.Select.includes('ALLNOTES')) payload.Select.push('ALLNOTES');
       }
 
       // Add Paging
@@ -162,12 +179,18 @@ export function LetterModule() {
       
       const groupedDetails = groupCommentDetails(rawDetails);
 
+      // Apply Room Resolution Engine
+      const savedMappingsStr = localStorage.getItem('subRoomMappings');
+      const mappings = savedMappingsStr ? JSON.parse(savedMappingsStr) : [];
+
       fetchedComments = fetchedComments.map(comment => {
         const matchedDetail = groupedDetails.find(d => String(d.COMMENTID) === String(comment.ID));
+        const resolvedRoomNo = resolveGuestRoom(comment.ROOMNO || '', comment.ALLNOTES, mappings);
+        
         if (matchedDetail && matchedDetail.details) {
-          return { ...comment, details: matchedDetail.details };
+          return { ...comment, details: matchedDetail.details, resolvedRoomNo };
         }
-        return comment;
+        return { ...comment, resolvedRoomNo };
       });
 
       if (fetchedComments.length < fetchLimit) {
@@ -307,6 +330,7 @@ export function LetterModule() {
           hasMoreData={hasMoreData}
           isLoadingMore={isLoadingMore}
           agendaNotes={combinedAnalysisData}
+          commentActions={commentActions}
           viewMode={viewMode}
           onViewModeChange={handleViewModeChange}
         />

@@ -119,7 +119,7 @@ export const BulkLabelModal: React.FC<BulkLabelModalProps> = ({ guests, onClose 
   }
 
   const formatLabel = (guest: GuestData) => {
-    const room = guest.ROOMNO || 'Bilinmiyor';
+    const room = guest.resolvedRoomNo || guest.ROOMNO || 'Bilinmiyor';
     const names = guest.GUESTNAMES || '';
     // Split by common separators and take the first part
     const firstName = names.split(/[,&/]/)[0].trim();

@@ -6,7 +6,7 @@ import { Calendar, Search, MessageSquare, ArrowUpDown, ChevronDown, ChevronUp, F
 import { GuestData, CommentData, ApiSettings, GuestListTab, UnifiedTimelineAction, PhonebookContact } from '../types';
 import { executeElektraQuery } from '../services/api';
 import { generateAIContent } from '../services/aiService';
-import { buildDynamicPayload, formatTRDate, groupCommentDetails, buildUnifiedTimeline, formatHtmlContent } from '../utils';
+import { buildDynamicPayload, formatTRDate, groupCommentDetails, buildUnifiedTimeline, formatHtmlContent, resolveGuestRoom } from '../utils';
 import { TimelineView } from '../components/TimelineView';
 import { BulkAnalysisModal } from '../components/BulkAnalysisModal';
 import { ActionEntryModal } from '../components/ActionEntryModal';
@@ -165,7 +165,7 @@ export function GuestListModule() {
         
         let merged = content;
         merged = merged.replace(/{{GUESTNAMES}}/g, `${selectedGuestForAction.GUESTNAME} ${selectedGuestForAction.GUESTSURNAME}`);
-        merged = merged.replace(/{{ROOMNO}}/g, selectedGuestForAction.ROOMNO || '');
+        merged = merged.replace(/{{ROOMNO}}/g, selectedGuestForAction.resolvedRoomNo || selectedGuestForAction.ROOMNO || '');
         merged = merged.replace(/{{CHECKIN}}/g, formatTRDate(selectedGuestForAction.CHECKIN || ''));
         merged = merged.replace(/{{CHECKOUT}}/g, formatTRDate(selectedGuestForAction.CHECKOUT || ''));
         merged = merged.replace(/{{HOTELNAME}}/g, 'Otelimiz');
@@ -189,7 +189,7 @@ export function GuestListModule() {
       const prompt = `You are a professional 5-star hotel Guest Relations Manager / Concierge. Write a polite and professional letter to a guest.
 Guest Name: ${guestName}
 Nationality: ${selectedGuestForAction.NATIONALITY}
-Room Number: ${selectedGuestForAction.ROOMNO}
+Room Number: ${selectedGuestForAction.resolvedRoomNo || selectedGuestForAction.ROOMNO}
 Check-In: ${formatTRDate(selectedGuestForAction.CHECKIN || '')}
 Check-Out: ${formatTRDate(selectedGuestForAction.CHECKOUT || '')}
 Extra Notes from Staff: ${extraNotes}
@@ -477,7 +477,7 @@ CRITICAL INSTRUCTIONS:
 
       // Inject Required Fields for Guest
       if (guestPayload.Select && Array.isArray(guestPayload.Select)) {
-        const requiredFields = ['RESGUESTID', 'CONTACTGUESTID', 'CONTACTPHONE', 'CONTACTEMAIL', 'ROOMNO', 'CHECKIN', 'CHECKOUT', 'GUESTNAMES', 'RESID', 'NATIONALITY', 'ARRIVALTIME', 'DEPARTURETIME'];
+        const requiredFields = ['RESGUESTID', 'CONTACTGUESTID', 'CONTACTPHONE', 'CONTACTEMAIL', 'ROOMNO', 'CHECKIN', 'CHECKOUT', 'GUESTNAMES', 'RESID', 'NATIONALITY', 'ARRIVALTIME', 'DEPARTURETIME', 'ALLNOTES'];
         requiredFields.forEach(field => {
           if (!guestPayload.Select.includes(field)) guestPayload.Select.push(field);
         });
@@ -489,6 +489,14 @@ CRITICAL INSTRUCTIONS:
       // 2. Fetch Guests First
       const guestRes = await executeElektraQuery(guestPayload);
       const guestsList: GuestData[] = Array.isArray(guestRes) ? guestRes : [];
+
+      // Apply Room Resolution Engine
+      const savedMappingsStr = localStorage.getItem('subRoomMappings');
+      const mappings = savedMappingsStr ? JSON.parse(savedMappingsStr) : [];
+      
+      guestsList.forEach(guest => {
+        guest.resolvedRoomNo = resolveGuestRoom(guest.ROOMNO, guest.ALLNOTES, mappings);
+      });
 
       if (guestsList.length < fetchLimit) {
         setHasMoreData(false);
@@ -780,26 +788,56 @@ CRITICAL INSTRUCTIONS:
     }
   };
 
-  const handleTextSelection = () => {
-    const selection = window.getSelection();
-    const text = selection?.toString().trim();
-    
-    if (text && text.length > 0) {
-      setSelectedText(text);
-      
-      // Get position for floating button
-      const range = selection?.getRangeAt(0);
-      const rect = range?.getBoundingClientRect();
-      if (rect) {
-        setSelectionPosition({
-          x: rect.left + rect.width / 2,
-          y: rect.top - 10
-        });
+  // Clear selection when clicking elsewhere
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.toString().trim() === '') {
+        setSelectedText('');
+        setSelectionPosition(null);
       }
-    } else {
-      setSelectedText('');
-      setSelectionPosition(null);
-    }
+    };
+    
+    const handleGlobalClick = (e: MouseEvent) => {
+      setTimeout(() => {
+        const selection = window.getSelection();
+        if (!selection || selection.toString().trim() === '') {
+          setSelectedText('');
+          setSelectionPosition(null);
+        }
+      }, 50);
+    };
+    
+    document.addEventListener('selectionchange', handleSelectionChange);
+    document.addEventListener('mousedown', handleGlobalClick);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      document.removeEventListener('mousedown', handleGlobalClick);
+    };
+  }, []);
+
+  const handleTextSelection = () => {
+    setTimeout(() => {
+      const selection = window.getSelection();
+      const text = selection?.toString().trim();
+      
+      if (text && text.length > 0) {
+        setSelectedText(text);
+        
+        // Get position for floating button
+        const range = selection?.getRangeAt(0);
+        const rect = range?.getBoundingClientRect();
+        if (rect) {
+          setSelectionPosition({
+            x: rect.left + rect.width / 2,
+            y: rect.top - 10
+          });
+        }
+      } else {
+        setSelectedText('');
+        setSelectionPosition(null);
+      }
+    }, 10);
   };
 
   const handleSendWhatsApp = async () => {
@@ -822,7 +860,7 @@ CRITICAL INSTRUCTIONS:
     }
 
     const message = `🚨 *Misafir Talebi (${sourceContext})* 🚨
-*Oda:* ${targetGuest.ROOMNO || 'N/A'}
+*Oda:* ${targetGuest.resolvedRoomNo || targetGuest.ROOMNO || 'N/A'}
 *Misafir:* ${targetGuest.GUESTNAMES || 'Misafir'}
 *Departman:* ${contact.department}
 
@@ -904,7 +942,7 @@ CRITICAL INSTRUCTIONS:
       }
 
       content = content.replace(/{{GUESTNAMES}}/g, guest.GUESTNAMES || 'Misafir');
-      content = content.replace(/{{ROOMNO}}/g, guest.ROOMNO || '-');
+      content = content.replace(/{{ROOMNO}}/g, guest.resolvedRoomNo || guest.ROOMNO || '-');
       content = content.replace(/{{CHECKIN}}/g, formatTRDate(guest.CHECKIN || ''));
       content = content.replace(/{{CHECKOUT}}/g, formatTRDate(guest.CHECKOUT || ''));
       content = content.replace(/{{AGENCY}}/g, guest.AGENCY || '');
@@ -1005,7 +1043,7 @@ CRITICAL INSTRUCTIONS:
       await addDoc(collection(db, 'survey_logs'), {
         guestId: selectedGuestForMail.RESID,
         guestName: selectedGuestForMail.GUESTNAMES,
-        roomNo: selectedGuestForMail.ROOMNO,
+        roomNo: selectedGuestForMail.resolvedRoomNo || selectedGuestForMail.ROOMNO,
         action: 'Anket Üretildi',
         createdAt: serverTimestamp()
       });
@@ -1116,7 +1154,7 @@ CRITICAL INSTRUCTIONS:
 Seçili Misafirler ve Aksiyon Geçmişleri:
 ${JSON.stringify(selectedGuests.map(g => ({
   misafirAdi: g.GUESTNAMES,
-  oda: g.ROOMNO,
+  oda: g.resolvedRoomNo || g.ROOMNO,
   aksiyonlar: g.timelineActions?.map(a => ({
     tarih: a.date,
     tip: a.type,
@@ -1221,7 +1259,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
       }
 
       content = content.replace(/{{GUESTNAMES}}/g, guest.GUESTNAMES || 'Misafir');
-      content = content.replace(/{{ROOMNO}}/g, guest.ROOMNO || '-');
+      content = content.replace(/{{ROOMNO}}/g, guest.resolvedRoomNo || guest.ROOMNO || '-');
       content = content.replace(/{{CHECKIN}}/g, formatTRDate(guest.CHECKIN || ''));
       content = content.replace(/{{CHECKOUT}}/g, formatTRDate(guest.CHECKOUT || ''));
       content = content.replace(/{{AGENCY}}/g, guest.AGENCY || '');
@@ -1342,7 +1380,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
         batch.set(logRef, {
           guestId: guest.RESID,
           guestName: guest.GUESTNAMES,
-          roomNo: guest.ROOMNO,
+          roomNo: guest.resolvedRoomNo || guest.ROOMNO,
           action: `Toplu Anket Üretildi (${templateName})`,
           createdAt: serverTimestamp()
         });
@@ -1753,7 +1791,15 @@ ${JSON.stringify(selectedGuests.map(g => ({
                         </div>
                       </td>
                       <td className="p-4 text-sm font-medium text-slate-900 relative">
-                        {guest.ROOMNO}
+                        {guest.resolvedRoomNo && guest.resolvedRoomNo.includes(' - ') ? (
+                          <div className="flex items-center gap-1">
+                            <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-md text-xs font-bold border border-purple-200 shadow-sm whitespace-nowrap">
+                              {guest.resolvedRoomNo}
+                            </span>
+                          </div>
+                        ) : (
+                          guest.resolvedRoomNo || guest.ROOMNO
+                        )}
                       </td>
                       <td className="p-4 text-sm text-slate-700 font-medium">{guest.GUESTNAMES}</td>
                       <td className="p-4 text-sm text-slate-500">
@@ -2290,7 +2336,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                 </div>
                 <div className="text-right">
                   <span className="block text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Oda</span>
-                  <span className="text-lg font-semibold text-slate-800">{selectedGuestForCall.ROOMNO}</span>
+                  <span className="text-lg font-semibold text-slate-800">{selectedGuestForCall.resolvedRoomNo || selectedGuestForCall.ROOMNO}</span>
                 </div>
               </div>
 
@@ -2386,6 +2432,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                       >
                         <button
                           onClick={() => setIsWhatsAppModalOpen(true)}
+                          onMouseDown={(e) => e.preventDefault()}
                           className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors"
                         >
                           <MessageSquare size={14} className="text-emerald-400" />
@@ -2478,7 +2525,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                          selectedPreviewAction.action.type === 'template' ? 'Şablon Mektup' :
                          selectedPreviewAction.action.type === 'elektra' ? 'Elektra Yorumu' : 'İçerik Önizleme')
                       : 'Hoş Geldiniz Araması'
-                  })* 🚨\n*Oda:* ${(selectedPreviewAction?.guest || selectedGuestForCall)?.ROOMNO || 'N/A'}\n*Misafir:* ${(selectedPreviewAction?.guest || selectedGuestForCall)?.GUESTNAMES || 'Misafir'}\n*Departman:* ${phonebook.find(c => c.id === selectedContactId)?.department || '...'}\n\n📌 *Talep Detayı:*\n"_${selectedText || '...'}_"`}
+                  })* 🚨\n*Oda:* ${(selectedPreviewAction?.guest || selectedGuestForCall)?.resolvedRoomNo || (selectedPreviewAction?.guest || selectedGuestForCall)?.ROOMNO || 'N/A'}\n*Misafir:* ${(selectedPreviewAction?.guest || selectedGuestForCall)?.GUESTNAMES || 'Misafir'}\n*Departman:* ${phonebook.find(c => c.id === selectedContactId)?.department || '...'}\n\n📌 *Talep Detayı:*\n"_${selectedText || '...'}_"`}
                 </div>
               </div>
             </div>
@@ -2779,6 +2826,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                     >
                       <button
                         onClick={() => setIsWhatsAppModalOpen(true)}
+                        onMouseDown={(e) => e.preventDefault()}
                         className="flex items-center gap-2 px-3 py-1.5 hover:bg-slate-800 rounded-lg text-sm font-medium transition-colors"
                       >
                         <MessageSquare size={14} className="text-emerald-400" />

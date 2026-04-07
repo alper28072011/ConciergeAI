@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { CommentData } from '../types';
 import { MessageSquare, Calendar, Globe, RefreshCw, DoorOpen, ChevronDown, Filter, LayoutTemplate } from 'lucide-react';
 import { formatTRDate } from '../utils';
@@ -17,9 +17,44 @@ interface SidebarProps {
   hasMoreData: boolean;
   isLoadingMore: boolean;
   agendaNotes?: Record<string, any>;
+  commentActions?: Record<string, any[]>;
   viewMode: 'spacious' | 'compact';
   onViewModeChange: (mode: 'spacious' | 'compact') => void;
 }
+
+const getOutlookDateGroup = (dateString: string | undefined): string => {
+  if (!dateString) return 'Bilinmeyen Tarih';
+  
+  const date = new Date(dateString);
+  if (isNaN(date.getTime())) return 'Bilinmeyen Tarih';
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const yesterday = new Date(today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
+  const lastWeek = new Date(today);
+  lastWeek.setDate(lastWeek.getDate() - 7);
+  
+  const lastMonth = new Date(today);
+  lastMonth.setMonth(lastMonth.getMonth() - 1);
+
+  const commentDate = new Date(date);
+  commentDate.setHours(0, 0, 0, 0);
+
+  if (commentDate.getTime() === today.getTime()) {
+    return 'Bugün';
+  } else if (commentDate.getTime() === yesterday.getTime()) {
+    return 'Dün';
+  } else if (commentDate.getTime() > lastWeek.getTime()) {
+    return 'Geçen Hafta';
+  } else if (commentDate.getTime() > lastMonth.getTime()) {
+    return 'Geçen Ay';
+  } else {
+    return 'Daha Eski';
+  }
+};
 
 export function Sidebar({ 
   comments, 
@@ -35,9 +70,65 @@ export function Sidebar({
   hasMoreData,
   isLoadingMore,
   agendaNotes = {},
+  commentActions = {},
   viewMode,
   onViewModeChange
 }: SidebarProps) {
+  const [filterMode, setFilterMode] = useState<'all' | 'waiting_letter' | 'low_score' | 'high_score'>('all');
+
+  const filteredComments = useMemo(() => {
+    return comments.filter(comment => {
+      const note = agendaNotes[String(comment.ID)];
+      const sentimentScore = note?.sentimentScore;
+      const deepAnalytics = note; // Since combinedAnalysisData is passed
+      
+      const isDissatisfied = (sentimentScore !== null && sentimentScore !== undefined && sentimentScore < 0.5) || 
+                             (deepAnalytics?.overallScore !== undefined && (deepAnalytics.overallScore < 50 || deepAnalytics.topics?.some((t: any) => t.score < 50)));
+      
+      const isHighScore = (sentimentScore !== null && sentimentScore !== undefined && sentimentScore >= 0.8) || 
+                          (deepAnalytics?.overallScore !== undefined && deepAnalytics.overallScore >= 80);
+      
+      const actions = commentActions[String(comment.ID)] || [];
+      const hasLetterGenerated = actions.some(action => 
+        action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email'
+      );
+
+      if (filterMode === 'waiting_letter') {
+        return isDissatisfied && !hasLetterGenerated;
+      }
+      if (filterMode === 'low_score') {
+        return isDissatisfied;
+      }
+      if (filterMode === 'high_score') {
+        return isHighScore;
+      }
+      return true;
+    });
+  }, [comments, agendaNotes, commentActions, filterMode]);
+
+  const groupedComments = useMemo(() => {
+    const groups: Record<string, CommentData[]> = {
+      'Bugün': [],
+      'Dün': [],
+      'Geçen Hafta': [],
+      'Geçen Ay': [],
+      'Daha Eski': [],
+      'Bilinmeyen Tarih': []
+    };
+
+    filteredComments.forEach(comment => {
+      const group = getOutlookDateGroup(comment.COMMENTDATE);
+      if (groups[group]) {
+        groups[group].push(comment);
+      } else {
+        groups[group] = [comment];
+      }
+    });
+
+    // Remove empty groups
+    return Object.entries(groups).filter(([_, groupComments]) => groupComments.length > 0);
+  }, [filteredComments]);
+
   return (
     <div className="w-1/3 min-w-[320px] max-w-[400px] bg-white border-r border-slate-200 flex flex-col h-full print:hidden">
       <div className="p-4 border-b border-slate-200 bg-slate-50/50 space-y-4">
@@ -103,6 +194,33 @@ export function Sidebar({
               <RefreshCw size={18} className={isFetching ? "animate-spin" : ""} />
             </button>
           </div>
+
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide">
+            <button 
+              onClick={() => setFilterMode('all')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${filterMode === 'all' ? 'bg-slate-800 text-white shadow-sm' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            >
+              Tümü
+            </button>
+            <button 
+              onClick={() => setFilterMode('waiting_letter')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${filterMode === 'waiting_letter' ? 'bg-amber-500 text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+            >
+              Mektup Bekleyen
+            </button>
+            <button 
+              onClick={() => setFilterMode('low_score')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${filterMode === 'low_score' ? 'bg-red-500 text-white shadow-sm' : 'bg-red-50 text-red-700 hover:bg-red-100'}`}
+            >
+              Düşük Puanlı
+            </button>
+            <button 
+              onClick={() => setFilterMode('high_score')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${filterMode === 'high_score' ? 'bg-emerald-500 text-white shadow-sm' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
+            >
+              Yüksek Puanlı
+            </button>
+          </div>
         </div>
       </div>
       
@@ -118,10 +236,25 @@ export function Sidebar({
             Gösterilecek yorum bulunamadı.
           </div>
         )}
-        {comments.map((comment) => {
-          const note = agendaNotes[String(comment.ID)];
-          const score = note?.sentimentScore;
-          const isSelected = selectedId === comment.ID;
+        {groupedComments.map(([groupName, groupComments]) => (
+          <div key={groupName} className="space-y-2">
+            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 sticky top-0 bg-white/90 backdrop-blur-sm py-1 z-10">
+              {groupName}
+            </h3>
+            <div className="space-y-2">
+              {groupComments.map((comment) => {
+                const note = agendaNotes[String(comment.ID)];
+                const score = note?.sentimentScore;
+                const deepAnalytics = note;
+                const isSelected = selectedId === comment.ID;
+                
+                const isDissatisfied = (score !== null && score !== undefined && score < 0.5) || 
+                                      (deepAnalytics?.overallScore !== undefined && (deepAnalytics.overallScore < 50 || deepAnalytics.topics?.some((t: any) => t.score < 50)));
+                
+                const actions = commentActions[String(comment.ID)] || [];
+                const hasLetterGenerated = actions.some(action => 
+                  action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email'
+                );
           
           if (viewMode === 'compact') {
             return (
@@ -158,6 +291,11 @@ export function Sidebar({
                       <p className="text-[11px] text-slate-500 truncate flex-1">
                         {comment.COMMENT}
                       </p>
+                      {isDissatisfied && !hasLetterGenerated && (
+                        <span className="shrink-0 bg-amber-100 text-amber-700 text-[9px] font-bold px-1.5 py-0.5 rounded-md">
+                          Mektup Bekliyor
+                        </span>
+                      )}
                       {score !== undefined && score !== null && (
                         <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                           score >= 0.8 ? 'bg-emerald-500' :
@@ -201,10 +339,10 @@ export function Sidebar({
                     <h3 className="font-medium text-slate-900 truncate pr-2">
                       {comment.RESNAMEID_LOOKUP ? comment.RESNAMEID_LOOKUP.split('-')[1] : 'Misafir Yorumu'}
                     </h3>
-                    {comment.ROOMNO && (
+                    {(comment.resolvedRoomNo || comment.ROOMNO) && (
                       <div className="flex items-center gap-1 text-slate-700 bg-slate-100 px-2 py-1 rounded-md">
                         <DoorOpen size={14} />
-                        <span className="text-xs font-bold whitespace-nowrap">Oda: {comment.ROOMNO}</span>
+                        <span className="text-xs font-bold whitespace-nowrap">Oda: {comment.resolvedRoomNo || comment.ROOMNO}</span>
                       </div>
                     )}
                   </div>
@@ -216,7 +354,14 @@ export function Sidebar({
                     {comment.COMMENT}
                   </p>
                   <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
-                    <span className="text-xs font-medium text-slate-400">{comment.COMMENTSOURCEID_NAME}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-medium text-slate-400">{comment.COMMENTSOURCEID_NAME}</span>
+                      {isDissatisfied && !hasLetterGenerated && (
+                        <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md">
+                          Mektup Bekliyor
+                        </span>
+                      )}
+                    </div>
                     {score !== undefined && score !== null && (
                       <div className={`text-xs font-bold px-2 py-1 rounded-md ${
                         score >= 0.8 ? 'bg-emerald-100 text-emerald-700' :
@@ -233,6 +378,9 @@ export function Sidebar({
             </div>
           );
         })}
+            </div>
+          </div>
+        ))}
         
         {comments.length > 0 && hasMoreData && (
           <div className="pt-2 pb-4 flex justify-center">

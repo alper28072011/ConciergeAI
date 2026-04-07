@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Plus, Filter, MessageSquare, Clock, CheckCircle2, AlertCircle, Send, X, User, Briefcase, FileText, Printer, Save, Trash2, Edit3, ArrowUp, ArrowDown, RefreshCw } from 'lucide-react';
+import { Search, Plus, Filter, MessageSquare, Clock, CheckCircle2, AlertCircle, Send, X, User, Briefcase, FileText, Printer, Save, Trash2, Edit3, ArrowUp, ArrowDown, RefreshCw, LayoutTemplate } from 'lucide-react';
 import { CaseTracker, CaseAction, GuestData, ApiSettings } from '../types';
 import { listenToCases, createCase, updateCaseStatus, addCaseAction } from '../services/firebaseService';
-import { doc, updateDoc, deleteDoc } from 'firebase/firestore';
+import { doc, updateDoc, deleteDoc, getDoc, setDoc } from 'firebase/firestore';
 import { generateAIContent } from '../services/aiService';
 import { executeElektraQuery } from '../services/api';
-import { buildDynamicPayload, formatTRDate, formatHtmlContent } from '../utils';
+import { buildDynamicPayload, formatTRDate, formatHtmlContent, resolveGuestRoom } from '../utils';
 import { auth, db } from '../firebase';
 import ReactQuillModule from 'react-quill-new';
 const ReactQuill = (ReactQuillModule as any).default || ReactQuillModule;
@@ -58,15 +58,44 @@ export function CaseTrackingModule() {
   const [showAITranslation, setShowAITranslation] = useState(false);
   const [isTranslatingAILetter, setIsTranslatingAILetter] = useState(false);
   const [isSavingLetter, setIsSavingLetter] = useState(false);
+  const [isSavingSummary, setIsSavingSummary] = useState(false);
   const [selectedPreviewAction, setSelectedPreviewAction] = useState<CaseAction | null>(null);
+  const [viewMode, setViewMode] = useState<'spacious' | 'compact'>('spacious');
   const printRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    // Load UI preferences
+    const loadPrefs = async () => {
+      try {
+        const prefDoc = await getDoc(doc(db, 'config', 'ui_preferences'));
+        if (prefDoc.exists()) {
+          const data = prefDoc.data();
+          if (data.caseTrackingViewMode) {
+            setViewMode(data.caseTrackingViewMode);
+          }
+        }
+      } catch (error) {
+        console.error("Error loading UI preferences:", error);
+      }
+    };
+    loadPrefs();
+
     const unsubscribe = listenToCases((fetchedCases) => {
       setCases(fetchedCases);
     });
     return () => unsubscribe();
   }, []);
+
+  const handleViewModeChange = async (mode: 'spacious' | 'compact') => {
+    setViewMode(mode);
+    try {
+      await setDoc(doc(db, 'config', 'ui_preferences'), {
+        caseTrackingViewMode: mode
+      }, { merge: true });
+    } catch (error) {
+      console.error("Error saving UI preference:", error);
+    }
+  };
 
   const selectedCase = cases.find(c => c.id === selectedCaseId);
 
@@ -89,7 +118,7 @@ export function CaseTrackingModule() {
       
       const guestPayload = buildDynamicPayload(settings.inhousePayloadTemplate, settings, {});
       if (guestPayload.Select && Array.isArray(guestPayload.Select)) {
-        const requiredFields = ['ROOMNO', 'GUESTNAMES', 'RESID'];
+        const requiredFields = ['ROOMNO', 'GUESTNAMES', 'RESID', 'ALLNOTES'];
         requiredFields.forEach(field => {
           if (!guestPayload.Select.includes(field)) guestPayload.Select.push(field);
         });
@@ -97,7 +126,24 @@ export function CaseTrackingModule() {
       guestPayload.Paging = { ItemsPerPage: 500, Current: 1 };
       
       const guestRes = await executeElektraQuery(guestPayload);
-      setInHouseGuests(Array.isArray(guestRes) ? guestRes : []);
+      
+      let guests = Array.isArray(guestRes) ? guestRes : [];
+      
+      // Resolve room numbers
+      const savedMappings = localStorage.getItem('subRoomMappings');
+      if (savedMappings) {
+        try {
+          const mappings = JSON.parse(savedMappings);
+          guests = guests.map((guest: any) => ({
+            ...guest,
+            resolvedRoomNo: resolveGuestRoom(guest.ROOMNO, guest.ALLNOTES, mappings)
+          }));
+        } catch (e) {
+          console.error("Error parsing mappings:", e);
+        }
+      }
+      
+      setInHouseGuests(guests);
       setShowGuestDropdown(true);
     } catch (error: any) {
       console.error('Error fetching guests:', error);
@@ -283,15 +329,38 @@ export function CaseTrackingModule() {
 Vaka: ${selectedCase.description}
 Misafir: ${selectedCase.guestName} (Oda: ${selectedCase.roomNumber})
 Aksiyonlar:
-${selectedCase.actions?.map(a => `- ${new Date(a.date).toLocaleString('tr-TR')}: ${a.actionText}`).join('\n') || 'Henüz aksiyon yok.'}`;
+${selectedCase.actions?.map(a => `- ${new Date(a.date).toLocaleString('tr-TR')}: ${a.actionText}`).join('\n') || 'Henüz aksiyon yok.'}
+
+Lütfen özeti HTML formatında (sadece <b>, <i>, <p>, <ul>, <li> gibi temel etiketleri kullanarak) oluştur. Markdown kullanma.`;
       
       const summary = await generateAIContent(prompt, 'Vaka Özeti', 'caseSummary');
-      setCaseSummary(summary ? summary.replace(/\n/g, '<br>') : 'Özet oluşturulamadı.');
+      setCaseSummary(summary || 'Özet oluşturulamadı.');
     } catch (error: any) {
       console.error('Error summarizing case:', error);
       setCaseSummary('Özet oluşturulurken hata oluştu: ' + error.message);
     } finally {
       setIsGeneratingSummary(false);
+    }
+  };
+
+  const handleSaveSummary = async () => {
+    if (!selectedCase || !caseSummary.trim()) return;
+    setIsSavingSummary(true);
+    try {
+      await addCaseAction(selectedCase.id, {
+        date: new Date().toISOString(),
+        actionText: 'Yapay zeka ile vaka özeti oluşturuldu.',
+        performedBy: auth.currentUser?.displayName || auth.currentUser?.email || 'Sistem Kullanıcısı',
+        type: 'summary',
+        content: caseSummary
+      }, selectedCase.actions || []);
+      setCaseSummary('');
+      alert('Özet başarıyla kaydedildi.');
+    } catch (error) {
+      console.error('Error saving summary:', error);
+      alert('Özet kaydedilirken hata oluştu.');
+    } finally {
+      setIsSavingSummary(false);
     }
   };
 
@@ -440,7 +509,7 @@ CRITICAL INSTRUCTIONS:
 
   const filteredGuests = inHouseGuests.filter(g => 
     (g.GUESTNAMES || '').toLowerCase().includes(guestSearchTerm.toLowerCase()) ||
-    (g.ROOMNO || '').toLowerCase().includes(guestSearchTerm.toLowerCase())
+    (g.resolvedRoomNo || g.ROOMNO || '').toLowerCase().includes(guestSearchTerm.toLowerCase())
   );
 
   return (
@@ -453,13 +522,31 @@ CRITICAL INSTRUCTIONS:
               <Briefcase className="text-emerald-600" size={24} />
               Vaka Takibi
             </h2>
-            <button 
-              onClick={() => setIsNewCaseModalOpen(true)}
-              className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors"
-              title="Yeni Vaka Ekle"
-            >
-              <Plus size={20} />
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="flex bg-slate-100 p-1 rounded-lg">
+                <button
+                  onClick={() => handleViewModeChange('spacious')}
+                  className={`p-1.5 rounded-md transition-all ${viewMode === 'spacious' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Ferah Görünüm"
+                >
+                  <Filter size={14} />
+                </button>
+                <button
+                  onClick={() => handleViewModeChange('compact')}
+                  className={`p-1.5 rounded-md transition-all ${viewMode === 'compact' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                  title="Sıkıştırılmış Görünüm"
+                >
+                  <LayoutTemplate size={14} />
+                </button>
+              </div>
+              <button 
+                onClick={() => setIsNewCaseModalOpen(true)}
+                className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors"
+                title="Yeni Vaka Ekle"
+              >
+                <Plus size={20} />
+              </button>
+            </div>
           </div>
 
           <div className="relative mb-4">
@@ -495,7 +582,7 @@ CRITICAL INSTRUCTIONS:
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar bg-slate-50/50">
+        <div className={`flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/50 ${viewMode === 'compact' ? 'space-y-2' : 'space-y-3'}`}>
           {filteredCases.length === 0 ? (
             <div className="text-center py-10 text-slate-400">
               <AlertCircle size={32} className="mx-auto mb-3 opacity-50" />
@@ -506,9 +593,9 @@ CRITICAL INSTRUCTIONS:
               <div 
                 key={c.id}
                 onClick={() => setSelectedCaseId(c.id)}
-                className={`p-4 rounded-xl cursor-pointer transition-all border ${selectedCaseId === c.id ? 'bg-white border-emerald-500 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500' : 'bg-white border-slate-200 hover:border-emerald-300 hover:shadow-sm'}`}
+                className={`${viewMode === 'compact' ? 'p-3' : 'p-4'} rounded-xl cursor-pointer transition-all border ${selectedCaseId === c.id ? 'bg-white border-emerald-500 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500' : 'bg-white border-slate-200 hover:border-emerald-300 hover:shadow-sm'}`}
               >
-                <div className="flex justify-between items-start mb-2">
+                <div className={`flex justify-between items-start ${viewMode === 'compact' ? 'mb-1' : 'mb-2'}`}>
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-xs font-bold bg-slate-100 text-slate-700 px-2 py-1 rounded-md">
                       {c.roomNumber}
@@ -516,13 +603,13 @@ CRITICAL INSTRUCTIONS:
                     <span className="text-sm font-bold text-slate-800 line-clamp-1">{c.guestName}</span>
                   </div>
                   {c.status === 'open' ? (
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse"></span>
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse shrink-0 mt-1"></span>
                   ) : (
-                    <CheckCircle2 size={16} className="text-emerald-500" />
+                    <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
                   )}
                 </div>
-                <p className="text-xs text-slate-600 line-clamp-2 mb-3 leading-relaxed">
-                  {c.description}
+                <p className={`text-xs text-slate-600 leading-relaxed ${viewMode === 'compact' ? 'line-clamp-1 mb-2' : 'line-clamp-2 mb-3'}`}>
+                  {c.description.length > (viewMode === 'compact' ? 60 : 120) ? c.description.substring(0, viewMode === 'compact' ? 60 : 120) + '...' : c.description}
                 </p>
                 <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium">
                   <span className="flex items-center gap-1">
@@ -623,10 +710,44 @@ CRITICAL INSTRUCTIONS:
                     className="mt-6 flex flex-col gap-4"
                   >
                     {caseSummary && (
-                      <div className="bg-purple-50/50 border border-purple-100 rounded-xl p-4 relative">
-                        <button onClick={() => setCaseSummary('')} className="absolute top-2 right-2 text-purple-400 hover:text-purple-600"><X size={16} /></button>
-                        <h4 className="text-xs font-bold text-purple-800 uppercase tracking-wider mb-2 flex items-center gap-1.5"><FileText size={14} /> Vaka Özeti</h4>
-                        <div className="text-sm text-purple-900 leading-relaxed" dangerouslySetInnerHTML={{ __html: caseSummary }} />
+                      <div className="bg-purple-50/50 border border-purple-100 rounded-xl p-6 relative">
+                        <button onClick={() => setCaseSummary('')} className="absolute top-4 right-4 text-purple-400 hover:text-purple-600 z-10"><X size={16} /></button>
+                        <h4 className="text-sm font-bold text-purple-800 uppercase tracking-wider mb-4 flex items-center gap-1.5"><FileText size={16} /> AI Vaka Özeti</h4>
+                        
+                        <div className="bg-white rounded-xl border border-purple-200 overflow-hidden">
+                          <ReactQuill 
+                            theme="snow" 
+                            value={caseSummary} 
+                            onChange={setCaseSummary}
+                            className="h-[300px] mb-12"
+                            modules={{
+                              toolbar: [
+                                [{ 'header': [1, 2, false] }],
+                                ['bold', 'italic', 'underline', 'strike', 'blockquote'],
+                                [{'list': 'ordered'}, {'list': 'bullet'}, {'indent': '-1'}, {'indent': '+1'}],
+                                ['link', 'image'],
+                                ['clean']
+                              ],
+                            }}
+                          />
+                        </div>
+                        
+                        <div className="mt-4 flex justify-end gap-3">
+                          <button 
+                            onClick={() => setCaseSummary('')}
+                            className="px-4 py-2 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-200 transition-colors"
+                          >
+                            Kapat
+                          </button>
+                          <button 
+                            onClick={handleSaveSummary}
+                            disabled={isSavingSummary}
+                            className="px-4 py-2 bg-purple-600 text-white text-sm font-bold rounded-lg hover:bg-purple-700 transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+                          >
+                            {isSavingSummary ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : <Save size={16} />}
+                            Kaydet
+                          </button>
+                        </div>
                       </div>
                     )}
                     {isAILetterFormOpen && (
@@ -788,14 +909,14 @@ CRITICAL INSTRUCTIONS:
                   {/* Actions Nodes */}
                   {selectedCase.actions?.map((action, index) => (
                     <div key={action.id} className="relative pl-8">
-                      <div className={`absolute -left-[11px] top-1 w-5 h-5 rounded-full border-4 border-slate-50 flex items-center justify-center ${action.type === 'letter' ? 'bg-blue-100' : 'bg-emerald-100'}`}>
-                        <div className={`w-2 h-2 rounded-full ${action.type === 'letter' ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
+                      <div className={`absolute -left-[11px] top-1 w-5 h-5 rounded-full border-4 border-slate-50 flex items-center justify-center ${action.type === 'letter' ? 'bg-blue-100' : action.type === 'summary' ? 'bg-purple-100' : 'bg-emerald-100'}`}>
+                        <div className={`w-2 h-2 rounded-full ${action.type === 'letter' ? 'bg-blue-500' : action.type === 'summary' ? 'bg-purple-500' : 'bg-emerald-500'}`}></div>
                       </div>
-                      <div className={`bg-white p-4 rounded-xl border shadow-sm transition-all group ${action.type === 'letter' ? 'border-blue-200 hover:shadow-md' : 'border-slate-200 hover:border-emerald-200 hover:shadow-md'}`}>
+                      <div className={`bg-white p-4 rounded-xl border shadow-sm transition-all group ${action.type === 'letter' ? 'border-blue-200 hover:shadow-md' : action.type === 'summary' ? 'border-purple-200 hover:shadow-md' : 'border-slate-200 hover:border-emerald-200 hover:shadow-md'}`}>
                         <div className="flex items-start justify-between mb-2">
                           <div className="flex flex-col gap-1">
-                            <span className={`text-xs font-bold uppercase tracking-wider ${action.type === 'letter' ? 'text-blue-600' : 'text-emerald-600'}`}>
-                              {action.type === 'letter' ? 'Mektup' : 'Aksiyon / Not'}
+                            <span className={`text-xs font-bold uppercase tracking-wider ${action.type === 'letter' ? 'text-blue-600' : action.type === 'summary' ? 'text-purple-600' : 'text-emerald-600'}`}>
+                              {action.type === 'letter' ? 'Mektup' : action.type === 'summary' ? 'Vaka Özeti' : 'Aksiyon / Not'}
                             </span>
                             <span className="text-xs text-slate-400 font-medium">{new Date(action.date).toLocaleString('tr-TR')}</span>
                           </div>
@@ -834,11 +955,11 @@ CRITICAL INSTRUCTIONS:
                         </div>
                         <p className="text-sm text-slate-700 whitespace-pre-wrap">{action.actionText}</p>
                         
-                        {action.type === 'letter' && action.content && (
+                        {(action.type === 'letter' || action.type === 'summary') && action.content && (
                           <div className="mt-3">
                             <button
                               onClick={() => setSelectedPreviewAction(action)}
-                              className="flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 transition-colors"
+                              className={`flex items-center gap-1.5 text-xs font-medium transition-colors ${action.type === 'letter' ? 'text-blue-600 hover:text-blue-700' : 'text-purple-600 hover:text-purple-700'}`}
                             >
                               <FileText size={14} />
                               İçeriği Görüntüle
@@ -954,16 +1075,16 @@ CRITICAL INSTRUCTIONS:
                           onChange={(e) => {
                             const guest = inHouseGuests.find(g => g.RESID.toString() === e.target.value);
                             if (guest) {
-                              setNewCaseRoom(guest.ROOMNO || '');
+                              setNewCaseRoom(guest.resolvedRoomNo || guest.ROOMNO || '');
                               setNewCaseGuest(guest.GUESTNAMES || '');
                               setShowGuestDropdown(false);
-                              setGuestSearchTerm(`${guest.ROOMNO} - ${guest.GUESTNAMES}`);
+                              setGuestSearchTerm(`${guest.resolvedRoomNo || guest.ROOMNO} - ${guest.GUESTNAMES}`);
                             }
                           }}
                         >
                           {filteredGuests.map(g => (
                             <option key={g.RESID} value={g.RESID} className="p-2 hover:bg-emerald-50 cursor-pointer rounded-md">
-                              {g.ROOMNO} - {g.GUESTNAMES}
+                              {g.resolvedRoomNo || g.ROOMNO} - {g.GUESTNAMES}
                             </option>
                           ))}
                           {filteredGuests.length === 0 && (
@@ -1204,19 +1325,21 @@ CRITICAL INSTRUCTIONS:
                 
                 <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                    {editingAction.type === 'letter' ? 'Mektup Başlığı / Not' : 'İçerik'}
+                    {editingAction.type === 'letter' ? 'Mektup Başlığı / Not' : editingAction.type === 'summary' ? 'Özet Başlığı / Not' : 'İçerik'}
                   </label>
                   <textarea 
                     value={editActionText}
                     onChange={(e) => setEditActionText(e.target.value)}
-                    rows={editingAction.type === 'letter' ? 2 : 5}
+                    rows={(editingAction.type === 'letter' || editingAction.type === 'summary') ? 2 : 5}
                     className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all resize-none bg-slate-50"
                   />
                 </div>
                 
-                {editingAction.type === 'letter' && (
+                {(editingAction.type === 'letter' || editingAction.type === 'summary') && (
                   <div>
-                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Mektup İçeriği</label>
+                    <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                      {editingAction.type === 'letter' ? 'Mektup İçeriği' : 'Özet İçeriği'}
+                    </label>
                     <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
                       <ReactQuill 
                         theme="snow" 

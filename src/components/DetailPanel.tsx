@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { CommentData, UnifiedTimelineAction, LetterTemplate, CommentAnalytics, PhonebookContact } from '../types';
-import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone, Save, Database, Brain, Plus, FileText, Send, Edit3, Trash2, X, PhoneCall } from 'lucide-react';
+import { Sparkles, Printer, Download, Languages, User, Calendar, Globe, Building, CheckCircle2, MessageSquare, DoorOpen, Phone, Mail, ShieldCheck, MessageCircle, Smartphone, Save, Database, Brain, Plus, FileText, Send, Edit3, Trash2, X, PhoneCall, AlertTriangle } from 'lucide-react';
 import { formatTRDate, parseElektraActions, buildUnifiedTimeline, formatHtmlContent } from '../utils';
 import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, orderBy, onSnapshot, serverTimestamp, deleteDoc, where, updateDoc } from "firebase/firestore";
 import { db } from '../firebase';
@@ -189,7 +189,7 @@ export function DetailPanel({ comment }: DetailPanelProps) {
         // Merge variables
         let merged = content;
         merged = merged.replace(/{{GUESTNAMES}}/g, 'Misafir');
-        merged = merged.replace(/{{ROOMNO}}/g, comment.ROOMNO || '');
+        merged = merged.replace(/{{ROOMNO}}/g, comment.resolvedRoomNo || comment.ROOMNO || '');
         merged = merged.replace(/{{CHECKIN}}/g, formatTRDate(comment.CHECKIN || ''));
         merged = merged.replace(/{{CHECKOUT}}/g, formatTRDate(comment.CHECKOUT || ''));
         merged = merged.replace(/{{HOTELNAME}}/g, comment.COMMENTSOURCEID_NAME || 'Otelimiz');
@@ -214,26 +214,58 @@ export function DetailPanel({ comment }: DetailPanelProps) {
     return () => unsubscribe();
   }, []);
 
-  const handleTextSelection = () => {
-    const selection = window.getSelection();
-    const text = selection?.toString().trim();
-    
-    if (text && text.length > 0) {
-      setSelectedText(text);
-      
-      // Get position for floating button
-      const range = selection?.getRangeAt(0);
-      const rect = range?.getBoundingClientRect();
-      if (rect) {
-        setSelectionPosition({
-          x: rect.left + rect.width / 2,
-          y: rect.top - 10
-        });
+  // Clear selection when clicking elsewhere
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      const selection = window.getSelection();
+      if (!selection || selection.toString().trim() === '') {
+        setSelectedText('');
+        setSelectionPosition(null);
       }
-    } else {
-      // Don't clear immediately to allow clicking the button
-      // We'll clear when clicking elsewhere
-    }
+    };
+    
+    const handleGlobalClick = (e: MouseEvent) => {
+      // If clicking outside, clear selection after a tiny delay to allow browser to update selection first
+      setTimeout(() => {
+        const selection = window.getSelection();
+        if (!selection || selection.toString().trim() === '') {
+          setSelectedText('');
+          setSelectionPosition(null);
+        }
+      }, 50);
+    };
+    
+    document.addEventListener('selectionchange', handleSelectionChange);
+    document.addEventListener('mousedown', handleGlobalClick);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      document.removeEventListener('mousedown', handleGlobalClick);
+    };
+  }, []);
+
+  const handleTextSelection = () => {
+    // Small delay to allow the browser to update the selection
+    setTimeout(() => {
+      const selection = window.getSelection();
+      const text = selection?.toString().trim();
+      
+      if (text && text.length > 0) {
+        setSelectedText(text);
+        
+        // Get position for floating button
+        const range = selection?.getRangeAt(0);
+        const rect = range?.getBoundingClientRect();
+        if (rect) {
+          setSelectionPosition({
+            x: rect.left + rect.width / 2,
+            y: rect.top - 10
+          });
+        }
+      } else {
+        setSelectedText('');
+        setSelectionPosition(null);
+      }
+    }, 10);
   };
 
   const handleSendWhatsApp = async () => {
@@ -253,7 +285,7 @@ export function DetailPanel({ comment }: DetailPanelProps) {
     }
 
     const message = `🚨 *${sourceContext}* 🚨
-*Oda:* ${comment.ROOMNO || 'N/A'}
+*Oda:* ${comment.resolvedRoomNo || comment.ROOMNO || 'N/A'}
 *Misafir:* Misafir
 *Departman:* ${contact.department}
 
@@ -390,7 +422,7 @@ ${comment.COMMENT}`;
       const prompt = `You are a professional 5-star hotel Guest Relations Manager / Concierge. Write a polite and professional letter to a guest.
 Guest Name: ${guestName}
 Nationality: ${comment?.NATIONALITY}
-Room Number: ${comment?.ROOMNO}
+Room Number: ${comment?.resolvedRoomNo || comment?.ROOMNO}
 Check-In: ${formatTRDate(comment?.CHECKIN || '')}
 Check-Out: ${formatTRDate(comment?.CHECKOUT || '')}
 Guest Comment: ${comment?.COMMENT}
@@ -471,7 +503,7 @@ Kurallar:
 
 Misafir Bilgileri:
 Adı: ${comment.RESNAMEID_LOOKUP ? comment.RESNAMEID_LOOKUP.split('-')[1] : 'Bilinmiyor'}
-Oda: ${comment.ROOMNO || 'Bilinmiyor'}
+Oda: ${comment.resolvedRoomNo || comment.ROOMNO || 'Bilinmiyor'}
 Giriş: ${comment.CHECKIN ? formatTRDate(comment.CHECKIN) : 'Bilinmiyor'}
 Çıkış: ${comment.CHECKOUT ? formatTRDate(comment.CHECKOUT) : 'Bilinmiyor'}
 
@@ -602,6 +634,15 @@ ${JSON.stringify(timelineActions.map(a => ({
     );
   }
 
+  const isDissatisfied = (sentimentScore !== null && sentimentScore < 0.5) || 
+                         (deepAnalytics !== null && (deepAnalytics.overallScore < 50 || deepAnalytics.topics.some(t => t.score < 50)));
+
+  const hasLetterGenerated = timelineActions.some(action => 
+    action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email'
+  );
+
+  const showLetterWarning = isDissatisfied && !hasLetterGenerated;
+
   return (
     <div className="flex-1 bg-white flex h-full overflow-hidden">
       {/* Left Column: Guest Details & Comment */}
@@ -663,7 +704,7 @@ ${JSON.stringify(timelineActions.map(a => ({
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Globe size={16} className="text-slate-400"/> {comment.NATIONALITY}</div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Calendar size={16} className="text-slate-400"/> {formatTRDate(comment.COMMENTDATE)}</div>
             <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Building size={16} className="text-slate-400"/> {comment.COMMENTSOURCEID_NAME}</div>
-            {comment.ROOMNO && <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><DoorOpen size={16} className="text-slate-400"/> {comment.ROOMNO}</div>}
+            {(comment.resolvedRoomNo || comment.ROOMNO) && <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><DoorOpen size={16} className="text-slate-400"/> {comment.resolvedRoomNo || comment.ROOMNO}</div>}
             {comment.PHONE && <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Phone size={16} className="text-slate-400"/> {comment.PHONE}</div>}
             {comment.EMAIL && <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm"><Mail size={16} className="text-slate-400"/> {comment.EMAIL}</div>}
           </div>
@@ -731,6 +772,7 @@ ${JSON.stringify(timelineActions.map(a => ({
               >
                 <button
                   onClick={() => setIsWhatsAppModalOpen(true)}
+                  onMouseDown={(e) => e.preventDefault()}
                   className="bg-emerald-600 text-white px-3 py-1.5 rounded-full shadow-xl flex items-center gap-2 text-xs font-bold hover:bg-emerald-700 transition-all hover:scale-105"
                 >
                   <MessageCircle size={14} />
@@ -922,6 +964,40 @@ ${JSON.stringify(timelineActions.map(a => ({
           </div>
         </div>
 
+        {showLetterWarning && (
+          <div className="mx-5 mt-5 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 animate-in fade-in slide-in-from-top-2 shadow-sm">
+            <div className="bg-amber-100 p-2 rounded-lg shrink-0">
+              <AlertTriangle size={18} className="text-amber-600" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-amber-800 mb-1">Mektup Gönderimi Önerilir</h4>
+              <p className="text-xs text-amber-700 leading-relaxed">
+                Bu yorumda memnuniyetsizlik tespit edildi ancak henüz bir mektup oluşturulmamış. Misafir memnuniyetini artırmak için bir yanıt oluşturmayı düşünebilirsiniz.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <button 
+                  onClick={() => {
+                    setEditingActionId(null);
+                    setGeneratedLetter('');
+                    setTranslatedLetter('');
+                    setShowTranslation(false);
+                    setIsAILetterModalOpen(true);
+                  }}
+                  className="text-xs font-bold bg-amber-600 text-white px-3 py-1.5 rounded-lg hover:bg-amber-700 transition-colors shadow-sm"
+                >
+                  AI Mektup Üret
+                </button>
+                <button 
+                  onClick={() => setIsTemplateModalOpen(true)}
+                  className="text-xs font-bold bg-white text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition-colors shadow-sm"
+                >
+                  Şablon Seç
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto p-6">
           <TimelineView 
             actions={timelineActions} 
@@ -981,7 +1057,7 @@ ${JSON.stringify(timelineActions.map(a => ({
                     Kopyala
                   </button>
                   <button
-                    onClick={() => handleDocumentOutput(generatedReport, `Vaka_Raporu_${comment?.ROOMNO || 'Bilinmiyor'}`)}
+                    onClick={() => handleDocumentOutput(generatedReport, `Vaka_Raporu_${comment?.resolvedRoomNo || comment?.ROOMNO || 'Bilinmiyor'}`)}
                     className="px-4 py-2 text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
                   >
                     <Printer size={14} />
@@ -1073,7 +1149,7 @@ ${JSON.stringify(timelineActions.map(a => ({
                       </button>
                       
                       <button 
-                        onClick={() => handleDocumentOutput(showTranslation ? translatedLetter : generatedLetter, `Misafir_Mektubu_${comment?.ROOMNO || 'Misafir'}`)}
+                        onClick={() => handleDocumentOutput(showTranslation ? translatedLetter : generatedLetter, `Misafir_Mektubu_${comment?.resolvedRoomNo || comment?.ROOMNO || 'Misafir'}`)}
                         className="flex items-center gap-2 text-sm font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition-colors"
                       >
                         <Printer size={14} /> Yazdır / PDF Kaydet
@@ -1265,7 +1341,7 @@ ${JSON.stringify(timelineActions.map(a => ({
                          selectedPreviewAction.type === 'template' ? 'Şablon Mektup' :
                          selectedPreviewAction.type === 'elektra' ? 'Elektra Yorumu' : 'İçerik Önizleme')
                       : 'Misafir Geri Bildirimi'
-                  }* 🚨\n*Oda:* ${comment?.ROOMNO || 'N/A'}\n*Misafir:* Misafir\n*Departman:* ${phonebook.find(c => c.id === selectedContactId)?.department || '...'}\n\n📌 *Odaklanılacak Alan:*\n"_${selectedText || '...'}_"\n\n*Yorumun Tamamı:*\n${comment?.COMMENT}`}
+                  }* 🚨\n*Oda:* ${comment?.resolvedRoomNo || comment?.ROOMNO || 'N/A'}\n*Misafir:* Misafir\n*Departman:* ${phonebook.find(c => c.id === selectedContactId)?.department || '...'}\n\n📌 *Odaklanılacak Alan:*\n"_${selectedText || '...'}_"\n\n*Yorumun Tamamı:*\n${comment?.COMMENT}`}
                 </div>
               </div>
             </div>
@@ -1365,6 +1441,7 @@ ${JSON.stringify(timelineActions.map(a => ({
                   >
                     <button
                       onClick={() => setIsWhatsAppModalOpen(true)}
+                      onMouseDown={(e) => e.preventDefault()}
                       className="bg-emerald-600 text-white px-3 py-1.5 rounded-full shadow-xl flex items-center gap-2 text-xs font-bold hover:bg-emerald-700 transition-all hover:scale-105"
                     >
                       <MessageCircle size={14} />

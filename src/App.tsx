@@ -75,7 +75,7 @@ export default function App() {
     }
 
     // Listen for settings updates from Firestore
-    const unsubscribe = onSnapshot(doc(db, "config", "api_settings"), (docSnap) => {
+    const unsubscribeSettings = onSnapshot(doc(db, "config", "api_settings"), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const savedSettings = localStorage.getItem('hotelApiSettings');
@@ -119,7 +119,35 @@ export default function App() {
       }
     });
 
-    return () => unsubscribe();
+    // Listen for sub-room mappings updates from Firestore
+    const unsubscribeMappings = onSnapshot(doc(db, "config", "sub_room_mappings"), (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (data.mappings && Array.isArray(data.mappings)) {
+          const savedMappings = localStorage.getItem('subRoomMappings');
+          let currentMappings: any[] = [];
+          
+          if (savedMappings) {
+            try {
+              currentMappings = JSON.parse(savedMappings);
+            } catch (e) {
+              console.error('Error parsing subRoomMappings', e);
+            }
+          }
+
+          if (JSON.stringify(currentMappings) !== JSON.stringify(data.mappings)) {
+            console.log("Syncing sub-room mappings from Firestore...");
+            localStorage.setItem('subRoomMappings', JSON.stringify(data.mappings));
+            window.dispatchEvent(new Event('hotelApiSettingsUpdated'));
+          }
+        }
+      }
+    });
+
+    return () => {
+      unsubscribeSettings();
+      unsubscribeMappings();
+    };
   }, []);
 
   return (

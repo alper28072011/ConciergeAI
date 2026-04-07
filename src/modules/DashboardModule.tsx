@@ -213,6 +213,7 @@ export function DashboardModule() {
   const [isDateExpanded, setIsDateExpanded] = useState(false);
   const [globalViewMode, setGlobalViewMode] = useState<'chart' | 'table'>('chart');
   const [showSubCategories, setShowSubCategories] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   const [activeModules, setActiveModules] = useState<string[]>(['kpi_cards', 'satisfaction_timeline', 'category_satisfaction', 'source_analysis', 'nationality_analysis', 'hotel_agenda']);
   const [modulesOrder, setModulesOrder] = useState(AVAILABLE_MODULES);
   const [userId, setUserId] = useState<string | null>(null);
@@ -584,6 +585,10 @@ export function DashboardModule() {
       }
     });
 
+    // Sort by date descending (newest first)
+    current.sort((a, b) => parseDate(b.date || (b as any).createdAt).getTime() - parseDate(a.date || (a as any).createdAt).getTime());
+    previous.sort((a, b) => parseDate(b.date || (b as any).createdAt).getTime() - parseDate(a.date || (a as any).createdAt).getTime());
+
     return { filteredAnalytics: current, previousFilteredAnalytics: previous };
   }, [analytics, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources, isCompareActive]);
 
@@ -627,13 +632,6 @@ export function DashboardModule() {
   }, [dashboardData.mostMentioned]);
 
   const categoryChartData = useMemo(() => {
-    if (!showSubCategories) {
-      return dashboardData.categoryPerformance.map(item => ({
-        ...item,
-        isSub: false
-      }));
-    }
-
     const flatData: any[] = [];
     hierarchicalCategoryData.forEach(group => {
       flatData.push({
@@ -642,18 +640,21 @@ export function DashboardModule() {
         count: group.count,
         isSub: false
       });
-      group.subCategories.forEach(sub => {
-        flatData.push({
-          name: sub.subCategory,
-          score: sub.avgScore,
-          count: sub.count,
-          isSub: true,
-          parent: group.name
+      
+      if (showSubCategories || expandedCategories[group.name]) {
+        group.subCategories.forEach(sub => {
+          flatData.push({
+            name: sub.subCategory,
+            score: sub.avgScore,
+            count: sub.count,
+            isSub: true,
+            parent: group.name
+          });
         });
-      });
+      }
     });
     return flatData;
-  }, [hierarchicalCategoryData, dashboardData.categoryPerformance, showSubCategories]);
+  }, [hierarchicalCategoryData, showSubCategories, expandedCategories]);
 
   const allNationalities = useMemo(() => {
     const nats = new Set<string>();
@@ -667,10 +668,47 @@ export function DashboardModule() {
     return Array.from(sources).sort();
   }, [analytics]);
 
-  const handleExportHtml = () => {
+  const handleExportHtml = async () => {
     if (!dashboardRef.current) return;
 
+    // Temporarily expand all categories for export so they are in the DOM
+    const previousShowSubCategories = showSubCategories;
+    setShowSubCategories(true);
+    
+    // Wait for React to render the expanded rows
+    await new Promise(resolve => setTimeout(resolve, 300));
+
     const clone = dashboardRef.current.cloneNode(true) as HTMLElement;
+    
+    // Restore previous state
+    setShowSubCategories(previousShowSubCategories);
+    
+    // If they were originally collapsed, hide them in the clone
+    if (!previousShowSubCategories) {
+      const mainCategoryRows = clone.querySelectorAll('.main-category-row');
+      mainCategoryRows.forEach(row => {
+        const categoryName = row.getAttribute('data-category-name');
+        if (categoryName && !expandedCategories[categoryName]) {
+          row.setAttribute('data-expanded', 'false');
+          const icon = row.querySelector('.category-expand-icon');
+          if (icon) {
+            icon.classList.remove('rotate-180', 'text-indigo-500');
+          }
+          const subRows = clone.querySelectorAll(`.subtopic-row[data-parent-category="${categoryName}"]`);
+          subRows.forEach(subRow => {
+            subRow.classList.add('hidden');
+          });
+        }
+      });
+      
+      const toggleBtn = clone.querySelector('#toggle-subtopics-btn');
+      if (toggleBtn) {
+        toggleBtn.setAttribute('data-showing', 'false');
+        toggleBtn.setAttribute('title', 'Alt Konuları Göster');
+        toggleBtn.classList.remove('bg-indigo-600', 'text-white', 'shadow-lg', 'shadow-indigo-100');
+        toggleBtn.classList.add('bg-slate-100', 'text-slate-600');
+      }
+    }
     
     // Gereksiz scrollbar ve boşlukları temizle
     clone.classList.remove('overflow-y-auto', 'pr-4', 'custom-scrollbar', 'pb-20');
@@ -748,7 +786,13 @@ export function DashboardModule() {
           if (commentData.topics && commentData.topics.length > 0) {
               topicsHtml = '<div class="mt-3 pt-3 border-t border-slate-100 flex flex-wrap gap-1.5">';
               commentData.topics.forEach(topic => {
-                  topicsHtml += `<span class="text-[9px] font-black bg-slate-100 text-slate-500 px-2 py-1 rounded shadow-sm uppercase">${topic.subCategory}</span>`;
+                  const tScore = topic.score || 0;
+                  let tColorClass = 'bg-slate-100 text-slate-500 border-slate-200';
+                  if (tScore >= 80) tColorClass = 'bg-emerald-50 text-emerald-700 border-emerald-100';
+                  else if (tScore >= 50) tColorClass = 'bg-amber-50 text-amber-700 border-amber-100';
+                  else tColorClass = 'bg-red-50 text-red-700 border-red-100';
+                  
+                  topicsHtml += `<span class="text-[9px] font-black ${tColorClass} border px-2 py-1 rounded shadow-sm uppercase">${topic.subCategory}</span>`;
               });
               topicsHtml += '</div>';
           }
@@ -785,6 +829,12 @@ export function DashboardModule() {
             `;
           }
 
+          const oScore = commentData.overallScore || 0;
+          let oColorClass = 'bg-slate-50 text-slate-700 border-slate-200';
+          if (oScore >= 80) oColorClass = 'bg-emerald-50 text-emerald-700 border-emerald-100';
+          else if (oScore >= 50) oColorClass = 'bg-amber-50 text-amber-700 border-amber-100';
+          else oColorClass = 'bg-red-50 text-red-700 border-red-100';
+
           allCommentsHtml += `<div class="p-5 rounded-2xl border border-slate-200 bg-white shadow-sm hover:border-indigo-400 transition-all mb-4 comment-card visible-card" 
               data-source="${source}" 
               data-nationality="${nationality}" 
@@ -795,7 +845,7 @@ export function DashboardModule() {
                       <span class="text-[10px] font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-100 uppercase">${source}</span>
                       <span class="text-xs font-bold text-slate-400">${dateStr}</span>
                   </div>
-                  <div class="text-sm font-black text-slate-700 bg-slate-50 px-2 py-1 rounded-lg">${commentData.overallScore || 0}/100</div>
+                  <div class="text-sm font-black ${oColorClass} border px-2 py-1 rounded-lg">${oScore}/100</div>
               </div>
               <div class="relative">${textHtml}</div>
               ${topicsHtml}
@@ -860,6 +910,10 @@ export function DashboardModule() {
         /* --- ANIMASYONLAR --- */
         @keyframes fadeInSlideUp {
             from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-10px); }
             to { opacity: 1; transform: translateY(0); }
         }
         
@@ -982,12 +1036,27 @@ export function DashboardModule() {
                 toggleSubtopicsBtn.addEventListener('click', function() {
                     const isShowing = this.getAttribute('data-showing') === 'true';
                     const subtopicRows = document.querySelectorAll('.subtopic-row');
+                    const mainCategoryRows = document.querySelectorAll('.main-category-row');
                     
                     subtopicRows.forEach(row => {
                         if (isShowing) {
                             row.classList.add('hidden');
+                            row.style.animation = '';
                         } else {
                             row.classList.remove('hidden');
+                            row.style.animation = 'fadeInDown 0.3s ease forwards';
+                        }
+                    });
+
+                    mainCategoryRows.forEach(row => {
+                        row.setAttribute('data-expanded', !isShowing);
+                        const icon = row.querySelector('.category-expand-icon');
+                        if (icon) {
+                            if (isShowing) {
+                                icon.classList.remove('rotate-180', 'text-indigo-500');
+                            } else {
+                                icon.classList.add('rotate-180', 'text-indigo-500');
+                            }
                         }
                     });
                     
@@ -1003,6 +1072,37 @@ export function DashboardModule() {
                     }
                 });
             }
+
+            const mainCategoryRows = document.querySelectorAll('.main-category-row');
+            mainCategoryRows.forEach(row => {
+                row.addEventListener('click', function(e) {
+                    const categoryName = this.getAttribute('data-category-name');
+                    const subRows = document.querySelectorAll('.subtopic-row[data-parent-category="' + categoryName + '"]');
+                    
+                    let isExpanded = this.getAttribute('data-expanded') === 'true';
+                    isExpanded = !isExpanded;
+                    this.setAttribute('data-expanded', isExpanded);
+                    
+                    const icon = this.querySelector('.category-expand-icon');
+                    if (icon) {
+                        if (isExpanded) {
+                            icon.classList.add('rotate-180', 'text-indigo-500');
+                        } else {
+                            icon.classList.remove('rotate-180', 'text-indigo-500');
+                        }
+                    }
+                    
+                    subRows.forEach(subRow => {
+                        if (isExpanded) {
+                            subRow.classList.remove('hidden');
+                            subRow.style.animation = 'fadeInDown 0.3s ease forwards';
+                        } else {
+                            subRow.classList.add('hidden');
+                            subRow.style.animation = '';
+                        }
+                    });
+                });
+            });
 
             const toggleButtons = document.querySelectorAll('[data-toggle-btn]');
             toggleButtons.forEach(btn => {
@@ -1096,6 +1196,45 @@ export function DashboardModule() {
               });
             });
             ` : ''}
+
+            // --- C. ZAMANA GÖRE MEMNUNİYET SKORU SEKMELERİ ---
+            const timelineTabs = document.querySelectorAll('.timeline-tab-btn');
+            const timelineContents = document.querySelectorAll('[data-timeline-content]');
+
+            timelineTabs.forEach(tab => {
+              tab.addEventListener('click', () => {
+                const target = tab.getAttribute('data-tab-target');
+                
+                // Aktif sekme stilini güncelle
+                timelineTabs.forEach(t => {
+                  t.classList.remove('bg-white', 'text-indigo-600', 'shadow-sm', 'active-tab');
+                  t.classList.add('text-slate-500');
+                });
+                tab.classList.remove('text-slate-500');
+                tab.classList.add('bg-white', 'text-indigo-600', 'shadow-sm', 'active-tab');
+
+                // İçerikleri göster/gizle
+                timelineContents.forEach(content => {
+                  if (content.getAttribute('data-timeline-content') === target) {
+                    if (content.classList.contains('absolute')) {
+                      content.classList.remove('opacity-0', 'z-0', 'pointer-events-none');
+                      content.classList.add('opacity-100', 'z-10');
+                    } else {
+                      content.classList.remove('hidden', 'opacity-0');
+                      content.classList.add('block', 'opacity-100');
+                    }
+                  } else {
+                    if (content.classList.contains('absolute')) {
+                      content.classList.remove('opacity-100', 'z-10');
+                      content.classList.add('opacity-0', 'z-0', 'pointer-events-none');
+                    } else {
+                      content.classList.remove('block', 'opacity-100');
+                      content.classList.add('hidden', 'opacity-0');
+                    }
+                  }
+                });
+              });
+            });
         });
     </script>
 </body>
@@ -1704,7 +1843,7 @@ export function DashboardModule() {
                       </h3>
                       <p className="text-xs text-slate-500 mt-1">Seçilen periyoda göre ortalama memnuniyet değişimi</p>
                     </div>
-                    <div className="flex p-1 bg-slate-100 rounded-lg no-print">
+                    <div className="flex p-1 bg-slate-100 rounded-lg interactive-timeline-tabs">
                       {[
                         { id: 'daily', label: 'Günlük' },
                         { id: 'weekly', label: 'Haftalık' },
@@ -1714,9 +1853,10 @@ export function DashboardModule() {
                         <button
                           key={g.id}
                           onClick={() => setTimelineGranularity(g.id as any)}
-                          className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all ${
+                          data-tab-target={g.id}
+                          className={`px-3 py-1 rounded-md text-[10px] font-bold transition-all timeline-tab-btn ${
                             timelineGranularity === g.id 
-                              ? 'bg-white text-indigo-600 shadow-sm' 
+                              ? 'bg-white text-indigo-600 shadow-sm active-tab' 
                               : 'text-slate-500 hover:text-slate-700'
                           }`}
                         >
@@ -1728,80 +1868,104 @@ export function DashboardModule() {
 
                   {globalViewMode === 'chart' ? (
                     <div className="h-[300px] w-full relative min-w-0 min-h-0">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={timelineData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                          <XAxis 
-                            dataKey="date" 
-                            axisLine={false} 
-                            tickLine={false} 
-                            tick={{ fontSize: 10, fill: '#64748b' }}
-                            dy={10}
-                          />
-                          <YAxis 
-                            domain={[0, 100]} 
-                            axisLine={false} 
-                            tickLine={false} 
-                            tick={{ fontSize: 10, fill: '#64748b' }}
-                            tickFormatter={(v) => `%${v}`}
-                          />
-                          <Tooltip 
-                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
-                            formatter={(value: any) => [`%${value}`, 'Ort. Skor']}
-                          />
-                          <Line 
-                            type="monotone" 
-                            dataKey="avgScore" 
-                            stroke="#6366f1" 
-                            strokeWidth={3} 
-                            dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }}
-                            activeDot={{ r: 6, strokeWidth: 0 }}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
+                      {['daily', 'weekly', 'monthly', 'yearly'].map(granularity => {
+                        const data = dashboardData.satisfactionOverTime[granularity as keyof typeof dashboardData.satisfactionOverTime];
+                        const isActive = timelineGranularity === granularity;
+                        return (
+                          <div 
+                            key={granularity}
+                            data-timeline-content={granularity}
+                            className={`absolute inset-0 transition-opacity duration-300 ${isActive ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}
+                          >
+                            <ResponsiveContainer width="100%" height="100%">
+                              <LineChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                                <XAxis 
+                                  dataKey="date" 
+                                  axisLine={false} 
+                                  tickLine={false} 
+                                  tick={{ fontSize: 10, fill: '#64748b' }}
+                                  dy={10}
+                                />
+                                <YAxis 
+                                  domain={[0, 100]} 
+                                  axisLine={false} 
+                                  tickLine={false} 
+                                  tick={{ fontSize: 10, fill: '#64748b' }}
+                                  tickFormatter={(v) => `%${v}`}
+                                />
+                                <Tooltip 
+                                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
+                                  formatter={(value: any) => [`%${value}`, 'Ort. Skor']}
+                                />
+                                <Line 
+                                  type="monotone" 
+                                  dataKey="avgScore" 
+                                  stroke="#6366f1" 
+                                  strokeWidth={3} 
+                                  dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }}
+                                  activeDot={{ r: 6, strokeWidth: 0 }}
+                                />
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+                        );
+                      })}
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b border-slate-100">
-                            <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Tarih / Periyot</th>
-                            <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
-                            <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Ort. Memnuniyet</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {timelineData.map((item, idx) => (
-                            <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                              <td className="py-3 px-4 text-sm font-bold text-slate-700">{item.date}</td>
-                              <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">{item.count}</td>
-                              <td className="py-3 px-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
-                                    <div 
-                                      className={`h-full rounded-full ${
-                                        item.avgScore >= 80 ? 'bg-emerald-500' :
-                                        item.avgScore >= 60 ? 'bg-blue-500' :
-                                        item.avgScore >= 40 ? 'bg-amber-500' :
-                                        'bg-red-500'
-                                      }`}
-                                      style={{ width: `${item.avgScore}%` }}
-                                    />
-                                  </div>
-                                  <span className={`text-xs font-black w-10 ${
-                                    item.avgScore >= 80 ? 'text-emerald-600' :
-                                    item.avgScore >= 60 ? 'text-blue-600' :
-                                    item.avgScore >= 40 ? 'text-amber-600' :
-                                    'text-red-600'
-                                  }`}>
-                                    %{item.avgScore}
-                                  </span>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                    <div className="overflow-x-auto relative">
+                      {['daily', 'weekly', 'monthly', 'yearly'].map(granularity => {
+                        const data = dashboardData.satisfactionOverTime[granularity as keyof typeof dashboardData.satisfactionOverTime];
+                        const isActive = timelineGranularity === granularity;
+                        return (
+                          <div 
+                            key={granularity}
+                            data-timeline-content={granularity}
+                            className={`transition-opacity duration-300 ${isActive ? 'block opacity-100' : 'hidden opacity-0'}`}
+                          >
+                            <table className="w-full text-left border-collapse">
+                              <thead>
+                                <tr className="border-b border-slate-100">
+                                  <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Tarih / Periyot</th>
+                                  <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
+                                  <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Ort. Memnuniyet</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {data.map((item, idx) => (
+                                  <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                                    <td className="py-3 px-4 text-sm font-bold text-slate-700">{item.date}</td>
+                                    <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">{item.count}</td>
+                                    <td className="py-3 px-4">
+                                      <div className="flex items-center gap-3">
+                                        <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
+                                          <div 
+                                            className={`h-full rounded-full ${
+                                              item.avgScore >= 80 ? 'bg-emerald-500' :
+                                              item.avgScore >= 60 ? 'bg-blue-500' :
+                                              item.avgScore >= 40 ? 'bg-amber-500' :
+                                              'bg-red-500'
+                                            }`}
+                                            style={{ width: `${item.avgScore}%` }}
+                                          />
+                                        </div>
+                                        <span className={`text-xs font-black w-10 ${
+                                          item.avgScore >= 80 ? 'text-emerald-600' :
+                                          item.avgScore >= 60 ? 'text-blue-600' :
+                                          item.avgScore >= 40 ? 'text-amber-600' :
+                                          'text-red-600'
+                                        }`}>
+                                          %{item.avgScore}
+                                        </span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </section>
@@ -1835,7 +1999,7 @@ export function DashboardModule() {
                     <div className="w-full overflow-y-auto custom-scrollbar pr-2" style={{ maxHeight: '700px' }}>
                       <div 
                         className="w-full relative min-w-0 min-h-0 transition-all duration-500" 
-                        style={{ height: showSubCategories ? `${Math.max(600, categoryChartData.length * 45)}px` : `${Math.max(400, categoryChartData.length * 60)}px` }}
+                        style={{ height: `${Math.max(400, categoryChartData.length * 45)}px` }}
                       >
                         <ResponsiveContainer width="100%" height="100%">
                         <BarChart 
@@ -1845,13 +2009,21 @@ export function DashboardModule() {
                           onClick={(data: any) => {
                             if (data && data.activePayload && data.activePayload[0]) {
                               const payload = data.activePayload[0].payload;
-                              if (payload.isMain === false && payload.parent) {
+                              if (payload.isSub && payload.parent) {
                                 setDrillDownFilter({ type: 'category', value: `${payload.parent}|${payload.name}` });
                               } else {
                                 setDrillDownFilter({ type: 'category', value: payload.name });
+                                setExpandedCategories(prev => ({
+                                  ...prev,
+                                  [payload.name]: !prev[payload.name]
+                                }));
                               }
                             } else if (data && data.activeLabel) {
                               setDrillDownFilter({ type: 'category', value: data.activeLabel });
+                              setExpandedCategories(prev => ({
+                                ...prev,
+                                [data.activeLabel]: !prev[data.activeLabel]
+                              }));
                             }
                           }}
                         >
@@ -1931,17 +2103,30 @@ export function DashboardModule() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                          {hierarchicalCategoryData.map((group, gIdx) => (
+                          {hierarchicalCategoryData.map((group, gIdx) => {
+                            const isExpanded = showSubCategories || expandedCategories[group.name];
+                            return (
                             <React.Fragment key={gIdx}>
                               <tr 
-                                className="hover:bg-slate-50 transition-colors group cursor-pointer interactive-filter-trigger"
+                                className="hover:bg-slate-50 transition-colors group cursor-pointer interactive-filter-trigger main-category-row"
                                 data-filter-type="topic"
                                 data-filter-value={group.name}
-                                onClick={() => setDrillDownFilter({ type: 'category', value: group.name })}
+                                data-category-name={group.name}
+                                data-expanded={isExpanded}
+                                onClick={() => {
+                                  setDrillDownFilter({ type: 'category', value: group.name });
+                                  setExpandedCategories(prev => ({
+                                    ...prev,
+                                    [group.name]: !prev[group.name]
+                                  }));
+                                }}
                               >
                                 <td className="py-3 px-4">
                                   <div className="flex items-center gap-2">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
+                                    <ChevronDown 
+                                      size={14} 
+                                      className={`text-slate-400 transition-transform duration-300 category-expand-icon ${isExpanded ? 'rotate-180 text-indigo-500' : ''}`} 
+                                    />
                                     <span className="text-sm font-bold text-slate-800 uppercase tracking-tight">
                                       {group.name}
                                     </span>
@@ -1954,7 +2139,7 @@ export function DashboardModule() {
                                   <div className="flex items-center gap-3">
                                     <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
                                       <div 
-                                        className={`h-full rounded-full ${
+                                        className={`h-full rounded-full transition-all duration-500 ${
                                           group.avgScore >= 80 ? 'bg-emerald-500' :
                                           group.avgScore >= 60 ? 'bg-blue-500' :
                                           group.avgScore >= 40 ? 'bg-amber-500' :
@@ -1974,45 +2159,56 @@ export function DashboardModule() {
                                   </div>
                                 </td>
                               </tr>
-                              {group.subCategories.map((sub, sIdx) => (
-                                <tr
-                                  key={`${gIdx}-${sIdx}`}
-                                  className={`bg-slate-50/50 hover:bg-indigo-50 transition-colors cursor-pointer border-l-2 border-indigo-200 interactive-filter-trigger subtopic-row ${showSubCategories ? '' : 'hidden'}`}
-                                  data-parent-category={group.name}
-                                  data-filter-type="topic"
-                                  data-filter-value={`${group.name}|${sub.subCategory}`}
-                                  onClick={() => setDrillDownFilter({ type: 'category', value: `${group.name}|${sub.subCategory}` })}
-                                >
-                                  <td className="py-2 px-4 pl-8">
-                                    <span className="text-xs font-medium text-slate-600">
-                                      ↳ {sub.subCategory}
-                                    </span>
-                                  </td>
-                                  <td className="py-2 px-4 text-xs text-slate-400 text-center font-mono">
-                                    {sub.count}
-                                  </td>
-                                  <td className="py-2 px-4">
-                                    <div className="flex items-center gap-3">
-                                      <div className="flex-1 h-1 bg-slate-200 rounded-full overflow-hidden min-w-[100px]">
-                                        <div 
-                                          className={`h-full rounded-full ${
-                                            sub.avgScore >= 80 ? 'bg-emerald-400' :
-                                            sub.avgScore >= 60 ? 'bg-blue-400' :
-                                            sub.avgScore >= 40 ? 'bg-amber-400' :
-                                            'bg-red-400'
-                                          }`}
-                                          style={{ width: `${sub.avgScore}%` }}
-                                        />
-                                      </div>
-                                      <span className="text-[10px] font-bold text-slate-500 w-10">
-                                        %{sub.avgScore}
+                              <AnimatePresence>
+                                {isExpanded && group.subCategories.map((sub, sIdx) => (
+                                  <motion.tr
+                                    initial={{ opacity: 0, height: 0, scaleY: 0.8 }}
+                                    animate={{ opacity: 1, height: 'auto', scaleY: 1 }}
+                                    exit={{ opacity: 0, height: 0, scaleY: 0.8 }}
+                                    transition={{ duration: 0.2, ease: "easeOut" }}
+                                    key={`${gIdx}-${sIdx}`}
+                                    className={`bg-slate-50/50 hover:bg-indigo-50 transition-colors cursor-pointer border-l-2 border-indigo-200 interactive-filter-trigger subtopic-row`}
+                                    data-parent-category={group.name}
+                                    data-filter-type="topic"
+                                    data-filter-value={`${group.name}|${sub.subCategory}`}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setDrillDownFilter({ type: 'category', value: `${group.name}|${sub.subCategory}` });
+                                    }}
+                                  >
+                                    <td className="py-2 px-4 pl-8">
+                                      <span className="text-xs font-medium text-slate-600 flex items-center gap-2">
+                                        <div className="w-1 h-1 rounded-full bg-indigo-400" />
+                                        {sub.subCategory}
                                       </span>
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))}
+                                    </td>
+                                    <td className="py-2 px-4 text-xs text-slate-400 text-center font-mono">
+                                      {sub.count}
+                                    </td>
+                                    <td className="py-2 px-4">
+                                      <div className="flex items-center gap-2">
+                                        <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden min-w-[100px]">
+                                          <div 
+                                            className={`h-full rounded-full transition-all duration-500 ${
+                                              sub.avgScore >= 80 ? 'bg-emerald-400' :
+                                              sub.avgScore >= 60 ? 'bg-blue-400' :
+                                              sub.avgScore >= 40 ? 'bg-amber-400' :
+                                              'bg-red-400'
+                                            }`}
+                                            style={{ width: `${sub.avgScore}%` }}
+                                          />
+                                        </div>
+                                        <span className="text-[10px] font-bold text-slate-500 w-8">
+                                          %{sub.avgScore}
+                                        </span>
+                                      </div>
+                                    </td>
+                                  </motion.tr>
+                                ))}
+                              </AnimatePresence>
                             </React.Fragment>
-                          ))}
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2815,6 +3011,12 @@ export function DashboardModule() {
                   const isLong = localText.length > 150;
                   const displayedText = isExpanded ? localText : localText.slice(0, 150);
 
+                  const oScore = commentData.overallScore || 0;
+                  let oColorClass = 'bg-slate-50 text-slate-700 border-slate-200';
+                  if (oScore >= 80) oColorClass = 'bg-emerald-50 text-emerald-700 border-emerald-100';
+                  else if (oScore >= 50) oColorClass = 'bg-amber-50 text-amber-700 border-amber-100';
+                  else oColorClass = 'bg-red-50 text-red-700 border-red-100';
+
                   return (
                     <div key={commentData.commentId || idx} className="p-4 rounded-2xl border border-slate-100 bg-white hover:border-indigo-200 transition-all group">
                       <div className="flex items-center justify-between mb-2">
@@ -2822,7 +3024,7 @@ export function DashboardModule() {
                           <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded uppercase">{commentData.source}</span>
                           <span className="text-[10px] font-bold text-slate-400">{new Date(commentData.date).toLocaleDateString('tr-TR')}</span>
                         </div>
-                        <div className="text-xs font-black text-slate-600">{commentData.overallScore}/100</div>
+                        <div className={`text-xs font-black ${oColorClass} border px-2 py-1 rounded-lg`}>{oScore}/100</div>
                       </div>
                       <div className="relative">
                         {localText ? (
@@ -2842,11 +3044,19 @@ export function DashboardModule() {
                         )}
                       </div>
                       <div className="mt-3 pt-3 border-t border-slate-50 flex flex-wrap gap-1">
-                        {commentData.topics?.map((topic, tidx) => (
-                          <span key={tidx} className="text-[8px] font-bold bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded uppercase">
-                            {topic.subCategory}
-                          </span>
-                        ))}
+                        {commentData.topics?.map((topic, tidx) => {
+                          const tScore = topic.score || 0;
+                          let tColorClass = 'bg-slate-100 text-slate-500 border-slate-200';
+                          if (tScore >= 80) tColorClass = 'bg-emerald-50 text-emerald-700 border-emerald-100';
+                          else if (tScore >= 50) tColorClass = 'bg-amber-50 text-amber-700 border-amber-100';
+                          else tColorClass = 'bg-red-50 text-red-700 border-red-100';
+
+                          return (
+                            <span key={tidx} className={`text-[8px] font-bold ${tColorClass} border px-1.5 py-0.5 rounded uppercase`}>
+                              {topic.subCategory}
+                            </span>
+                          );
+                        })}
                       </div>
                       
                       {(() => {
