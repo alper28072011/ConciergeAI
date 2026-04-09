@@ -220,7 +220,7 @@ export function DashboardModule() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
-  const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string }>({ type: 'all', value: 'all' });
+  const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string, sentiment?: 'negative' | 'positive' | 'all' }>({ type: 'all', value: 'all' });
   const [timelineGranularity, setTimelineGranularity] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   const [expandedActions, setExpandedActions] = useState<Record<string, boolean>>({});
@@ -599,9 +599,18 @@ export function DashboardModule() {
       if (drillDownFilter.type === 'category') {
         if (drillDownFilter.value.includes('|')) {
           const [main, sub] = drillDownFilter.value.split('|');
-          return item.topics?.some(t => t.mainCategory === main && t.subCategory === sub);
+          return item.topics?.some(t => 
+            t.mainCategory === main && 
+            t.subCategory === sub &&
+            (drillDownFilter.sentiment === 'negative' ? (t.score !== undefined && t.score < 50) : true) &&
+            (drillDownFilter.sentiment === 'positive' ? (t.score !== undefined && t.score >= 80) : true)
+          );
         } else {
-          return item.topics?.some(t => t.subCategory === drillDownFilter.value || t.mainCategory === drillDownFilter.value);
+          return item.topics?.some(t => 
+            (t.subCategory === drillDownFilter.value || t.mainCategory === drillDownFilter.value) &&
+            (drillDownFilter.sentiment === 'negative' ? (t.score !== undefined && t.score < 50) : true) &&
+            (drillDownFilter.sentiment === 'positive' ? (t.score !== undefined && t.score >= 80) : true)
+          );
         }
       }
       if (drillDownFilter.type === 'source') return item.source === drillDownFilter.value;
@@ -839,6 +848,7 @@ export function DashboardModule() {
               data-source="${source}" 
               data-nationality="${nationality}" 
               data-topics="${compositeTopics},${subCategories},${categories}"
+              data-overall-score="${oScore}"
               style="animation-delay: ${Math.min(filteredAnalytics.indexOf(commentData) * 0.05, 0.5)}s;">
               <div class="flex items-center justify-between mb-3">
                   <div class="flex items-center gap-3">
@@ -1154,6 +1164,7 @@ export function DashboardModule() {
               trigger.addEventListener('click', (e) => {
                 const type = trigger.getAttribute('data-filter-type');
                 const value = trigger.getAttribute('data-filter-value');
+                const sentiment = trigger.getAttribute('data-filter-sentiment');
                 if (!type || !value || value === 'all') {
                   resetFilters();
                   return;
@@ -1179,6 +1190,15 @@ export function DashboardModule() {
                     const topics = card.getAttribute('data-topics') || '';
                     // Alt konu veya ana konu kelimesini arar
                     isMatch = topics.split(',').includes(value); 
+                    
+                    if (isMatch && sentiment) {
+                      const cardScore = parseInt(card.getAttribute('data-overall-score') || '0', 10);
+                      if (sentiment === 'negative' && cardScore >= 50) {
+                        isMatch = false;
+                      } else if (sentiment === 'positive' && cardScore < 80) {
+                        isMatch = false;
+                      }
+                    }
                   } else {
                     const cardValue = card.getAttribute(\`data-\${type}\`);
                     isMatch = (cardValue === value);
@@ -2721,9 +2741,9 @@ export function DashboardModule() {
                             onClick={(data: any) => {
                               if (data && data.activePayload && data.activePayload[0]) {
                                 const payload = data.activePayload[0].payload;
-                                setDrillDownFilter({ type: 'category', value: `${payload.mainCategory}|${payload.subCategory}` });
+                                setDrillDownFilter({ type: 'category', value: `${payload.mainCategory}|${payload.subCategory}`, sentiment: 'positive' });
                               } else if (data && data.activeLabel) {
-                                setDrillDownFilter({ type: 'category', value: data.activeLabel });
+                                setDrillDownFilter({ type: 'category', value: data.activeLabel, sentiment: 'positive' });
                               }
                             }}
                           >
@@ -2784,9 +2804,10 @@ export function DashboardModule() {
                               <tr 
                                 key={idx} 
                                 className={`hover:bg-slate-50/80 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopPositive && idx >= 10) ? 'hidden' : ''}`}
-                                onClick={() => setDrillDownFilter({ type: 'category', value: `${item.mainCategory}|${item.subCategory}` })}
+                                onClick={() => setDrillDownFilter({ type: 'category', value: `${item.mainCategory}|${item.subCategory}`, sentiment: 'positive' })}
                                 data-filter-type="topic"
                                 data-filter-value={`${item.mainCategory}|${item.subCategory}`}
+                                data-filter-sentiment="positive"
                               >
                                 <td className="py-4 px-4">
                                   <span className="text-sm font-bold text-slate-800 group-hover:text-emerald-600 transition-colors">{item.subCategory}</span>
@@ -2855,9 +2876,9 @@ export function DashboardModule() {
                             onClick={(data: any) => {
                               if (data && data.activePayload && data.activePayload[0]) {
                                 const payload = data.activePayload[0].payload;
-                                setDrillDownFilter({ type: 'category', value: `${payload.mainCategory}|${payload.subCategory}` });
+                                setDrillDownFilter({ type: 'category', value: `${payload.mainCategory}|${payload.subCategory}`, sentiment: 'negative' });
                               } else if (data && data.activeLabel) {
-                                setDrillDownFilter({ type: 'category', value: data.activeLabel });
+                                setDrillDownFilter({ type: 'category', value: data.activeLabel, sentiment: 'negative' });
                               }
                             }}
                           >
@@ -2918,9 +2939,10 @@ export function DashboardModule() {
                               <tr 
                                 key={idx} 
                                 className={`hover:bg-rose-50/30 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopNegative && idx >= 10) ? 'hidden' : ''}`}
-                                onClick={() => setDrillDownFilter({ type: 'category', value: `${item.mainCategory}|${item.subCategory}` })}
+                                onClick={() => setDrillDownFilter({ type: 'category', value: `${item.mainCategory}|${item.subCategory}`, sentiment: 'negative' })}
                                 data-filter-type="topic"
                                 data-filter-value={`${item.mainCategory}|${item.subCategory}`}
+                                data-filter-sentiment="negative"
                               >
                                 <td className="py-4 px-4">
                                   <span className="text-sm font-bold text-slate-800 group-hover:text-rose-600 transition-colors">{item.subCategory}</span>

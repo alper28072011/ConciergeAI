@@ -660,6 +660,13 @@ CRITICAL INSTRUCTIONS:
       case 'has_comment':
         filtered = filtered.filter(g => g.hasComment);
         break;
+      case 'face_to_face':
+        filtered = filtered.filter(g => g.hasComment && g.comments?.some(c => {
+          if (!c.SOURCENAME) return false;
+          const s = c.SOURCENAME.toLocaleLowerCase('tr-TR').replace(/\s+/g, '');
+          return s.includes('yüzyüze') || s.includes('yuzyuze') || s.includes('facetoface');
+        }));
+        break;
       case 'no_comment':
         filtered = filtered.filter(g => !g.hasComment);
         break;
@@ -1471,6 +1478,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
             >
               <option value="all">Tümü</option>
               <option value="has_comment">Yorum Yapanlar</option>
+              <option value="face_to_face">Yüz Yüze Yorumlar</option>
               <option value="no_comment">Sessiz Misafirler (Yorum Yok)</option>
               <option value="analyzed">Derin Analiz Yapılanlar</option>
               <option value="high_sentiment">Yüksek Memnuniyet (Score &gt; %80)</option>

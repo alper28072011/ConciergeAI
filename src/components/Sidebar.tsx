@@ -74,7 +74,7 @@ export function Sidebar({
   viewMode,
   onViewModeChange
 }: SidebarProps) {
-  const [filterMode, setFilterMode] = useState<'all' | 'waiting_letter' | 'low_score' | 'high_score'>('all');
+  const [filterMode, setFilterMode] = useState<'all' | 'waiting_letter' | 'low_score' | 'high_score' | 'face_to_face'>('all');
 
   const filteredComments = useMemo(() => {
     return comments.filter(comment => {
@@ -101,6 +101,11 @@ export function Sidebar({
       }
       if (filterMode === 'high_score') {
         return isHighScore;
+      }
+      if (filterMode === 'face_to_face') {
+        if (!comment.SOURCENAME) return false;
+        const s = comment.SOURCENAME.toLocaleLowerCase('tr-TR').replace(/\s+/g, '');
+        return s.includes('yüzyüze') || s.includes('yuzyuze') || s.includes('facetoface');
       }
       return true;
     });
@@ -219,6 +224,12 @@ export function Sidebar({
               className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${filterMode === 'high_score' ? 'bg-emerald-500 text-white shadow-sm' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
             >
               Yüksek Puanlı
+            </button>
+            <button 
+              onClick={() => setFilterMode('face_to_face')}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${filterMode === 'face_to_face' ? 'bg-indigo-500 text-white shadow-sm' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}
+            >
+              Yüz Yüze
             </button>
           </div>
         </div>
