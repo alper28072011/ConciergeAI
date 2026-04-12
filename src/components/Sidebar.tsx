@@ -103,8 +103,8 @@ export function Sidebar({
         return isHighScore;
       }
       if (filterMode === 'face_to_face') {
-        if (!comment.SOURCENAME) return false;
-        const s = comment.SOURCENAME.toLocaleLowerCase('tr-TR').replace(/\s+/g, '');
+        if (!comment.COMMENTSOURCEID_NAME) return false;
+        const s = comment.COMMENTSOURCEID_NAME.toLocaleLowerCase('tr-TR').replace(/\s+/g, '');
         return s.includes('yüzyüze') || s.includes('yuzyuze') || s.includes('facetoface');
       }
       return true;

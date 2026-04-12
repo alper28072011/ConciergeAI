@@ -65,7 +65,7 @@ function AppContent({ openCasesCount, isSettingsOpen, setIsSettingsOpen }: any) 
         {/* Module Content */}
         <main className="flex-1 flex overflow-hidden relative bg-slate-50">
           <AnimatePresence mode="wait">
-            <Routes location={location} key={location.pathname}>
+            <Routes location={location}>
               <Route path="/" element={
                 <motion.div
                   initial={{ opacity: 0, y: 10 }}

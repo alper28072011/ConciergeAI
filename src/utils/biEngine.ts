@@ -232,37 +232,74 @@ export const calculateCategoryPerformance = (analytics: CommentAnalytics[]): Cat
 };
 
 export const calculateSatisfactionOverTime = (analytics: CommentAnalytics[]) => {
-  const sortByDate = (a: any, b: any) => new Date(a.date).getTime() - new Date(b.date).getTime();
-
-  const process = (groupBy: (d: Date) => string) => {
-    const map = new Map<string, { totalScore: number; count: number }>();
+  const process = (groupBy: (d: Date) => { key: string; display: string; timestamp: number }) => {
+    const map = new Map<string, { totalScore: number; count: number; display: string; timestamp: number }>();
     analytics.forEach(item => {
       const d = new Date(item.date);
       if (isNaN(d.getTime())) return;
-      const key = groupBy(d);
-      if (!map.has(key)) map.set(key, { totalScore: 0, count: 0 });
+      const { key, display, timestamp } = groupBy(d);
+      if (!map.has(key)) map.set(key, { totalScore: 0, count: 0, display, timestamp });
       const data = map.get(key)!;
       data.totalScore += item.overallScore;
       data.count += 1;
     });
-    return Array.from(map.entries())
-      .map(([date, data]) => ({
-        date,
+    return Array.from(map.values())
+      .map(data => ({
+        date: data.display,
         avgScore: Math.round(data.totalScore / data.count),
-        count: data.count
+        count: data.count,
+        timestamp: data.timestamp
       }))
-      .sort(sortByDate);
+      .sort((a, b) => a.timestamp - b.timestamp)
+      .map(({ timestamp, ...rest }) => rest); // Remove timestamp before returning
   };
 
+  const getWeekNumber = (d: Date) => {
+    const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+    const dayNum = date.getUTCDay() || 7;
+    date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+    return Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  };
+
+  const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+
   return {
-    daily: process(d => d.toISOString().split('T')[0]),
-    weekly: process(d => {
-      const startOfWeek = new Date(d);
-      startOfWeek.setDate(d.getDate() - d.getDay());
-      return startOfWeek.toISOString().split('T')[0];
+    daily: process(d => {
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      return {
+        key: `${yyyy}-${mm}-${dd}`,
+        display: `${dd}.${mm}.${yyyy}`,
+        timestamp: new Date(yyyy, d.getMonth(), d.getDate()).getTime()
+      };
     }),
-    monthly: process(d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`),
-    yearly: process(d => `${d.getFullYear()}`)
+    weekly: process(d => {
+      const weekNumber = getWeekNumber(d);
+      const startOfWeek = new Date(d);
+      startOfWeek.setDate(d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1));
+      startOfWeek.setHours(0, 0, 0, 0);
+      return {
+        key: `${startOfWeek.getFullYear()}-W${weekNumber}`,
+        display: `${weekNumber}. Hafta`,
+        timestamp: startOfWeek.getTime()
+      };
+    }),
+    monthly: process(d => {
+      return {
+        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        display: `${months[d.getMonth()]} ${d.getFullYear()}`,
+        timestamp: new Date(d.getFullYear(), d.getMonth(), 1).getTime()
+      };
+    }),
+    yearly: process(d => {
+      return {
+        key: `${d.getFullYear()}`,
+        display: `${d.getFullYear()}`,
+        timestamp: new Date(d.getFullYear(), 0, 1).getTime()
+      };
+    })
   };
 };
 

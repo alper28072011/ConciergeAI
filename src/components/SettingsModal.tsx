@@ -670,6 +670,20 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
                       </select>
                     </div>
                     <div>
+                      <label className="block text-xs font-medium text-slate-700 mb-1">Dashboard Bölüm Özetleri (AI)</label>
+                      <select
+                        value={settings.featureModels?.dashboardSectionSummary || ''}
+                        onChange={(e) => handleFeatureModelChange('dashboardSectionSummary', e.target.value)}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 text-sm bg-white"
+                      >
+                        <option value="">Varsayılan Modeli Kullan</option>
+                        <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite</option>
+                        <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+                        <option value="gemini-3.1-pro-preview">Gemini 3.1 Pro Preview</option>
+                      </select>
+                    </div>
+                    <div>
                       <label className="block text-xs font-medium text-slate-700 mb-1">Toplu Aksiyon Raporu</label>
                       <select
                         value={settings.featureModels?.bulkReport || ''}

@@ -185,7 +185,7 @@ export interface PhonebookContact {
   createdAt: string;
 }
 
-export type AIFeature = 'sentimentAnalysis' | 'letterGeneration' | 'translation' | 'deepAnalysis' | 'templateTranslation' | 'dashboardReport' | 'bulkReport' | 'caseSummary' | 'caseLetter';
+export type AIFeature = 'sentimentAnalysis' | 'letterGeneration' | 'translation' | 'deepAnalysis' | 'templateTranslation' | 'dashboardReport' | 'dashboardSectionSummary' | 'bulkReport' | 'caseSummary' | 'caseLetter';
 
 export interface ApiSettings {
   baseUrl: string;

@@ -245,12 +245,18 @@ export function DashboardModule() {
   const [editingReportType, setEditingReportType] = useState<string>('dashboard_summary');
   const [isSavingReport, setIsSavingReport] = useState(false);
   const [isExportOptionsModalOpen, setIsExportOptionsModalOpen] = useState(false);
+  const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
+  const [sectionSummaries, setSectionSummaries] = useState<Record<string, string>>({});
+  const [isGeneratingSectionSummaries, setIsGeneratingSectionSummaries] = useState(false);
   const [exportOptions, setExportOptions] = useState({
     includeComments: true,
     includeFilters: true,
     interactive: true,
+    includeAiSummaries: false,
     title: `Otel CRM Kokpit Raporu - ${new Date().toLocaleDateString('tr-TR')}`
   });
+  const [isGeneratingExport, setIsGeneratingExport] = useState(false);
+  const [exportProgress, setExportProgress] = useState('');
 
   useEffect(() => {
     const initPreferences = async () => {
@@ -735,6 +741,11 @@ export function DashboardModule() {
       interactiveOnlyElements.forEach(el => el.remove());
     }
 
+    if (!exportOptions.includeAiSummaries) {
+      const aiSummaries = clone.querySelectorAll('.ai-summary-block');
+      aiSummaries.forEach(el => el.remove());
+    }
+
     // SVG düzeltmeleri
     const svgs = clone.querySelectorAll('svg');
     svgs.forEach(svg => {
@@ -788,6 +799,7 @@ export function DashboardModule() {
           const categories = commentData.topics?.map(t => t.mainCategory).join(',') || '';
           const subCategories = commentData.topics?.map(t => t.subCategory).join(',') || '';
           const compositeTopics = commentData.topics?.map(t => `${t.mainCategory}|${t.subCategory}`).join(',') || '';
+          const topicDetails = commentData.topics?.map(t => `${t.mainCategory}|${t.subCategory}|${t.score || 0}`).join(';') || '';
           const nationality = commentData.nationality || 'Bilinmiyor';
           const source = commentData.source || 'Bilinmiyor';
 
@@ -848,6 +860,7 @@ export function DashboardModule() {
               data-source="${source}" 
               data-nationality="${nationality}" 
               data-topics="${compositeTopics},${subCategories},${categories}"
+              data-topic-details="${topicDetails}"
               data-overall-score="${oScore}"
               style="animation-delay: ${Math.min(filteredAnalytics.indexOf(commentData) * 0.05, 0.5)}s;">
               <div class="flex items-center justify-between mb-3">
@@ -1187,20 +1200,30 @@ export function DashboardModule() {
                 commentCards.forEach(card => {
                   let isMatch = false;
                   if (type === 'topic') {
-                    const topics = card.getAttribute('data-topics') || '';
-                    // Alt konu veya ana konu kelimesini arar
-                    isMatch = topics.split(',').includes(value); 
+                    const topicDetails = card.getAttribute('data-topic-details') || '';
+                    const topicsList = topicDetails.split(';');
                     
-                    if (isMatch && sentiment) {
-                      const cardScore = parseInt(card.getAttribute('data-overall-score') || '0', 10);
-                      if (sentiment === 'negative' && cardScore >= 50) {
-                        isMatch = false;
-                      } else if (sentiment === 'positive' && cardScore < 80) {
-                        isMatch = false;
+                    for (const t of topicsList) {
+                      if (!t) continue;
+                      const [main, sub, scoreStr] = t.split('|');
+                      const score = parseInt(scoreStr, 10);
+                      
+                      let matchesValue = false;
+                      if (value.includes('|')) {
+                        matchesValue = (value === main + '|' + sub);
+                      } else {
+                        matchesValue = (value === main || value === sub);
+                      }
+                      
+                      if (matchesValue) {
+                        if (sentiment === 'negative' && score >= 50) continue;
+                        if (sentiment === 'positive' && score < 80) continue;
+                        isMatch = true;
+                        break;
                       }
                     }
                   } else {
-                    const cardValue = card.getAttribute(\`data-\${type}\`);
+                    const cardValue = card.getAttribute('data-' + type);
                     isMatch = (cardValue === value);
                   }
                   
@@ -1272,6 +1295,61 @@ export function DashboardModule() {
     URL.revokeObjectURL(url);
     
     setIsExportOptionsModalOpen(false);
+  };
+
+  const handleGenerateSectionSummaries = async () => {
+    if (filteredAnalytics.length === 0) {
+      alert("Özetlenecek veri bulunamadı.");
+      return;
+    }
+    
+    setIsGeneratingSectionSummaries(true);
+    setIsAiMenuOpen(false);
+    
+    try {
+      const prompt = `
+      Aşağıdaki otel müşteri yorumları analitik verilerini kullanarak, belirtilen her bir dashboard bölümü için 2-3 cümlelik doğal dilli, içgörü odaklı özetler oluştur.
+      Sadece sayıları tekrar etme; anomalileri, dikkat çeken başarıları veya gelişim alanlarını vurgula.
+      
+      Veriler:
+      Toplam Yorum: ${dashboardData.kpis.totalComments}
+      Ortalama Skor: ${dashboardData.kpis.avgScore}
+      
+      Kategoriler:
+      ${JSON.stringify(hierarchicalCategoryData.slice(0, 5), null, 2)}
+      
+      Uyruklar:
+      ${JSON.stringify(dashboardData.nationalityAnalysis.slice(0, 5), null, 2)}
+      
+      Kanallar:
+      ${JSON.stringify(dashboardData.sourceAnalysis.slice(0, 5), null, 2)}
+      
+      Lütfen aşağıdaki JSON formatında yanıt ver. Sadece JSON döndür, markdown veya başka bir metin ekleme.
+      {
+        "kpi_cards": "KPI özet kartları için özet...",
+        "satisfaction_timeline": "Zamana göre memnuniyet için özet...",
+        "category_satisfaction": "Kategori bazlı memnuniyet için özet...",
+        "source_analysis": "Kanal dağılımı için özet...",
+        "nationality_analysis": "Uyruk analizi için özet...",
+        "hotel_agenda": "Otel gündemi için özet..."
+      }
+      `;
+      
+      const response = await generateAIContent(prompt, 'Dashboard Bölüm Özetleri', 'dashboardSectionSummary');
+      
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const summaries = JSON.parse(jsonMatch[0]);
+        setSectionSummaries(summaries);
+      } else {
+        throw new Error("Geçerli JSON bulunamadı.");
+      }
+    } catch (error) {
+      console.error("Bölüm özetleri üretilirken hata:", error);
+      alert("Bölüm özetleri üretilirken bir hata oluştu.");
+    } finally {
+      setIsGeneratingSectionSummaries(false);
+    }
   };
 
   const handleGenerateDashboardReport = async () => {
@@ -1372,6 +1450,26 @@ export function DashboardModule() {
     }
   };
 
+  const renderAiSummary = (moduleId: string) => {
+    if (!sectionSummaries[moduleId]) return null;
+    return (
+      <motion.div 
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mt-4 bg-indigo-50/50 border border-indigo-100 rounded-xl p-4 flex gap-3 relative overflow-hidden ai-summary-block"
+      >
+        <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-indigo-400 to-purple-500"></div>
+        <div className="p-2 bg-white rounded-lg shrink-0 h-fit shadow-sm border border-indigo-50">
+          <Sparkles size={16} className="text-indigo-500" />
+        </div>
+        <div>
+          <h4 className="text-xs font-black text-indigo-900 uppercase tracking-widest mb-1">AI Özeti</h4>
+          <p className="text-sm text-slate-700 leading-relaxed font-medium">{sectionSummaries[moduleId]}</p>
+        </div>
+      </motion.div>
+    );
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -1385,6 +1483,18 @@ export function DashboardModule() {
       {/* Portal for Header Actions */}
       {portalTarget && createPortal(
         <div className="flex items-center gap-4 h-10">
+          <button 
+            onClick={handleGenerateSectionSummaries}
+            disabled={isGeneratingSectionSummaries || filteredAnalytics.length === 0}
+            className="px-5 py-2 rounded-xl font-bold text-sm shadow-md flex items-center gap-2 transition-all bg-purple-600 hover:bg-purple-700 text-white shadow-purple-200 disabled:opacity-70"
+          >
+            {isGeneratingSectionSummaries ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <Sparkles size={16} />
+            )}
+            {isGeneratingSectionSummaries ? 'Özetleniyor...' : 'AI Özeti Üret'}
+          </button>
           <button 
             onClick={handleSavePreferences}
             disabled={isSaving}
@@ -1744,13 +1854,47 @@ export function DashboardModule() {
 
           {/* Quick Actions */}
           <div className="flex flex-col gap-1.5">
-            <button
-              onClick={handleGenerateDashboardReport}
-              className="w-full bg-indigo-600 text-white p-2.5 rounded-lg font-bold text-[10px] flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100 group"
-            >
-              <Sparkles size={14} className="text-amber-300 group-hover:scale-110 transition-transform" />
-              AI Özeti Üret
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setIsAiMenuOpen(!isAiMenuOpen)}
+                className="w-full bg-indigo-600 text-white p-2.5 rounded-lg font-bold text-[10px] flex items-center justify-center gap-2 hover:bg-indigo-700 transition-all shadow-md shadow-indigo-100 group"
+              >
+                <Sparkles size={14} className="text-amber-300 group-hover:scale-110 transition-transform" />
+                AI İşlemleri
+                <ChevronDown size={14} className={`transition-transform ${isAiMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+              
+              <AnimatePresence>
+                {isAiMenuOpen && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 5 }}
+                    className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50"
+                  >
+                    <button
+                      onClick={handleGenerateDashboardReport}
+                      className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 border-b border-slate-50 flex items-center gap-2"
+                    >
+                      <FileText size={14} className="text-indigo-500" />
+                      Genel Yönetim Raporu
+                    </button>
+                    <button
+                      onClick={handleGenerateSectionSummaries}
+                      disabled={isGeneratingSectionSummaries}
+                      className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {isGeneratingSectionSummaries ? (
+                        <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-indigo-500 border-t-transparent"></div>
+                      ) : (
+                        <Brain size={14} className="text-indigo-500" />
+                      )}
+                      Bölüm Özetleri Ekle
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
             <div className="grid grid-cols-2 gap-1.5">
               <button
                 onClick={() => setIsExportOptionsModalOpen(true)}
@@ -1785,66 +1929,69 @@ export function DashboardModule() {
 
             if (module.id === 'kpi_cards') {
               return (
-                <div key="kpi_cards" className="grid grid-cols-4 gap-4">
-                  {[
-                    { 
-                      label: 'Ort. Memnuniyet', 
-                      value: `%${dashboardData.kpis.avgScore}`, 
-                      change: dashboardData.kpis.scoreChange, 
-                      icon: Award, 
-                      color: 'indigo' 
-                    },
-                    { 
-                      label: 'Toplam Yorum Sayısı', 
-                      value: dashboardData.kpis.totalComments, 
-                      change: dashboardData.kpis.commentChange, 
-                      icon: MessageSquare, 
-                      color: 'blue' 
-                    },
-                    { 
-                      label: 'En Başarılı Kategori', 
-                      value: dashboardData.kpis.bestCategory, 
-                      icon: CheckCircle2, 
-                      color: 'emerald' 
-                    },
-                    { 
-                      label: 'Gelişim Alanı', 
-                      value: dashboardData.kpis.worstCategory, 
-                      icon: AlertTriangle, 
-                      color: 'red' 
-                    }
-                  ].map((kpi, idx) => (
-                    <div 
-                      key={idx} 
-                      className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden group cursor-pointer hover:border-indigo-300 transition-all interactive-filter-trigger"
-                      onClick={() => {
-                        if (kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı') {
-                          setDrillDownFilter({ type: 'category', value: kpi.value });
-                        } else {
-                          setDrillDownFilter({ type: 'all', value: 'all' });
-                        }
-                      }}
-                      data-filter-type={kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı' ? 'category' : 'all'}
-                      data-filter-value={kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı' ? kpi.value : 'all'}
-                    >
-                      <div className={`absolute top-0 right-0 w-24 h-24 bg-${kpi.color}-50 rounded-full -mr-12 -mt-12 transition-transform group-hover:scale-110`} />
-                      <div className="relative z-10">
-                        <div className="flex items-center justify-between mb-3">
-                          <div className={`p-2 rounded-xl bg-${kpi.color}-50 text-${kpi.color}-600`}>
-                            <kpi.icon size={20} />
-                          </div>
-                          {kpi.change !== undefined && (
-                            <div className={`flex items-center gap-0.5 text-[10px] font-bold ${kpi.change >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                              {kpi.change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
-                              {Math.abs(kpi.change)}%
+                <div key="kpi_cards" className="flex flex-col gap-4">
+                  <div className="grid grid-cols-4 gap-4">
+                    {[
+                      { 
+                        label: 'Ort. Memnuniyet', 
+                        value: `%${dashboardData.kpis.avgScore}`, 
+                        change: dashboardData.kpis.scoreChange, 
+                        icon: Award, 
+                        color: 'indigo' 
+                      },
+                      { 
+                        label: 'Toplam Yorum Sayısı', 
+                        value: dashboardData.kpis.totalComments, 
+                        change: dashboardData.kpis.commentChange, 
+                        icon: MessageSquare, 
+                        color: 'blue' 
+                      },
+                      { 
+                        label: 'En Başarılı Kategori', 
+                        value: dashboardData.kpis.bestCategory, 
+                        icon: CheckCircle2, 
+                        color: 'emerald' 
+                      },
+                      { 
+                        label: 'Gelişim Alanı', 
+                        value: dashboardData.kpis.worstCategory, 
+                        icon: AlertTriangle, 
+                        color: 'red' 
+                      }
+                    ].map((kpi, idx) => (
+                      <div 
+                        key={idx} 
+                        className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative overflow-hidden group cursor-pointer hover:border-indigo-300 transition-all interactive-filter-trigger"
+                        onClick={() => {
+                          if (kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı') {
+                            setDrillDownFilter({ type: 'category', value: kpi.value });
+                          } else {
+                            setDrillDownFilter({ type: 'all', value: 'all' });
+                          }
+                        }}
+                        data-filter-type={kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı' ? 'topic' : 'all'}
+                        data-filter-value={kpi.label === 'En Başarılı Kategori' || kpi.label === 'Gelişim Alanı' ? kpi.value : 'all'}
+                      >
+                        <div className={`absolute top-0 right-0 w-24 h-24 bg-${kpi.color}-50 rounded-full -mr-12 -mt-12 transition-transform group-hover:scale-110`} />
+                        <div className="relative z-10">
+                          <div className="flex items-center justify-between mb-3">
+                            <div className={`p-2 rounded-xl bg-${kpi.color}-50 text-${kpi.color}-600`}>
+                              <kpi.icon size={20} />
                             </div>
-                          )}
+                            {kpi.change !== undefined && (
+                              <div className={`flex items-center gap-0.5 text-[10px] font-bold ${kpi.change >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                {kpi.change >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+                                {Math.abs(kpi.change)}%
+                              </div>
+                            )}
+                          </div>
+                          <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{kpi.label}</p>
+                          <h4 className="text-xl font-black text-slate-900 truncate">{kpi.value}</h4>
                         </div>
-                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{kpi.label}</p>
-                        <h4 className="text-xl font-black text-slate-900 truncate">{kpi.value}</h4>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
+                  {renderAiSummary('kpi_cards')}
                 </div>
               );
             }
@@ -1988,6 +2135,7 @@ export function DashboardModule() {
                       })}
                     </div>
                   )}
+                  {renderAiSummary('satisfaction_timeline')}
                 </section>
               );
             }
@@ -2233,6 +2381,7 @@ export function DashboardModule() {
                       </table>
                     </div>
                   )}
+                  {renderAiSummary('category_satisfaction')}
                 </section>
               );
             }
@@ -2365,6 +2514,7 @@ export function DashboardModule() {
                       </table>
                     </div>
                   )}
+                  {renderAiSummary('source_analysis')}
                 </section>
               );
             }
@@ -2576,6 +2726,7 @@ export function DashboardModule() {
                       </table>
                     </div>
                   )}
+                  {renderAiSummary('nationality_analysis')}
                 </section>
               );
             }
@@ -2683,13 +2834,23 @@ export function DashboardModule() {
                                 <td className="py-4 px-4 text-center">
                                   <span className="text-sm font-black text-indigo-600">{item.count}</span>
                                 </td>
-                                <td className="py-4 px-4 text-center">
-                                  <span className={`text-xs font-bold ${
-                                    item.avgScore >= 80 ? 'text-emerald-600' :
-                                    item.avgScore >= 60 ? 'text-blue-600' :
-                                    item.avgScore >= 40 ? 'text-amber-600' :
-                                    'text-red-600'
-                                  }`}>%{item.avgScore}</span>
+                                <td className="py-4 px-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[120px]">
+                                      <div className={`h-full rounded-full ${
+                                        item.avgScore >= 80 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]' :
+                                        item.avgScore >= 60 ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.3)]' :
+                                        item.avgScore >= 40 ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.3)]' :
+                                        'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.3)]'
+                                      }`} style={{ width: `${item.avgScore}%` }} />
+                                    </div>
+                                    <span className={`text-xs font-black w-10 ${
+                                      item.avgScore >= 80 ? 'text-emerald-600' :
+                                      item.avgScore >= 60 ? 'text-blue-600' :
+                                      item.avgScore >= 40 ? 'text-amber-600' :
+                                      'text-red-600'
+                                    }`}>%{item.avgScore}</span>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -2986,6 +3147,7 @@ export function DashboardModule() {
                       </div>
                     )}
                   </section>
+                  {renderAiSummary('hotel_agenda')}
                 </div>
               );
             }
@@ -3347,6 +3509,24 @@ export function DashboardModule() {
                     className={`w-12 h-6 rounded-full transition-all relative ${exportOptions.interactive ? 'bg-indigo-600' : 'bg-slate-300'}`}
                   >
                     <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${exportOptions.interactive ? 'left-7' : 'left-1'}`} />
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100 group hover:border-indigo-200 transition-all">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-white rounded-lg text-slate-400 group-hover:text-indigo-600 transition-colors">
+                      <Brain size={18} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-bold text-slate-800">AI Bölüm Özetleri</p>
+                      <p className="text-[10px] text-slate-500 font-medium">Her bölümün altına AI tarafından üretilmiş doğal dilli özetler ekler.</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setExportOptions({ ...exportOptions, includeAiSummaries: !exportOptions.includeAiSummaries })}
+                    className={`w-12 h-6 rounded-full transition-all relative ${exportOptions.includeAiSummaries ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${exportOptions.includeAiSummaries ? 'left-7' : 'left-1'}`} />
                   </button>
                 </div>
               </div>
