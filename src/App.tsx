@@ -18,6 +18,7 @@ import { CaseTrackingModule } from './modules/CaseTrackingModule';
 import { motion, AnimatePresence } from 'framer-motion';
 import { listenToCases } from './services/firebaseService';
 import { AppSidebar } from './components/AppSidebar';
+import { GlobalNotification } from './components/GlobalNotification';
 
 // A wrapper component to handle the header title based on location
 function AppContent({ openCasesCount, isSettingsOpen, setIsSettingsOpen }: any) {
@@ -145,6 +146,7 @@ function AppContent({ openCasesCount, isSettingsOpen, setIsSettingsOpen }: any) 
           console.log('Settings saved:', settings);
         }} 
       />
+      <GlobalNotification />
     </div>
   );
 }

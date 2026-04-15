@@ -312,7 +312,7 @@ ${comment.COMMENT}`;
     setSelectionPosition(null);
   };
 
-  const addActionToTimeline = async (description: string, type: 'ai_letter' | 'template' | 'manual' | 'whatsapp_sent' | 'report', content?: string) => {
+  const addActionToTimeline = async (description: string, type: 'ai_letter' | 'template' | 'manual' | 'whatsapp_sent' | 'report' | 'manual_close', content?: string) => {
     if (!comment?.ID) return;
     try {
       if (editingActionId) {
@@ -338,6 +338,13 @@ ${comment.COMMENT}`;
       });
     } catch (error) {
       console.error("Error adding/updating action:", error);
+    }
+  };
+
+  const handleManualClose = async () => {
+    if (!comment?.ID) return;
+    if (window.confirm('Bu yorum için mektup bekleme durumunu kapatmak istediğinize emin misiniz? (Örn: Misafir otelden ayrıldıysa)')) {
+      await addActionToTimeline('Mektup durumu manuel olarak kapatıldı.', 'manual_close');
     }
   };
 
@@ -638,7 +645,7 @@ ${JSON.stringify(timelineActions.map(a => ({
                          (deepAnalytics !== null && (deepAnalytics.overallScore < 50 || deepAnalytics.topics.some(t => t.score < 50)));
 
   const hasLetterGenerated = timelineActions.some(action => 
-    action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email'
+    action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email' || action.type === 'manual_close'
   );
 
   const showLetterWarning = isDissatisfied && !hasLetterGenerated;
@@ -992,6 +999,12 @@ ${JSON.stringify(timelineActions.map(a => ({
                   className="text-xs font-bold bg-white text-amber-700 border border-amber-200 px-3 py-1.5 rounded-lg hover:bg-amber-100 transition-colors shadow-sm"
                 >
                   Şablon Seç
+                </button>
+                <button 
+                  onClick={handleManualClose}
+                  className="text-xs font-bold bg-white text-slate-500 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors shadow-sm ml-auto"
+                >
+                  Uyarıyı Kapat
                 </button>
               </div>
             </div>

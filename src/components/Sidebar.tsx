@@ -90,7 +90,7 @@ export function Sidebar({
       
       const actions = commentActions[String(comment.ID)] || [];
       const hasLetterGenerated = actions.some(action => 
-        action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email'
+        action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email' || action.type === 'manual_close'
       );
 
       if (filterMode === 'waiting_letter') {
@@ -264,7 +264,7 @@ export function Sidebar({
                 
                 const actions = commentActions[String(comment.ID)] || [];
                 const hasLetterGenerated = actions.some(action => 
-                  action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email'
+                  action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email' || action.type === 'manual_close'
                 );
           
           if (viewMode === 'compact') {

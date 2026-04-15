@@ -8,6 +8,7 @@ export const createCase = async (caseData: Omit<CaseTracker, 'id' | 'actions' | 
     ...caseData,
     actions: [],
     createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     timestamp: serverTimestamp() // for sorting
   };
   const docRef = await addDoc(casesRef, newCase);
@@ -16,7 +17,10 @@ export const createCase = async (caseData: Omit<CaseTracker, 'id' | 'actions' | 
 
 export const updateCaseStatus = async (caseId: string, status: 'open' | 'resolved') => {
   const caseRef = doc(db, 'cases', caseId);
-  await updateDoc(caseRef, { status });
+  await updateDoc(caseRef, { 
+    status,
+    updatedAt: new Date().toISOString()
+  });
 };
 
 export const addCaseAction = async (caseId: string, action: Omit<CaseAction, 'id'>, currentActions: CaseAction[]) => {
@@ -26,7 +30,8 @@ export const addCaseAction = async (caseId: string, action: Omit<CaseAction, 'id
     id: crypto.randomUUID()
   };
   await updateDoc(caseRef, {
-    actions: [...currentActions, newAction]
+    actions: [...currentActions, newAction],
+    updatedAt: new Date().toISOString()
   });
 };
 

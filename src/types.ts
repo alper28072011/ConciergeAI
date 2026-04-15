@@ -11,11 +11,21 @@ export interface CaseTracker {
   id: string;
   roomNumber: string;
   guestName: string;
+  title: string;
   description: string; // Vakanın ilk tanımı (Örn: Klima Arızası)
   status: 'open' | 'resolved';
   createdAt: string;
+  updatedAt?: string;
   createdBy: string;
   actions: CaseAction[];
+  guestDetails?: {
+    agency?: string;
+    phone?: string;
+    checkIn?: string;
+    checkOut?: string;
+    roomType?: string;
+    resId?: string;
+  };
 }
 
 export interface UnifiedTopicAnalysis {
@@ -47,7 +57,7 @@ export interface HotelTaxonomy {
 export interface UnifiedTimelineAction {
   id: string;
   date: string;
-  type: 'elektra' | 'ai_letter' | 'template' | 'manual' | 'welcome_call' | 'survey_sent' | 'whatsapp_sent' | 'report';
+  type: 'elektra' | 'ai_letter' | 'template' | 'manual' | 'welcome_call' | 'survey_sent' | 'whatsapp_sent' | 'report' | 'manual_close';
   description: string;
   content?: string;
   commentId?: string | number;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { UnifiedTimelineAction } from '../types';
-import { Database, Sparkles, FileText, Edit3, PhoneCall, Send, Trash2, MessageCircle, BarChart3 } from 'lucide-react';
+import { Database, Sparkles, FileText, Edit3, PhoneCall, Send, Trash2, MessageCircle, BarChart3, XCircle } from 'lucide-react';
 
 interface TimelineViewProps {
   actions: UnifiedTimelineAction[];
@@ -66,6 +66,10 @@ export const TimelineView: React.FC<TimelineViewProps> = ({ actions, onDeleteAct
           icon = <BarChart3 size={14} className="text-rose-500" />;
           iconBg = "bg-rose-100";
           borderColor = "border-rose-200";
+        } else if (action.type === 'manual_close') {
+          icon = <XCircle size={14} className="text-slate-500" />;
+          iconBg = "bg-slate-100";
+          borderColor = "border-slate-200";
         }
 
         return (

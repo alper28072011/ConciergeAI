@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Plus, Filter, MessageSquare, Clock, CheckCircle2, AlertCircle, Send, X, User, Briefcase, FileText, Printer, Save, Trash2, Edit3, ArrowUp, ArrowDown, RefreshCw, LayoutTemplate } from 'lucide-react';
+import { Search, Plus, Filter, MessageSquare, Clock, CheckCircle2, AlertCircle, Send, X, User, Briefcase, FileText, Printer, Save, Trash2, Edit3, ArrowUp, ArrowDown, RefreshCw, LayoutTemplate, Sparkles, MoreHorizontal, ChevronDown } from 'lucide-react';
 import { CaseTracker, CaseAction, GuestData, ApiSettings } from '../types';
 import { listenToCases, createCase, updateCaseStatus, addCaseAction } from '../services/firebaseService';
 import { doc, updateDoc, deleteDoc, getDoc, setDoc } from 'firebase/firestore';
@@ -13,6 +14,7 @@ const ReactQuill = (ReactQuillModule as any).default || ReactQuillModule;
 import 'react-quill-new/dist/quill.snow.css';
 
 export function CaseTrackingModule() {
+  const location = useLocation();
   const [cases, setCases] = useState<CaseTracker[]>([]);
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -22,8 +24,12 @@ export function CaseTrackingModule() {
   const [isNewCaseModalOpen, setIsNewCaseModalOpen] = useState(false);
   const [newCaseRoom, setNewCaseRoom] = useState('');
   const [newCaseGuest, setNewCaseGuest] = useState('');
+  const [newCaseTitle, setNewCaseTitle] = useState('');
   const [newCaseDesc, setNewCaseDesc] = useState('');
+  const [selectedGuestDetails, setSelectedGuestDetails] = useState<CaseTracker['guestDetails'] | null>(null);
   const [isCreatingCase, setIsCreatingCase] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<{ room?: CaseTracker, guest?: CaseTracker } | null>(null);
+  const [bypassDuplicateCheck, setBypassDuplicateCheck] = useState(false);
   
   // Smart Selection State
   const [isFetchingGuests, setIsFetchingGuests] = useState(false);
@@ -44,6 +50,7 @@ export function CaseTrackingModule() {
 
   // Edit Initial Case State
   const [isEditingInitialCase, setIsEditingInitialCase] = useState(false);
+  const [editInitialCaseTitle, setEditInitialCaseTitle] = useState('');
   const [editInitialCaseDesc, setEditInitialCaseDesc] = useState('');
 
   // AI State
@@ -59,9 +66,19 @@ export function CaseTrackingModule() {
   const [isTranslatingAILetter, setIsTranslatingAILetter] = useState(false);
   const [isSavingLetter, setIsSavingLetter] = useState(false);
   const [isSavingSummary, setIsSavingSummary] = useState(false);
+  const [isHeaderMenuOpen, setIsHeaderMenuOpen] = useState(false);
   const [selectedPreviewAction, setSelectedPreviewAction] = useState<CaseAction | null>(null);
   const [viewMode, setViewMode] = useState<'spacious' | 'compact'>('spacious');
   const printRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const caseId = params.get('caseId');
+    if (caseId) {
+      setSelectedCaseId(caseId);
+      setStatusFilter('all'); // Ensure we can see it even if resolved
+    }
+  }, [location.search]);
 
   useEffect(() => {
     // Load UI preferences
@@ -102,6 +119,7 @@ export function CaseTrackingModule() {
   const filteredCases = cases.filter(c => {
     const matchesSearch = c.roomNumber.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           c.guestName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (c.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           c.description.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = statusFilter === 'all' ? true : c.status === statusFilter;
     return matchesSearch && matchesStatus;
@@ -162,28 +180,51 @@ export function CaseTrackingModule() {
       setGuestSearchTerm('');
       setNewCaseRoom('');
       setNewCaseGuest('');
+      setNewCaseTitle('');
       setNewCaseDesc('');
+      setSelectedGuestDetails(null);
+      setDuplicateWarning(null);
+      setBypassDuplicateCheck(false);
     }
   }, [isNewCaseModalOpen]);
 
-  const handleCreateCase = async () => {
-    if (!newCaseRoom.trim() || !newCaseGuest.trim() || !newCaseDesc.trim()) {
+  const handleCreateCase = async (bypass?: boolean) => {
+    if (!newCaseRoom.trim() || !newCaseGuest.trim() || !newCaseTitle.trim() || !newCaseDesc.trim()) {
       alert('Lütfen tüm alanları doldurun.');
       return;
     }
+
+    // Duplicate Check
+    if (!bypass && !bypassDuplicateCheck) {
+      const roomDuplicate = cases.find(c => c.roomNumber.trim() === newCaseRoom.trim() && c.status === 'open');
+      const guestDuplicate = cases.find(c => c.guestName.trim().toLowerCase() === newCaseGuest.trim().toLowerCase() && c.status === 'open');
+
+      if (roomDuplicate || guestDuplicate) {
+        setDuplicateWarning({
+          room: roomDuplicate,
+          guest: guestDuplicate
+        });
+        return;
+      }
+    }
+
     setIsCreatingCase(true);
     try {
       const newId = await createCase({
         roomNumber: newCaseRoom,
         guestName: newCaseGuest,
+        title: newCaseTitle,
         description: newCaseDesc,
         status: 'open',
-        createdBy: auth.currentUser?.displayName || auth.currentUser?.email || 'Sistem Kullanıcısı'
+        createdBy: auth.currentUser?.displayName || auth.currentUser?.email || 'Sistem Kullanıcısı',
+        guestDetails: selectedGuestDetails || undefined
       });
       setIsNewCaseModalOpen(false);
       setNewCaseRoom('');
       setNewCaseGuest('');
+      setNewCaseTitle('');
       setNewCaseDesc('');
+      setSelectedGuestDetails(null);
       setSelectedCaseId(newId);
     } catch (error) {
       console.error('Error creating case:', error);
@@ -288,6 +329,7 @@ export function CaseTrackingModule() {
 
   const openEditInitialCaseModal = () => {
     if (!selectedCase) return;
+    setEditInitialCaseTitle(selectedCase.title || '');
     setEditInitialCaseDesc(selectedCase.description);
     setIsEditingInitialCase(true);
   };
@@ -295,7 +337,11 @@ export function CaseTrackingModule() {
   const handleSaveInitialCase = async () => {
     if (!selectedCase) return;
     try {
-      await updateDoc(doc(db, 'cases', selectedCase.id), { description: editInitialCaseDesc });
+      await updateDoc(doc(db, 'cases', selectedCase.id), { 
+        title: editInitialCaseTitle,
+        description: editInitialCaseDesc,
+        updatedAt: new Date().toISOString()
+      });
       setIsEditingInitialCase(false);
     } catch (error) {
       console.error('Error updating initial case:', error);
@@ -589,40 +635,60 @@ CRITICAL INSTRUCTIONS:
               <p className="text-sm">Vaka bulunamadı.</p>
             </div>
           ) : (
-            filteredCases.map(c => (
-              <div 
-                key={c.id}
-                onClick={() => setSelectedCaseId(c.id)}
-                className={`${viewMode === 'compact' ? 'p-3' : 'p-4'} rounded-xl cursor-pointer transition-all border ${selectedCaseId === c.id ? 'bg-white border-emerald-500 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500' : 'bg-white border-slate-200 hover:border-emerald-300 hover:shadow-sm'}`}
-              >
-                <div className={`flex justify-between items-start ${viewMode === 'compact' ? 'mb-1' : 'mb-2'}`}>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold bg-slate-100 text-slate-700 px-2 py-1 rounded-md">
-                      {c.roomNumber}
-                    </span>
-                    <span className="text-sm font-bold text-slate-800 line-clamp-1">{c.guestName}</span>
-                  </div>
-                  {c.status === 'open' ? (
-                    <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse shrink-0 mt-1"></span>
-                  ) : (
-                    <CheckCircle2 size={16} className="text-emerald-500 shrink-0 mt-0.5" />
+            filteredCases.map(c => {
+              const lastUpdate = c.updatedAt || c.createdAt;
+              const isRecentlyUpdated = new Date().getTime() - new Date(lastUpdate).getTime() < 24 * 60 * 60 * 1000;
+
+              return (
+                <div 
+                  key={c.id}
+                  onClick={() => setSelectedCaseId(c.id)}
+                  className={`${viewMode === 'compact' ? 'p-3' : 'p-4'} rounded-xl cursor-pointer transition-all border relative overflow-hidden ${selectedCaseId === c.id ? 'bg-white border-emerald-500 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500' : 'bg-white border-slate-200 hover:border-emerald-300 hover:shadow-sm'}`}
+                >
+                  {isRecentlyUpdated && (
+                    <div className="absolute top-0 right-0">
+                      <div className="bg-emerald-500 text-white text-[8px] font-black px-2 py-0.5 rounded-bl-lg uppercase tracking-tighter shadow-sm">
+                        Güncel
+                      </div>
+                    </div>
                   )}
+                  <div className={`flex justify-between items-start ${viewMode === 'compact' ? 'mb-1' : 'mb-2'}`}>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-xs font-bold bg-slate-100 text-slate-700 px-2 py-1 rounded-md">
+                        {c.roomNumber}
+                      </span>
+                      <span className="text-sm font-bold text-slate-800 line-clamp-1">{c.guestName}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {isRecentlyUpdated && (
+                        <span className="flex h-2 w-2 relative">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                        </span>
+                      )}
+                      {c.status === 'open' ? (
+                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse shrink-0"></span>
+                      ) : (
+                        <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+                      )}
+                    </div>
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-800 mb-2 line-clamp-1">
+                    {c.title || 'Başlıksız Vaka'}
+                  </h4>
+                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium">
+                    <span className="flex items-center gap-1">
+                      <Clock size={12} />
+                      {new Date(c.createdAt).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <MessageSquare size={12} />
+                      {c.actions?.length || 0} İşlem
+                    </span>
+                  </div>
                 </div>
-                <p className={`text-xs text-slate-600 leading-relaxed ${viewMode === 'compact' ? 'line-clamp-1 mb-2' : 'line-clamp-2 mb-3'}`}>
-                  {c.description.length > (viewMode === 'compact' ? 60 : 120) ? c.description.substring(0, viewMode === 'compact' ? 60 : 120) + '...' : c.description}
-                </p>
-                <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium">
-                  <span className="flex items-center gap-1">
-                    <Clock size={12} />
-                    {new Date(c.createdAt).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <MessageSquare size={12} />
-                    {c.actions?.length || 0} İşlem
-                  </span>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
@@ -635,67 +701,198 @@ CRITICAL INSTRUCTIONS:
             <div className="bg-white px-8 py-6 border-b border-slate-200 shrink-0 shadow-sm z-10">
               <div className="flex items-start justify-between">
                 <div>
-                  <div className="flex items-center gap-3 mb-2">
-                    <span className="font-mono text-lg font-bold bg-slate-100 text-slate-800 px-3 py-1 rounded-lg border border-slate-200">
-                      {selectedCase.roomNumber}
-                    </span>
-                    <h2 className="text-2xl font-bold text-slate-800 tracking-tight">{selectedCase.guestName}</h2>
-                    <span className={`px-3 py-1 text-xs font-bold rounded-full uppercase tracking-wider ${selectedCase.status === 'open' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-emerald-100 text-emerald-700 border border-emerald-200'}`}>
-                      {selectedCase.status === 'open' ? 'Açık Vaka' : 'Çözüldü'}
+                  {/* Case Title - Now at the top and prominent */}
+                  <div className="flex items-center gap-2 mb-3">
+                    <h2 className="text-2xl font-black text-slate-900 tracking-tight leading-tight">
+                      {selectedCase.title || 'Başlıksız Vaka'}
+                    </h2>
+                    <button 
+                      onClick={openEditInitialCaseModal}
+                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                      title="Başlığı Düzenle"
+                    >
+                      <Edit3 size={18} />
+                    </button>
+                  </div>
+
+                  {/* Guest Primary Info - Now below the title and more compact */}
+                  <div className="flex items-center flex-wrap gap-3 mb-4">
+                    <div className="flex items-center gap-2 bg-slate-100 px-2.5 py-1 rounded-lg border border-slate-200 shadow-sm">
+                      <span className="font-mono text-sm font-bold text-slate-700">
+                        {selectedCase.roomNumber}
+                      </span>
+                    </div>
+                    <h3 className="text-lg font-semibold text-slate-700 truncate max-w-[300px]" title={selectedCase.guestName}>
+                      {selectedCase.guestName}
+                    </h3>
+                    <span className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-black rounded-full uppercase tracking-widest border ${
+                      selectedCase.status === 'open' 
+                        ? 'bg-amber-50 text-amber-600 border-amber-200 shadow-sm' 
+                        : 'bg-emerald-50 text-emerald-600 border-emerald-200 shadow-sm'
+                    }`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${selectedCase.status === 'open' ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'}`}></span>
+                      {selectedCase.status === 'open' ? 'Açık' : 'Çözüldü'}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-600 mt-3 leading-relaxed max-w-3xl">
-                    <span className="font-semibold text-slate-700 mr-2">Vaka Tanımı:</span>
-                    {selectedCase.description}
-                  </p>
-                  <div className="flex items-center gap-4 mt-4 text-xs text-slate-500 font-medium">
+
+                  {selectedCase.guestDetails && (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-5 p-2 bg-slate-50/50 rounded-2xl border border-slate-200/50">
+                      {selectedCase.guestDetails.agency && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white rounded-lg border border-slate-100 shadow-sm">
+                          <Briefcase size={11} className="text-slate-400" />
+                          <span className="text-[10px] font-medium text-slate-500">Acente:</span>
+                          <span className="text-[10px] font-bold text-slate-800">{selectedCase.guestDetails.agency}</span>
+                        </div>
+                      )}
+                      {selectedCase.guestDetails.phone && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white rounded-lg border border-slate-100 shadow-sm">
+                          <RefreshCw size={11} className="text-slate-400" />
+                          <span className="text-[10px] font-medium text-slate-500">Telefon:</span>
+                          <span className="text-[10px] font-bold text-slate-800">{selectedCase.guestDetails.phone}</span>
+                        </div>
+                      )}
+                      {(selectedCase.guestDetails.checkIn || selectedCase.guestDetails.checkOut) && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white rounded-lg border border-slate-100 shadow-sm">
+                          <Clock size={11} className="text-slate-400" />
+                          <span className="text-[10px] font-medium text-slate-500">Konaklama:</span>
+                          <span className="text-[10px] font-bold text-slate-800">
+                            {selectedCase.guestDetails.checkIn ? formatTRDate(selectedCase.guestDetails.checkIn) : '?'} - {selectedCase.guestDetails.checkOut ? formatTRDate(selectedCase.guestDetails.checkOut) : '?'}
+                          </span>
+                        </div>
+                      )}
+                      {selectedCase.guestDetails.roomType && (
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 bg-white rounded-lg border border-slate-100 shadow-sm">
+                          <LayoutTemplate size={11} className="text-slate-400" />
+                          <span className="text-[10px] font-medium text-slate-500">Oda Tipi:</span>
+                          <span className="text-[10px] font-bold text-slate-800">{selectedCase.guestDetails.roomType}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-4 text-[11px] text-slate-400 font-medium">
                     <span className="flex items-center gap-1.5">
-                      <User size={14} />
-                      Açan: {selectedCase.createdBy}
+                      <User size={12} className="text-slate-300" />
+                      Açan: <span className="text-slate-600">{selectedCase.createdBy}</span>
                     </span>
                     <span className="flex items-center gap-1.5">
-                      <Clock size={14} />
+                      <Clock size={12} className="text-slate-300" />
                       {new Date(selectedCase.createdAt).toLocaleString('tr-TR')}
                     </span>
                   </div>
                 </div>
                 
-                <div className="flex flex-col gap-2">
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={handleToggleStatus}
-                      className={`flex-1 px-4 py-2 text-sm font-semibold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 ${selectedCase.status === 'open' ? 'bg-emerald-600 text-white hover:bg-emerald-700 hover:shadow-md' : 'bg-amber-500 text-white hover:bg-amber-600 hover:shadow-md'}`}
-                    >
-                      {selectedCase.status === 'open' ? (
-                        <><CheckCircle2 size={16} /> Çözüldü Olarak İşaretle</>
-                      ) : (
-                        <><AlertCircle size={16} /> Yeniden Aç</>
-                      )}
-                    </button>
+                <div className="flex items-center gap-3">
+                  {/* Primary Action: Status Toggle */}
+                  <button 
+                    onClick={handleToggleStatus}
+                    className={`px-6 py-2.5 text-sm font-bold rounded-xl transition-all shadow-sm flex items-center gap-2 ${
+                      selectedCase.status === 'open' 
+                        ? 'bg-emerald-600 text-white hover:bg-emerald-700 hover:shadow-md' 
+                        : 'bg-amber-500 text-white hover:bg-amber-600 hover:shadow-md'
+                    }`}
+                  >
+                    {selectedCase.status === 'open' ? (
+                      <><CheckCircle2 size={18} /> Çözüldü Olarak İşaretle</>
+                    ) : (
+                      <><AlertCircle size={18} /> Yeniden Aç</>
+                    )}
+                  </button>
+
+                  {/* Secondary Actions Dropdown */}
+                  <div className="relative">
                     <button
-                      onClick={() => handleDeleteCase(selectedCase.id)}
-                      className="px-4 py-2 text-sm font-semibold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2 bg-red-50 text-red-600 hover:bg-red-100 border border-red-200"
-                      title="Vakayı Sil"
+                      onClick={() => setIsHeaderMenuOpen(!isHeaderMenuOpen)}
+                      className={`p-2.5 rounded-xl border transition-all flex items-center gap-1 ${
+                        isHeaderMenuOpen 
+                          ? 'bg-slate-100 border-slate-300 text-slate-800 shadow-inner' 
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300 shadow-sm'
+                      }`}
                     >
-                      <Trash2 size={16} />
+                      <MoreHorizontal size={20} />
+                      <ChevronDown size={14} className={`transition-transform duration-200 ${isHeaderMenuOpen ? 'rotate-180' : ''}`} />
                     </button>
-                  </div>
-                  <div className="flex gap-2">
-                    <button 
-                      onClick={handleSummarizeCase}
-                      disabled={isGeneratingSummary}
-                      className="flex-1 px-3 py-2 bg-purple-50 text-purple-700 text-xs font-bold rounded-lg hover:bg-purple-100 transition-colors border border-purple-100 flex items-center justify-center gap-1.5 disabled:opacity-50"
-                    >
-                      {isGeneratingSummary ? <span className="w-3 h-3 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></span> : <FileText size={14} />}
-                      Özetle
-                    </button>
-                    <button 
-                      onClick={() => setIsAILetterFormOpen(!isAILetterFormOpen)}
-                      className={`flex-1 px-3 py-2 text-xs font-bold rounded-lg transition-colors border flex items-center justify-center gap-1.5 ${isAILetterFormOpen ? 'bg-blue-600 text-white border-blue-600' : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-100'}`}
-                    >
-                      <MessageSquare size={14} />
-                      AI Mektup
-                    </button>
+
+                    <AnimatePresence>
+                      {isHeaderMenuOpen && (
+                        <>
+                          <div 
+                            className="fixed inset-0 z-40" 
+                            onClick={() => setIsHeaderMenuOpen(false)}
+                          />
+                          <motion.div
+                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                            className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 overflow-hidden"
+                          >
+                            <div className="p-2 space-y-1">
+                              <div className="px-3 py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                                <Sparkles size={12} className="text-purple-400" />
+                                Akıllı Araçlar
+                              </div>
+                              
+                              <button 
+                                onClick={() => {
+                                  handleSummarizeCase();
+                                  setIsHeaderMenuOpen(false);
+                                }}
+                                disabled={isGeneratingSummary}
+                                className="w-full px-3 py-2.5 text-left text-sm font-semibold text-slate-700 hover:bg-purple-50 hover:text-purple-700 rounded-xl transition-colors flex items-center gap-3 disabled:opacity-50"
+                              >
+                                {isGeneratingSummary ? (
+                                  <span className="w-4 h-4 border-2 border-purple-600 border-t-transparent rounded-full animate-spin"></span>
+                                ) : (
+                                  <FileText size={18} className="text-purple-500" />
+                                )}
+                                Vakayı Özetle
+                              </button>
+
+                              <button 
+                                onClick={() => {
+                                  setIsAILetterFormOpen(!isAILetterFormOpen);
+                                  setIsHeaderMenuOpen(false);
+                                }}
+                                className={`w-full px-3 py-2.5 text-left text-sm font-semibold rounded-xl transition-colors flex items-center gap-3 ${
+                                  isAILetterFormOpen ? 'bg-blue-50 text-blue-700' : 'text-slate-700 hover:bg-blue-50 hover:text-blue-700'
+                                }`}
+                              >
+                                <MessageSquare size={18} className="text-blue-500" />
+                                AI Mektup Oluştur
+                              </button>
+
+                              <div className="h-px bg-slate-100 my-1" />
+                              
+                              <div className="px-3 py-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                İşlemler
+                              </div>
+
+                              <button
+                                onClick={() => {
+                                  window.print();
+                                  setIsHeaderMenuOpen(false);
+                                }}
+                                className="w-full px-3 py-2.5 text-left text-sm font-semibold text-slate-700 hover:bg-slate-50 rounded-xl transition-colors flex items-center gap-3"
+                              >
+                                <Printer size={18} className="text-slate-500" />
+                                Vakayı Yazdır
+                              </button>
+
+                              <button
+                                onClick={() => {
+                                  handleDeleteCase(selectedCase.id);
+                                  setIsHeaderMenuOpen(false);
+                                }}
+                                className="w-full px-3 py-2.5 text-left text-sm font-semibold text-red-600 hover:bg-red-50 rounded-xl transition-colors flex items-center gap-3"
+                              >
+                                <Trash2 size={18} />
+                                Vakayı Sil
+                              </button>
+                            </div>
+                          </motion.div>
+                        </>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </div>
               </div>
@@ -1077,6 +1274,14 @@ CRITICAL INSTRUCTIONS:
                             if (guest) {
                               setNewCaseRoom(guest.resolvedRoomNo || guest.ROOMNO || '');
                               setNewCaseGuest(guest.GUESTNAMES || '');
+                              setSelectedGuestDetails({
+                                agency: guest.AGENCY || '',
+                                phone: guest.CONTACTPHONE || guest.PHONE || '',
+                                checkIn: guest.CHECKIN || '',
+                                checkOut: guest.CHECKOUT || '',
+                                roomType: guest.ROOMTYPE || '',
+                                resId: guest.RESID?.toString() || ''
+                              });
                               setShowGuestDropdown(false);
                               setGuestSearchTerm(`${guest.resolvedRoomNo || guest.ROOMNO} - ${guest.GUESTNAMES}`);
                             }
@@ -1126,6 +1331,17 @@ CRITICAL INSTRUCTIONS:
                 </div>
 
                 <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Vaka Başlığı</label>
+                  <input 
+                    type="text" 
+                    className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all bg-slate-50"
+                    value={newCaseTitle}
+                    onChange={(e) => setNewCaseTitle(e.target.value)}
+                    placeholder="Vakayı özetleyen kısa bir başlık (Örn: Klima Arızası)"
+                  />
+                </div>
+
+                <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Vaka Tanımı</label>
                   <textarea 
                     className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all resize-none bg-slate-50"
@@ -1135,6 +1351,47 @@ CRITICAL INSTRUCTIONS:
                     placeholder="Vakanın detaylarını yazın (Örn: Klima su akıtıyor, teknik servis yönlendirildi...)"
                   />
                 </div>
+
+                {duplicateWarning && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3"
+                  >
+                    <div className="flex items-start gap-3">
+                      <AlertCircle className="text-amber-600 shrink-0" size={20} />
+                      <div>
+                        <h4 className="text-sm font-bold text-amber-800">Zaten Mevcut Vaka Bulundu!</h4>
+                        <p className="text-xs text-amber-700 leading-relaxed mt-1">
+                          {duplicateWarning.room && duplicateWarning.guest 
+                            ? `Bu oda (${newCaseRoom}) ve misafir (${newCaseGuest}) için zaten açık bir vaka bulunuyor.`
+                            : duplicateWarning.room 
+                              ? `Bu oda (${newCaseRoom}) için zaten açık bir vaka bulunuyor.`
+                              : `Bu misafir (${newCaseGuest}) için zaten açık bir vaka bulunuyor.`
+                          }
+                          {" "}Yine de yeni bir vaka oluşturmak istiyor musunuz?
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => {
+                          setBypassDuplicateCheck(true);
+                          handleCreateCase(true);
+                        }}
+                        className="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition-colors"
+                      >
+                        Evet, Yeni Vaka Oluştur
+                      </button>
+                      <button 
+                        onClick={() => setDuplicateWarning(null)}
+                        className="px-3 py-1.5 bg-white text-amber-700 border border-amber-200 text-xs font-bold rounded-lg hover:bg-amber-50 transition-colors"
+                      >
+                        Hayır, Vazgeç
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
               </div>
 
               <div className="px-6 py-4 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
@@ -1145,8 +1402,8 @@ CRITICAL INSTRUCTIONS:
                   İptal
                 </button>
                 <button 
-                  onClick={handleCreateCase}
-                  disabled={isCreatingCase || !newCaseRoom.trim() || !newCaseGuest.trim() || !newCaseDesc.trim()}
+                  onClick={() => handleCreateCase()}
+                  disabled={isCreatingCase || !newCaseRoom.trim() || !newCaseGuest.trim() || !newCaseTitle.trim() || !newCaseDesc.trim()}
                   className="px-6 py-2.5 bg-emerald-600 text-white text-sm font-bold rounded-xl hover:bg-emerald-700 transition-colors shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   {isCreatingCase ? <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span> : <CheckCircle2 size={16} />}
@@ -1242,6 +1499,15 @@ CRITICAL INSTRUCTIONS:
               
               <div className="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
                 <div>
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Vaka Başlığı</label>
+                  <input 
+                    type="text" 
+                    value={editInitialCaseTitle}
+                    onChange={(e) => setEditInitialCaseTitle(e.target.value)}
+                    className="w-full border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-slate-50"
+                  />
+                </div>
+                <div>
                   <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">İçerik</label>
                   <textarea 
                     value={editInitialCaseDesc}
@@ -1261,7 +1527,7 @@ CRITICAL INSTRUCTIONS:
                 </button>
                 <button 
                   onClick={handleSaveInitialCase}
-                  disabled={!editInitialCaseDesc.trim()}
+                  disabled={!editInitialCaseTitle.trim() || !editInitialCaseDesc.trim()}
                   className="px-6 py-2.5 text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
                 >
                   <Save size={16} />

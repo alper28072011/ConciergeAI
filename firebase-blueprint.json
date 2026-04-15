@@ -57,12 +57,45 @@
         }
       },
       "required": ["modulesOrder", "activeModules", "updatedAt"]
+    },
+    "cases": {
+      "title": "Guest Cases",
+      "description": "Stores guest issues, complaints, and their resolution timeline.",
+      "type": "object",
+      "properties": {
+        "roomNumber": { "type": "string" },
+        "guestName": { "type": "string" },
+        "title": { "type": "string", "description": "Short title of the case." },
+        "description": { "type": "string", "description": "Detailed description of the initial issue." },
+        "status": { "type": "string", "enum": ["open", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "createdBy": { "type": "string" },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "date": { "type": "string", "format": "date-time" },
+              "actionText": { "type": "string" },
+              "performedBy": { "type": "string" },
+              "type": { "type": "string", "enum": ["note", "letter", "status_change", "summary"] },
+              "content": { "type": "string" }
+            }
+          }
+        }
+      },
+      "required": ["roomNumber", "guestName", "title", "description", "status", "createdAt", "createdBy"]
     }
   },
   "firestore": {
     "/user_preferences/{userId}": {
       "schema": "user_preferences",
       "description": "User-specific configuration settings."
+    },
+    "/cases/{caseId}": {
+      "schema": "cases",
+      "description": "Guest case tracking records."
     }
   }
 }

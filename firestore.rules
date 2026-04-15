@@ -15,6 +15,11 @@ service cloud.firestore {
       allow read, write: if isOwner(userId);
     }
     
+    // Guest Cases
+    match /cases/{caseId} {
+      allow read, write: if isAuthenticated();
+    }
+    
     // Executive Reports (if used)
     match /executive_reports/{reportId} {
       allow read, write: if isAuthenticated() && (
