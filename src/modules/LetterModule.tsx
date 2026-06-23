@@ -48,13 +48,22 @@ export function LetterModule() {
     };
     loadPrefs();
 
+    const handleQuotaError = (error: any) => {
+      console.error("LetterModule onSnapshot error:", error);
+      const msg = error?.message || '';
+      const code = error?.code || '';
+      if (msg.includes('Quota exceeded') || msg.includes('resource-exhausted') || code === 'resource-exhausted') {
+        window.dispatchEvent(new Event('firestore-quota-exceeded'));
+      }
+    };
+
     const unsubAgenda = onSnapshot(collection(db, 'agenda_notes'), (snapshot) => {
       const notes: Record<string, any> = {};
       snapshot.forEach((doc) => {
         notes[doc.id] = doc.data();
       });
       setAgendaNotes(notes);
-    });
+    }, handleQuotaError);
 
     const unsubAnalytics = onSnapshot(collection(db, 'comment_analytics'), (snapshot) => {
       const analytics: Record<string, any> = {};
@@ -62,7 +71,7 @@ export function LetterModule() {
         analytics[doc.id] = doc.data();
       });
       setCommentAnalytics(analytics);
-    });
+    }, handleQuotaError);
 
     const unsubActions = onSnapshot(collection(db, 'comment_actions'), (snapshot) => {
       const actionsByComment: Record<string, any[]> = {};
@@ -76,7 +85,7 @@ export function LetterModule() {
         }
       });
       setCommentActions(actionsByComment);
-    });
+    }, handleQuotaError);
 
     return () => {
       unsubAgenda();
@@ -90,7 +99,7 @@ export function LetterModule() {
   }, []); // Auto-load on mount
 
   const fetchComments = async (isLoadMore = false) => {
-    const savedSettings = localStorage.getItem('hotelApiSettings');
+    const savedSettings = window.safeStorage.getItem('hotelApiSettings');
     if (!savedSettings) {
       alert('Lütfen önce API ayarlarını yapın.');
       return;
@@ -180,7 +189,7 @@ export function LetterModule() {
       const groupedDetails = groupCommentDetails(rawDetails);
 
       // Apply Room Resolution Engine
-      const savedMappingsStr = localStorage.getItem('subRoomMappings');
+      const savedMappingsStr = window.safeStorage.getItem('subRoomMappings');
       const mappings = savedMappingsStr ? JSON.parse(savedMappingsStr) : [];
 
       fetchedComments = fetchedComments.map(comment => {
@@ -235,6 +244,23 @@ export function LetterModule() {
       setSelectedCommentIds([]);
     } else {
       setSelectedCommentIds(comments.map(c => c.ID));
+    }
+  };
+
+  const handleToggleGroupSelect = (ids: string[]) => {
+    const allGroupSelected = ids.every(id => selectedCommentIds.includes(id));
+    if (allGroupSelected) {
+      // Deselect all in group
+      setSelectedCommentIds(prev => prev.filter(id => !ids.includes(id)));
+    } else {
+      // Select all in group (add missing ones)
+      setSelectedCommentIds(prev => {
+        const newIds = [...prev];
+        ids.forEach(id => {
+          if (!newIds.includes(id)) newIds.push(id);
+        });
+        return newIds;
+      });
     }
   };
 
@@ -323,6 +349,7 @@ export function LetterModule() {
           selectedIds={selectedCommentIds}
           onToggleSelect={handleToggleSelect}
           onToggleSelectAll={handleToggleSelectAll}
+          onToggleGroupSelect={handleToggleGroupSelect}
           onFetch={fetchComments}
           isFetching={isFetching}
           fetchLimit={fetchLimit}

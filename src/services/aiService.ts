@@ -35,7 +35,7 @@ async function fetchWithRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<
 export async function generateAIContent(prompt: string, actionName: string, featureKey?: AIFeature): Promise<string> {
   let settings: Partial<ApiSettings> = {};
   try {
-    const savedSettings = localStorage.getItem('hotelApiSettings');
+    const savedSettings = window.safeStorage.getItem('hotelApiSettings');
     if (savedSettings) {
       settings = JSON.parse(savedSettings);
     }
@@ -88,7 +88,7 @@ export async function generateAIContent(prompt: string, actionName: string, feat
 export async function analyzeCommentComprehensive(comment: CommentData): Promise<CommentAnalytics> {
   let settings: Partial<ApiSettings> = {};
   try {
-    const savedSettings = localStorage.getItem('hotelApiSettings');
+    const savedSettings = window.safeStorage.getItem('hotelApiSettings');
     if (savedSettings) {
       settings = JSON.parse(savedSettings);
     }

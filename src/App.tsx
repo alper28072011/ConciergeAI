@@ -19,10 +19,22 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { listenToCases } from './services/firebaseService';
 import { AppSidebar } from './components/AppSidebar';
 import { GlobalNotification } from './components/GlobalNotification';
+import { AlertCircle, ExternalLink, Database } from 'lucide-react';
 
 // A wrapper component to handle the header title based on location
 function AppContent({ openCasesCount, isSettingsOpen, setIsSettingsOpen }: any) {
   const location = useLocation();
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+
+  useEffect(() => {
+    const handleQuotaExceeded = () => {
+      setQuotaExceeded(true);
+    };
+    window.addEventListener('firestore-quota-exceeded', handleQuotaExceeded);
+    return () => {
+      window.removeEventListener('firestore-quota-exceeded', handleQuotaExceeded);
+    };
+  }, []);
   
   const getHeaderTitle = () => {
     switch (location.pathname) {
@@ -42,6 +54,26 @@ function AppContent({ openCasesCount, isSettingsOpen, setIsSettingsOpen }: any) 
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+        {quotaExceeded && (
+          <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-center justify-between shrink-0 text-amber-900 shadow-sm leading-snug z-[9999]">
+            <div className="flex items-center gap-3">
+              <AlertCircle size={16} className="text-amber-600 shrink-0" />
+              <div className="text-xs font-semibold">
+                <span className="font-bold text-amber-950">Firebase Firestore Kota Sınırı Aşılmıştır (Quota Exceeded)</span>. 
+                Günlük ücretsiz okuma/yazma limitlerine ulaşıldığı için yeni veriler geçici olarak yazılamayabilir. 
+                Limitleriniz TSİ gece yarısı veya 24 saat sonra sıfırlanacaktır.
+              </div>
+            </div>
+            <a 
+              href="https://firebase.google.com/pricing#cloud-firestore" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="px-3 py-1 bg-amber-600 hover:bg-amber-700 text-[11px] font-bold text-white rounded-lg transition-all flex items-center gap-1.5 focus:outline-none shadow-xs shrink-0 cursor-pointer text-decoration-none"
+            >
+              Geliştir & Uzat <ExternalLink size={12} />
+            </a>
+          </div>
+        )}
         {/* Header */}
         <header className="bg-white h-16 flex items-center justify-between px-8 shrink-0 border-b border-slate-200 z-10">
           <div>
@@ -54,6 +86,10 @@ function AppContent({ openCasesCount, isSettingsOpen, setIsSettingsOpen }: any) 
           <div className="flex items-center gap-3">
              {/* Additional header actions can go here */}
              <div id="header-actions-portal"></div>
+             <div className="px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-full border border-emerald-200 flex items-center gap-1.5 duration-[3s] animate-pulse">
+                <Database size={12} className="text-emerald-500" />
+                <span className="text-xs font-bold leading-none">Veritabanı Aktif</span>
+             </div>
              <div className="px-3 py-1.5 bg-slate-100 rounded-full border border-slate-200">
                 <span className="text-xs font-semibold text-slate-600 flex items-center gap-1.5">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -168,7 +204,7 @@ export default function App() {
     const token = params.get('token');
 
     if (token) {
-      const savedSettings = localStorage.getItem('hotelApiSettings');
+      const savedSettings = window.safeStorage.getItem('hotelApiSettings');
       let settings: ApiSettings = {
         baseUrl: '',
         loginToken: '',
@@ -184,7 +220,7 @@ export default function App() {
       }
 
       settings.loginToken = token;
-      localStorage.setItem('hotelApiSettings', JSON.stringify(settings));
+      window.safeStorage.setItem('hotelApiSettings', JSON.stringify(settings));
 
       // Sync to Firestore for other instances
       const syncToken = async () => {
@@ -209,7 +245,7 @@ export default function App() {
     const unsubscribeSettings = onSnapshot(doc(db, "config", "api_settings"), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
-        const savedSettings = localStorage.getItem('hotelApiSettings');
+        const savedSettings = window.safeStorage.getItem('hotelApiSettings');
         let currentSettings: any = {};
 
         if (savedSettings) {
@@ -242,11 +278,18 @@ export default function App() {
           // Remove updatedAt from local storage if it exists to keep it clean
           delete newSettings.updatedAt;
           
-          localStorage.setItem('hotelApiSettings', JSON.stringify(newSettings));
+          window.safeStorage.setItem('hotelApiSettings', JSON.stringify(newSettings));
           
           // Dispatch a custom event so other components can react if needed
           window.dispatchEvent(new Event('hotelApiSettingsUpdated'));
         }
+      }
+    }, (error) => {
+      console.error("settings onSnapshot error:", error);
+      const msg = error?.message || '';
+      const code = error?.code || '';
+      if (msg.includes('Quota exceeded') || msg.includes('resource-exhausted') || code === 'resource-exhausted') {
+        window.dispatchEvent(new Event('firestore-quota-exceeded'));
       }
     });
 
@@ -255,7 +298,7 @@ export default function App() {
       if (docSnap.exists()) {
         const data = docSnap.data();
         if (data.mappings && Array.isArray(data.mappings)) {
-          const savedMappings = localStorage.getItem('subRoomMappings');
+          const savedMappings = window.safeStorage.getItem('subRoomMappings');
           let currentMappings: any[] = [];
           
           if (savedMappings) {
@@ -268,10 +311,17 @@ export default function App() {
 
           if (JSON.stringify(currentMappings) !== JSON.stringify(data.mappings)) {
             console.log("Syncing sub-room mappings from Firestore...");
-            localStorage.setItem('subRoomMappings', JSON.stringify(data.mappings));
+            window.safeStorage.setItem('subRoomMappings', JSON.stringify(data.mappings));
             window.dispatchEvent(new Event('hotelApiSettingsUpdated'));
           }
         }
+      }
+    }, (error) => {
+      console.error("mappings onSnapshot error:", error);
+      const msg = error?.message || '';
+      const code = error?.code || '';
+      if (msg.includes('Quota exceeded') || msg.includes('resource-exhausted') || code === 'resource-exhausted') {
+        window.dispatchEvent(new Event('firestore-quota-exceeded'));
       }
     });
 
@@ -282,12 +332,38 @@ export default function App() {
   }, []);
 
   return (
-    <Router>
-      <AppContent 
-        openCasesCount={openCasesCount} 
-        isSettingsOpen={isSettingsOpen} 
-        setIsSettingsOpen={setIsSettingsOpen} 
-      />
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <AppContent 
+          openCasesCount={openCasesCount} 
+          isSettingsOpen={isSettingsOpen} 
+          setIsSettingsOpen={setIsSettingsOpen} 
+        />
+      </Router>
+    </ErrorBoundary>
   );
+}
+
+class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: Error | null}> {
+  constructor(props: {children: React.ReactNode}) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 text-red-600 font-mono text-sm max-w-full overflow-auto">
+          <h1>Uygulama Hatası:</h1>
+          <pre>{this.state.error?.toString()}</pre>
+          <pre>{this.state.error?.stack}</pre>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }

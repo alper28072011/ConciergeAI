@@ -114,21 +114,91 @@ export function CaseTrackingModule() {
     }
   };
 
-  const selectedCase = cases.find(c => c.id === selectedCaseId);
+  const getOutlookDateGroup = (dateString: string): string => {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Bilinmeyen Tarih';
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    const lastWeek = new Date(today);
+    lastWeek.setDate(lastWeek.getDate() - 7);
+    
+    const lastMonth = new Date(today);
+    lastMonth.setMonth(lastMonth.getMonth() - 1);
+
+    const caseDate = new Date(date);
+    caseDate.setHours(0, 0, 0, 0);
+
+    if (caseDate.getTime() === today.getTime()) {
+      return 'Bugün';
+    } else if (caseDate.getTime() === yesterday.getTime()) {
+      return 'Dün';
+    } else if (caseDate.getTime() > lastWeek.getTime()) {
+      return 'Geçen Hafta';
+    } else if (caseDate.getTime() > lastMonth.getTime()) {
+      return 'Geçen Ay';
+    } else {
+      return 'Daha Eski';
+    }
+  };
 
   const filteredCases = cases.filter(c => {
-    const matchesSearch = c.roomNumber.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          c.guestName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          (c.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          c.description.toLowerCase().includes(searchTerm.toLowerCase());
+    if (c.isDeleted) return false;
+    
+    const searchLower = searchTerm.toLocaleLowerCase('tr-TR').trim();
+    if (!searchLower) return statusFilter === 'all' ? true : c.status === statusFilter;
+
+    const matchesSearch = 
+      c.roomNumber.toLocaleLowerCase('tr-TR').includes(searchLower) || 
+      c.guestName.toLocaleLowerCase('tr-TR').includes(searchLower) ||
+      (c.title || '').toLocaleLowerCase('tr-TR').includes(searchLower) ||
+      c.description.toLocaleLowerCase('tr-TR').includes(searchLower) ||
+      // Search in actions
+      (c.actions || []).some(action => 
+        action.actionText.toLocaleLowerCase('tr-TR').includes(searchLower) ||
+        (action.content || '').toLocaleLowerCase('tr-TR').includes(searchLower)
+      ) ||
+      // Search in guest details
+      (c.guestDetails?.agency || '').toLocaleLowerCase('tr-TR').includes(searchLower) ||
+      (c.guestDetails?.roomType || '').toLocaleLowerCase('tr-TR').includes(searchLower) ||
+      (c.guestDetails?.nationality || '').toLocaleLowerCase('tr-TR').includes(searchLower);
+
     const matchesStatus = statusFilter === 'all' ? true : c.status === statusFilter;
     return matchesSearch && matchesStatus;
   });
 
+  const groupedCases = React.useMemo(() => {
+    const groups: Record<string, CaseTracker[]> = {
+      'Bugün': [],
+      'Dün': [],
+      'Geçen Hafta': [],
+      'Geçen Ay': [],
+      'Daha Eski': [],
+      'Bilinmeyen Tarih': []
+    };
+
+    filteredCases.forEach(c => {
+      const group = getOutlookDateGroup(c.createdAt);
+      if (groups[group]) {
+        groups[group].push(c);
+      } else {
+        groups[group] = [c];
+      }
+    });
+
+    return Object.entries(groups).filter(([_, items]) => items.length > 0);
+  }, [filteredCases]);
+
+  const selectedCase = cases.find(c => c.id === selectedCaseId);
+
   const fetchInHouseGuests = async () => {
     setIsFetchingGuests(true);
     try {
-      const savedSettings = localStorage.getItem('hotelApiSettings');
+      const savedSettings = window.safeStorage.getItem('hotelApiSettings');
       if (!savedSettings) throw new Error('API ayarları bulunamadı.');
       const settings: ApiSettings = JSON.parse(savedSettings);
       
@@ -148,7 +218,7 @@ export function CaseTrackingModule() {
       let guests = Array.isArray(guestRes) ? guestRes : [];
       
       // Resolve room numbers
-      const savedMappings = localStorage.getItem('subRoomMappings');
+      const savedMappings = window.safeStorage.getItem('subRoomMappings');
       if (savedMappings) {
         try {
           const mappings = JSON.parse(savedMappings);
@@ -219,6 +289,13 @@ export function CaseTrackingModule() {
         createdBy: auth.currentUser?.displayName || auth.currentUser?.email || 'Sistem Kullanıcısı',
         guestDetails: selectedGuestDetails || undefined
       });
+      
+      await addCaseAction(newId, {
+        date: new Date().toISOString(),
+        actionText: 'Yeni vaka oluşturuldu.',
+        performedBy: auth.currentUser?.displayName || auth.currentUser?.email || 'Sistem Kullanıcısı'
+      }, []);
+
       setIsNewCaseModalOpen(false);
       setNewCaseRoom('');
       setNewCaseGuest('');
@@ -255,7 +332,15 @@ export function CaseTrackingModule() {
   const handleDeleteCase = async (id: string) => {
     if (window.confirm('Bu vakayı tamamen silmek istediğinize emin misiniz?')) {
       try {
-        await deleteDoc(doc(db, 'cases', id));
+        const caseToDelete = cases.find(c => c.id === id);
+        await updateDoc(doc(db, 'cases', id), { isDeleted: true });
+        if (caseToDelete) {
+          await addCaseAction(id, {
+            date: new Date().toISOString(),
+            actionText: 'Vaka silindi.',
+            performedBy: auth.currentUser?.displayName || auth.currentUser?.email || 'Sistem Kullanıcısı'
+          }, caseToDelete.actions || []);
+        }
         if (selectedCaseId === id) setSelectedCaseId(null);
       } catch (error) {
         console.error('Error deleting case:', error);
@@ -342,6 +427,11 @@ export function CaseTrackingModule() {
         description: editInitialCaseDesc,
         updatedAt: new Date().toISOString()
       });
+      await addCaseAction(selectedCase.id, {
+        date: new Date().toISOString(),
+        actionText: 'Vaka başlığı/tanımı güncellendi.',
+        performedBy: auth.currentUser?.displayName || auth.currentUser?.email || 'Sistem Kullanıcısı'
+      }, selectedCase.actions || []);
       setIsEditingInitialCase(false);
     } catch (error) {
       console.error('Error updating initial case:', error);
@@ -562,10 +652,10 @@ CRITICAL INSTRUCTIONS:
     <div className="flex w-full h-full bg-slate-50 overflow-hidden">
       {/* Left Column: Case List */}
       <div className="w-[400px] bg-white border-r border-slate-200 flex flex-col shrink-0 z-10 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
-        <div className="p-6 border-b border-slate-100 flex-shrink-0 bg-white">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 tracking-tight">
-              <Briefcase className="text-emerald-600" size={24} />
+        <div className="p-4 border-b border-slate-100 flex-shrink-0 bg-white">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 tracking-tight">
+              <Briefcase className="text-emerald-600" size={20} />
               Vaka Takibi
             </h2>
             <div className="flex items-center gap-2">
@@ -628,67 +718,127 @@ CRITICAL INSTRUCTIONS:
           </div>
         </div>
 
-        <div className={`flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/50 ${viewMode === 'compact' ? 'space-y-2' : 'space-y-3'}`}>
-          {filteredCases.length === 0 ? (
+        <div className="flex-1 overflow-y-auto custom-scrollbar bg-slate-50/50">
+          {groupedCases.length === 0 ? (
             <div className="text-center py-10 text-slate-400">
               <AlertCircle size={32} className="mx-auto mb-3 opacity-50" />
               <p className="text-sm">Vaka bulunamadı.</p>
             </div>
           ) : (
-            filteredCases.map(c => {
-              const lastUpdate = c.updatedAt || c.createdAt;
-              const isRecentlyUpdated = new Date().getTime() - new Date(lastUpdate).getTime() < 24 * 60 * 60 * 1000;
+            <div className="p-3 space-y-6">
+              {groupedCases.map(([groupName, items]) => (
+                <div key={groupName} className="space-y-2">
+                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest px-1 sticky top-0 bg-slate-50 py-2 z-10 -mt-2 pt-2 border-b border-slate-100/50">
+                    {groupName}
+                  </h3>
+                  <div className={viewMode === 'compact' ? 'space-y-1.5' : 'space-y-3'}>
+                    {items.map(c => {
+                      const lastUpdate = c.updatedAt || c.createdAt;
+                      const isRecentlyUpdated = new Date().getTime() - new Date(lastUpdate).getTime() < 24 * 60 * 60 * 1000;
+                      const isSelected = selectedCaseId === c.id;
 
-              return (
-                <div 
-                  key={c.id}
-                  onClick={() => setSelectedCaseId(c.id)}
-                  className={`${viewMode === 'compact' ? 'p-3' : 'p-4'} rounded-xl cursor-pointer transition-all border relative overflow-hidden ${selectedCaseId === c.id ? 'bg-white border-emerald-500 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500' : 'bg-white border-slate-200 hover:border-emerald-300 hover:shadow-sm'}`}
-                >
-                  {isRecentlyUpdated && (
-                    <div className="absolute top-0 right-0">
-                      <div className="bg-emerald-500 text-white text-[8px] font-black px-2 py-0.5 rounded-bl-lg uppercase tracking-tighter shadow-sm">
-                        Güncel
-                      </div>
-                    </div>
-                  )}
-                  <div className={`flex justify-between items-start ${viewMode === 'compact' ? 'mb-1' : 'mb-2'}`}>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-bold bg-slate-100 text-slate-700 px-2 py-1 rounded-md">
-                        {c.roomNumber}
-                      </span>
-                      <span className="text-sm font-bold text-slate-800 line-clamp-1">{c.guestName}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {isRecentlyUpdated && (
-                        <span className="flex h-2 w-2 relative">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                        </span>
-                      )}
-                      {c.status === 'open' ? (
-                        <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse shrink-0"></span>
-                      ) : (
-                        <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
-                      )}
-                    </div>
-                  </div>
-                  <h4 className="text-sm font-bold text-slate-800 mb-2 line-clamp-1">
-                    {c.title || 'Başlıksız Vaka'}
-                  </h4>
-                  <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium">
-                    <span className="flex items-center gap-1">
-                      <Clock size={12} />
-                      {new Date(c.createdAt).toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <MessageSquare size={12} />
-                      {c.actions?.length || 0} İşlem
-                    </span>
+                      if (viewMode === 'compact') {
+                        return (
+                          <div 
+                            key={c.id}
+                            onClick={() => setSelectedCaseId(c.id)}
+                            className={`px-3 py-2.5 rounded-lg cursor-pointer transition-all border relative overflow-hidden ${
+                              isSelected 
+                                ? 'bg-slate-50 border-slate-900 shadow-sm' 
+                                : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'
+                            }`}
+                          >
+                            {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600" />}
+                            
+                            <div className="flex justify-between items-center mb-1 gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-mono text-[10px] font-bold bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">
+                                  {c.roomNumber}
+                                </span>
+                                <span className={`text-xs font-bold truncate ${isSelected ? 'text-indigo-600' : 'text-slate-900'}`}>
+                                  {c.guestName}
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 whitespace-nowrap font-medium">
+                                {new Date(c.createdAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-[11px] text-slate-500 truncate flex-1 font-medium">
+                                {c.title || 'Başlıksız Vaka'}
+                              </p>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                {c.actions && c.actions.length > 0 && (
+                                  <span className="text-[9px] text-slate-400 font-bold bg-slate-50 px-1 rounded">
+                                    {c.actions.length}
+                                  </span>
+                                )}
+                                {c.status === 'open' ? (
+                                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_4px_rgba(245,158,11,0.4)]" />
+                                ) : (
+                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div 
+                          key={c.id}
+                          onClick={() => setSelectedCaseId(c.id)}
+                          className={`p-4 rounded-xl cursor-pointer transition-all border relative overflow-hidden ${selectedCaseId === c.id ? 'bg-white border-emerald-500 shadow-md shadow-emerald-500/10 ring-1 ring-emerald-500' : 'bg-white border-slate-200 hover:border-emerald-300 hover:shadow-sm'}`}
+                        >
+                          {isRecentlyUpdated && (
+                            <div className="absolute top-0 right-0">
+                              <div className="bg-emerald-500 text-white text-[8px] font-black px-2 py-0.5 rounded-bl-lg uppercase tracking-tighter shadow-sm">
+                                Güncel
+                              </div>
+                            </div>
+                          )}
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold bg-slate-100 text-slate-700 px-2 py-1 rounded-md">
+                                {c.roomNumber}
+                              </span>
+                              <span className="text-sm font-bold text-slate-800 line-clamp-1">{c.guestName}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {isRecentlyUpdated && (
+                                <span className="flex h-2 w-2 relative">
+                                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                </span>
+                              )}
+                              {c.status === 'open' ? (
+                                <span className="w-2.5 h-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse shrink-0"></span>
+                              ) : (
+                                <CheckCircle2 size={16} className="text-emerald-500 shrink-0" />
+                              )}
+                            </div>
+                          </div>
+                          <h4 className="text-sm font-bold text-slate-800 mb-2 line-clamp-1">
+                            {c.title || 'Başlıksız Vaka'}
+                          </h4>
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-medium">
+                            <span className="flex items-center gap-1">
+                              <Clock size={12} />
+                              {new Date(c.createdAt).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <MessageSquare size={12} />
+                              {c.actions?.length || 0} İşlem
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-              );
-            })
+              ))}
+            </div>
           )}
         </div>
       </div>
@@ -697,6 +847,12 @@ CRITICAL INSTRUCTIONS:
       <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden relative">
         {selectedCase ? (
           <>
+            {selectedCase.isDeleted && (
+              <div className="bg-red-50 border-b border-red-200 p-3 flex items-center justify-center gap-2 text-red-600 text-sm font-bold shadow-sm z-20 relative">
+                <Trash2 size={16} />
+                Bu vaka silinmiştir. Sadece salt okunur olarak görüntülenmektedir.
+              </div>
+            )}
             {/* Header */}
             <div className="bg-white px-8 py-6 border-b border-slate-200 shrink-0 shadow-sm z-10">
               <div className="flex items-start justify-between">
@@ -708,7 +864,8 @@ CRITICAL INSTRUCTIONS:
                     </h2>
                     <button 
                       onClick={openEditInitialCaseModal}
-                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all"
+                      disabled={selectedCase.isDeleted}
+                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                       title="Başlığı Düzenle"
                     >
                       <Edit3 size={18} />
@@ -786,7 +943,8 @@ CRITICAL INSTRUCTIONS:
                   {/* Primary Action: Status Toggle */}
                   <button 
                     onClick={handleToggleStatus}
-                    className={`px-6 py-2.5 text-sm font-bold rounded-xl transition-all shadow-sm flex items-center gap-2 ${
+                    disabled={selectedCase.isDeleted}
+                    className={`px-6 py-2.5 text-sm font-bold rounded-xl transition-all shadow-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed ${
                       selectedCase.status === 'open' 
                         ? 'bg-emerald-600 text-white hover:bg-emerald-700 hover:shadow-md' 
                         : 'bg-amber-500 text-white hover:bg-amber-600 hover:shadow-md'
@@ -883,7 +1041,8 @@ CRITICAL INSTRUCTIONS:
                                   handleDeleteCase(selectedCase.id);
                                   setIsHeaderMenuOpen(false);
                                 }}
-                                className="w-full px-3 py-2.5 text-left text-sm font-semibold text-red-600 hover:bg-red-50 rounded-xl transition-colors flex items-center gap-3"
+                                disabled={selectedCase.isDeleted}
+                                className="w-full px-3 py-2.5 text-left text-sm font-semibold text-red-600 hover:bg-red-50 rounded-xl transition-colors flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
                               >
                                 <Trash2 size={18} />
                                 Vakayı Sil
@@ -1089,7 +1248,8 @@ CRITICAL INSTRUCTIONS:
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
                             onClick={openEditInitialCaseModal}
-                            className="p-1 text-slate-400 hover:text-blue-600 transition-colors"
+                            disabled={selectedCase.isDeleted}
+                            className="p-1 text-slate-400 hover:text-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             title="Düzenle"
                           >
                             <Edit3 size={14} />
@@ -1178,11 +1338,12 @@ CRITICAL INSTRUCTIONS:
             <div className="bg-white p-6 border-t border-slate-200 shrink-0 shadow-[0_-4px_24px_rgba(0,0,0,0.02)] z-10">
               <div className="max-w-3xl mx-auto flex gap-4">
                 <textarea 
-                  className="flex-1 border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all resize-none bg-slate-50"
-                  placeholder="Vaka ile ilgili yeni bir gelişme veya not ekleyin..."
+                  className="flex-1 border border-slate-200 rounded-xl p-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all resize-none bg-slate-50 disabled:opacity-50 disabled:bg-slate-100"
+                  placeholder={selectedCase.isDeleted ? "Bu vaka silindiği için yeni not eklenemez." : "Vaka ile ilgili yeni bir gelişme veya not ekleyin..."}
                   rows={2}
                   value={newActionText}
                   onChange={(e) => setNewActionText(e.target.value)}
+                  disabled={selectedCase.isDeleted}
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault();
@@ -1192,7 +1353,7 @@ CRITICAL INSTRUCTIONS:
                 />
                 <button 
                   onClick={handleAddAction}
-                  disabled={!newActionText.trim() || isAddingAction}
+                  disabled={!newActionText.trim() || isAddingAction || selectedCase.isDeleted}
                   className="px-6 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shadow-sm hover:shadow-md"
                 >
                   {isAddingAction ? (

@@ -13,7 +13,7 @@ import { ActionEntryModal } from '../components/ActionEntryModal';
 import { BulkLabelModal } from '../components/BulkLabelModal';
 import { doc, getDoc, setDoc, collection, getDocs, addDoc, serverTimestamp, writeBatch, onSnapshot, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
-import { deleteCommentData } from '../services/firebaseService';
+import { deleteCommentData, fetchDocsInChunks } from '../services/firebaseService';
 import { motion, AnimatePresence } from 'framer-motion';
 
 export function GuestListModule() {
@@ -38,20 +38,6 @@ export function GuestListModule() {
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
   const [activeQuickFilter, setActiveQuickFilter] = useState<string>('all');
 
-  // Firebase Real-time Cache
-  const [firebaseCache, setFirebaseCache] = useState<{
-    surveys: any[];
-    interactions: Record<string, any>;
-    agenda: Record<string, any>;
-    commentAnalytics: Record<string, any>;
-    commentActions: any[];
-  }>({
-    surveys: [],
-    interactions: {},
-    agenda: {},
-    commentAnalytics: {},
-    commentActions: []
-  });
 
   // Welcome Call Modal State
   const [isWelcomeCallModalOpen, setIsWelcomeCallModalOpen] = useState(false);
@@ -284,6 +270,15 @@ CRITICAL INSTRUCTIONS:
 
   // Fetch phonebook for WhatsApp routing
   useEffect(() => {
+    const handleQuotaError = (error: any) => {
+      console.error("Phonebook onSnapshot error:", error);
+      const msg = error?.message || '';
+      const code = error?.code || '';
+      if (msg.includes('Quota exceeded') || msg.includes('resource-exhausted') || code === 'resource-exhausted') {
+        window.dispatchEvent(new Event('firestore-quota-exceeded'));
+      }
+    };
+
     const q = query(collection(db, 'phonebook'), orderBy('fullName', 'asc'));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const contactList: PhonebookContact[] = [];
@@ -295,136 +290,6 @@ CRITICAL INSTRUCTIONS:
     return () => unsubscribe();
   }, []);
 
-  // Firebase Real-time Listener
-  useEffect(() => {
-    const unsubSurveys = onSnapshot(collection(db, 'survey_logs'), (snapshot) => {
-      const surveys: any[] = [];
-      snapshot.forEach(doc => surveys.push(doc.data()));
-      setFirebaseCache(prev => ({ ...prev, surveys }));
-    });
-
-    const unsubInteractions = onSnapshot(collection(db, 'guest_interactions'), (snapshot) => {
-      const interactions: Record<string, any> = {};
-      snapshot.forEach(doc => {
-        interactions[doc.id] = doc.data();
-      });
-      setFirebaseCache(prev => ({ ...prev, interactions }));
-    });
-
-    const unsubAgenda = onSnapshot(collection(db, 'agenda_notes'), (snapshot) => {
-      const agenda: Record<string, any> = {};
-      snapshot.forEach(doc => {
-        agenda[doc.id] = doc.data();
-      });
-      setFirebaseCache(prev => ({ ...prev, agenda }));
-    });
-
-    const unsubCommentAnalytics = onSnapshot(collection(db, 'comment_analytics'), (snapshot) => {
-      const analytics: Record<string, any> = {};
-      snapshot.forEach(doc => {
-        analytics[doc.id] = doc.data();
-      });
-      setFirebaseCache(prev => ({ ...prev, commentAnalytics: analytics }));
-    });
-
-    const unsubCommentActions = onSnapshot(collection(db, 'comment_actions'), (snapshot) => {
-      const commentActions: any[] = [];
-      snapshot.forEach(doc => {
-        commentActions.push({ id: doc.id, ...doc.data() });
-      });
-      setFirebaseCache(prev => ({ ...prev, commentActions }));
-    });
-
-    return () => {
-      unsubSurveys();
-      unsubInteractions();
-      unsubAgenda();
-      unsubCommentAnalytics();
-      unsubCommentActions();
-    };
-  }, []);
-
-  // Real-time update of guests based on firebaseCache
-  useEffect(() => {
-    setGuests(prevGuests => {
-      if (prevGuests.length === 0) return prevGuests;
-      
-      let hasChanges = false;
-      const updatedGuests = prevGuests.map(guest => {
-        const matchedComments = guest.comments || [];
-        const hasSurveySent = firebaseCache.surveys.some(log => log.guestId === guest.RESID);
-        const interaction = firebaseCache.interactions[guest.RESID] || {};
-        
-        let sentimentScore = interaction.sentimentScore;
-        let sentimentAnalysisDate = interaction.sentimentAnalysisDate;
-
-        if (sentimentScore === undefined && matchedComments.length > 0) {
-          for (const comment of matchedComments) {
-            const note = firebaseCache.agenda[comment.COMMENTID];
-            if (note && note.sentimentScore !== undefined) {
-              sentimentScore = note.sentimentScore;
-              sentimentAnalysisDate = note.sentimentAnalysisDate;
-              break;
-            }
-          }
-        }
-        
-        const elektraAnswers = matchedComments.map(c => c.ANSWER).filter(Boolean).join('\n');
-        const guestCommentIds = matchedComments.map(c => String(c.COMMENTID));
-        
-        const filteredActions = firebaseCache.commentActions.filter(a => 
-          (a.resId && String(a.resId) === String(guest.RESID)) || 
-          (a.commentId && guestCommentIds.includes(String(a.commentId)))
-        );
-        
-        const filteredInteractions = (Object.values(firebaseCache.interactions) as any[]).filter(i => 
-          String(i.resId) === String(guest.RESID)
-        );
-        
-        const filteredSurveys = firebaseCache.surveys.filter(s => 
-          String(s.resId) === String(guest.RESID)
-        );
-
-        const newTimelineActions = buildUnifiedTimeline(
-          elektraAnswers,
-          filteredActions,
-          filteredInteractions,
-          filteredSurveys
-        );
-
-        const isChanged = 
-          guest.surveySent !== hasSurveySent ||
-          guest.sentimentScore !== sentimentScore ||
-          guest.sentimentAnalysisDate !== sentimentAnalysisDate ||
-          guest.generatedLetter !== interaction.generatedLetter ||
-          guest.letterSentDate !== interaction.letterSentDate ||
-          guest.welcomeCallStatus !== (interaction.welcomeCallStatus || 'not_called') ||
-          guest.welcomeCallNotes !== (interaction.welcomeCallNotes || '') ||
-          guest.welcomeCallDate !== (interaction.welcomeCallDate || '') ||
-          JSON.stringify(guest.timelineActions) !== JSON.stringify(newTimelineActions);
-
-        if (isChanged) {
-          hasChanges = true;
-          return {
-            ...guest,
-            surveySent: hasSurveySent,
-            sentimentScore: sentimentScore,
-            sentimentAnalysisDate: sentimentAnalysisDate,
-            generatedLetter: interaction.generatedLetter,
-            letterSentDate: interaction.letterSentDate,
-            welcomeCallStatus: interaction.welcomeCallStatus || 'not_called',
-            welcomeCallNotes: interaction.welcomeCallNotes || '',
-            welcomeCallDate: interaction.welcomeCallDate || '',
-            timelineActions: newTimelineActions
-          };
-        }
-        return guest;
-      });
-
-      return hasChanges ? updatedGuests : prevGuests;
-    });
-  }, [firebaseCache]);
-
   const handleFilterChange = (column: string, value: string) => {
     setColumnFilters(prev => ({
       ...prev,
@@ -433,7 +298,7 @@ CRITICAL INSTRUCTIONS:
   };
 
   const handleSearch = async (isLoadMore = false) => {
-    const savedSettings = localStorage.getItem('hotelApiSettings');
+    const savedSettings = window.safeStorage.getItem('hotelApiSettings');
     if (!savedSettings) {
       alert('API ayarları bulunamadı. Lütfen önce ayarları yapın.');
       return;
@@ -491,7 +356,7 @@ CRITICAL INSTRUCTIONS:
       const guestsList: GuestData[] = Array.isArray(guestRes) ? guestRes : [];
 
       // Apply Room Resolution Engine
-      const savedMappingsStr = localStorage.getItem('subRoomMappings');
+      const savedMappingsStr = window.safeStorage.getItem('subRoomMappings');
       const mappings = savedMappingsStr ? JSON.parse(savedMappingsStr) : [];
       
       guestsList.forEach(guest => {
@@ -543,20 +408,72 @@ CRITICAL INSTRUCTIONS:
         commentsList = Array.isArray(cList) ? cList : [];
       }
 
-      // 4. Cross-Match Logic using Firebase Cache
+      // 3.5 Fetch Data From Firebase Exactly for These Users
+      const staticFirebaseCache = {
+        surveys: [] as any[],
+        interactions: {} as Record<string, any>,
+        agenda: {} as Record<string, any>,
+        commentActions: [] as any[],
+        commentAnalytics: {} as Record<string, any>
+      };
+
+      if (fetchedResIds.length > 0) {
+        // Fetch survey_logs
+        staticFirebaseCache.surveys = await fetchDocsInChunks('survey_logs', 'resId', fetchedResIds);
+        
+        // Fetch interactions
+        const interactionsDocs = await fetchDocsInChunks('guest_interactions', '__name__', fetchedResIds);
+        interactionsDocs.forEach(doc => {
+          staticFirebaseCache.interactions[doc.id] = doc;
+        });
+      }
+
+      if (commentsList.length > 0) {
+        const commentIds = commentsList.map(c => String(c.COMMENTID));
+        
+        // Fetch agenda_notes
+        const agendaDocs = await fetchDocsInChunks('agenda_notes', '__name__', commentIds);
+        agendaDocs.forEach(doc => {
+          staticFirebaseCache.agenda[doc.id] = doc;
+        });
+
+        // Fetch comment_analytics
+        const analyticsDocs = await fetchDocsInChunks('comment_analytics', '__name__', commentIds);
+        analyticsDocs.forEach(doc => {
+          staticFirebaseCache.commentAnalytics[doc.id] = doc;
+        });
+
+        // Fetch comment_actions (using 'resId' for fallback or 'commentId')
+        // We will fetch based on resIds to cover welcome calls too!
+        staticFirebaseCache.commentActions = await fetchDocsInChunks('comment_actions', 'resId', fetchedResIds);
+      }
+
+      // Update Combined Analysis Data statically
+      const combined: Record<string, any> = { ...staticFirebaseCache.agenda };
+      Object.keys(staticFirebaseCache.commentAnalytics).forEach(id => {
+        combined[id] = { ...combined[id], ...staticFirebaseCache.commentAnalytics[id] };
+      });
+      setCombinedAnalysisData(combined);
+
+      // 4. Cross-Match Logic using Static Cache
       const groupedDetails = groupCommentDetails(commentsList as any);
 
       let processedGuests = guestsList.map(guest => {
-        const matchedComments = groupedDetails.filter(detail => String(detail.RESID) === String(guest.RESID));
-        const hasSurveySent = firebaseCache.surveys.some(log => log.guestId === guest.RESID);
-        const interaction = firebaseCache.interactions[guest.RESID] || {};
+        const matchedComments = groupedDetails.filter(detail => String(detail.RESID).trim() === String(guest.RESID).trim());
+        
+        // Support historic surveys where ID was stored as guestId or resId
+        const hasSurveySent = staticFirebaseCache.surveys.some(log => 
+          (log.guestId !== undefined && String(log.guestId).trim() === String(guest.RESID).trim()) || 
+          (log.resId !== undefined && String(log.resId).trim() === String(guest.RESID).trim())
+        );
+        const interaction = staticFirebaseCache.interactions[String(guest.RESID).trim()] || {};
         
         let sentimentScore = interaction.sentimentScore;
         let sentimentAnalysisDate = interaction.sentimentAnalysisDate;
 
         if (sentimentScore === undefined && matchedComments.length > 0) {
           for (const comment of matchedComments) {
-            const note = firebaseCache.agenda[comment.COMMENTID];
+            const note = staticFirebaseCache.agenda[String(comment.COMMENTID).trim()];
             if (note && note.sentimentScore !== undefined) {
               sentimentScore = note.sentimentScore;
               sentimentAnalysisDate = note.sentimentAnalysisDate;
@@ -568,17 +485,17 @@ CRITICAL INSTRUCTIONS:
         const elektraAnswers = matchedComments.map(c => c.ANSWER).filter(Boolean).join('\n');
         const guestCommentIds = matchedComments.map(c => String(c.COMMENTID));
         
-        const filteredActions = firebaseCache.commentActions.filter(a => 
-          (a.resId && String(a.resId) === String(guest.RESID)) || 
-          (a.commentId && guestCommentIds.includes(String(a.commentId)))
+        const filteredActions = staticFirebaseCache.commentActions.filter(a => 
+          (a.resId && String(a.resId).trim() === String(guest.RESID).trim()) || 
+          (a.commentId && guestCommentIds.includes(String(a.commentId).trim()))
         );
         
-        const filteredInteractions = (Object.values(firebaseCache.interactions) as any[]).filter(i => 
-          String(i.resId) === String(guest.RESID)
+        const filteredInteractions = (Object.values(staticFirebaseCache.interactions) as any[]).filter(i => 
+          String(i.resId).trim() === String(guest.RESID).trim()
         );
         
-        const filteredSurveys = firebaseCache.surveys.filter(s => 
-          String(s.resId) === String(guest.RESID)
+        const filteredSurveys = staticFirebaseCache.surveys.filter(s => 
+          String(s.resId).trim() === String(guest.RESID).trim()
         );
 
         const timelineActions = buildUnifiedTimeline(
@@ -596,6 +513,7 @@ CRITICAL INSTRUCTIONS:
           sentimentScore: sentimentScore,
           sentimentAnalysisDate: sentimentAnalysisDate,
           generatedLetter: interaction.generatedLetter,
+          generatedLetterTemplateNames: interaction.generatedLetterTemplateNames,
           letterSentDate: interaction.letterSentDate,
           welcomeCallStatus: interaction.welcomeCallStatus || 'not_called',
           welcomeCallNotes: interaction.welcomeCallNotes || '',
@@ -655,6 +573,21 @@ CRITICAL INSTRUCTIONS:
   const processedData = useMemo(() => {
     let filtered = guests;
 
+    // Apply Column Filters (Client-side interactive instant search)
+    Object.entries(columnFilters).forEach(([key, value]) => {
+      if (value && typeof value === 'string' && value.trim() !== '') {
+        const valLower = value.toLocaleLowerCase('tr-TR').trim();
+        filtered = filtered.filter(g => {
+          let itemValue = g[key as keyof GuestData];
+          if (key === 'ROOMNO' && g.resolvedRoomNo) {
+            itemValue = g.resolvedRoomNo;
+          }
+          if (itemValue === undefined || itemValue === null) return false;
+          return String(itemValue).toLocaleLowerCase('tr-TR').includes(valLower);
+        });
+      }
+    });
+
     // Apply Quick Filters
     switch (activeQuickFilter) {
       case 'has_comment':
@@ -685,6 +618,9 @@ CRITICAL INSTRUCTIONS:
       case 'no_welcome_call':
         filtered = filtered.filter(g => !g.welcomeCallStatus || g.welcomeCallStatus === 'not_called');
         break;
+      case 'not_called_or_no_answer':
+        filtered = filtered.filter(g => !g.welcomeCallStatus || g.welcomeCallStatus === 'not_called' || g.welcomeCallStatus === 'no_answer');
+        break;
       case 'welcome_call_done':
         filtered = filtered.filter(g => g.welcomeCallStatus && g.welcomeCallStatus !== 'not_called');
         break;
@@ -711,7 +647,7 @@ CRITICAL INSTRUCTIONS:
       if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
       return 0;
     });
-  }, [guests, sortConfig, activeQuickFilter]);
+  }, [guests, sortConfig, activeQuickFilter, columnFilters]);
 
   const toggleRow = (id: string) => {
     setExpandedRowId(expandedRowId === id ? null : id);
@@ -748,8 +684,9 @@ CRITICAL INSTRUCTIONS:
     try {
       const interactionRef = doc(db, 'guest_interactions', String(selectedGuestForCall.RESID));
       const payload = {
+        resId: String(selectedGuestForCall.RESID),
         welcomeCallStatus: callStatus,
-        welcomeCallNotes: callStatus === 'answered_has_request' ? callNotes : '',
+        welcomeCallNotes: callNotes,
         welcomeCallDate: new Date().toISOString()
       };
 
@@ -758,7 +695,7 @@ CRITICAL INSTRUCTIONS:
       // Add to comment_actions for timeline history only if changed
       const hasChanged = 
         selectedGuestForCall.welcomeCallStatus !== callStatus || 
-        (callStatus === 'answered_has_request' && selectedGuestForCall.welcomeCallNotes !== callNotes);
+        selectedGuestForCall.welcomeCallNotes !== callNotes;
 
       if (callStatus !== 'not_called' && hasChanged) {
         const actionsRef = collection(db, "comment_actions");
@@ -771,7 +708,7 @@ CRITICAL INSTRUCTIONS:
           resId: String(selectedGuestForCall.RESID),
           type: 'welcome_call',
           description: desc,
-          content: callStatus === 'answered_has_request' ? callNotes : '',
+          content: callNotes,
           date: new Date().toISOString(),
           source: 'Misafir İlişkileri'
         });
@@ -958,12 +895,20 @@ CRITICAL INSTRUCTIONS:
 
       // Save generated letter to Firebase
       const interactionRef = doc(db, 'guest_interactions', String(guest.RESID));
+      const currentTemplates = guest.generatedLetterTemplateNames || [];
+      const newTemplates = [...currentTemplates];
+      if (!newTemplates.includes(matchedTemplate.name)) {
+        newTemplates.push(matchedTemplate.name);
+      }
+
       await setDoc(interactionRef, {
-        generatedLetter: content
+        resId: String(guest.RESID),
+        generatedLetter: content,
+        generatedLetterTemplateNames: newTemplates
       }, { merge: true });
 
       // Update local state
-      setGuests(prev => prev.map(g => g.RESID === guest.RESID ? { ...g, generatedLetter: content } : g));
+      setGuests(prev => prev.map(g => g.RESID === guest.RESID ? { ...g, generatedLetter: content, generatedLetterTemplateNames: newTemplates } : g));
     } catch (error) {
       console.error("Error generating letter:", error);
       setGeneratedLetterContent('Şablon oluşturulurken bir hata oluştu.');
@@ -1044,9 +989,6 @@ CRITICAL INSTRUCTIONS:
     if (!selectedGuestForMail) return;
 
     try {
-      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
-      const { db } = await import('../firebase');
-
       await addDoc(collection(db, 'survey_logs'), {
         guestId: selectedGuestForMail.RESID,
         guestName: selectedGuestForMail.GUESTNAMES,
@@ -1058,6 +1000,7 @@ CRITICAL INSTRUCTIONS:
       // Update interaction log
       const interactionRef = doc(db, 'guest_interactions', String(selectedGuestForMail.RESID));
       await setDoc(interactionRef, {
+        resId: String(selectedGuestForMail.RESID),
         letterSentDate: new Date().toISOString()
       }, { merge: true });
 
@@ -1096,8 +1039,6 @@ CRITICAL INSTRUCTIONS:
     setSelectedBulkTemplateId('');
     
     try {
-      const { collection, getDocs } = await import('firebase/firestore');
-      const { db } = await import('../firebase');
       const querySnapshot = await getDocs(collection(db, 'letter_templates'));
       const templates: any[] = [];
       querySnapshot.forEach((doc) => {
@@ -1275,8 +1216,16 @@ ${JSON.stringify(selectedGuests.map(g => ({
 
       // Save to Firebase
       const interactionRef = doc(db, 'guest_interactions', String(guest.RESID));
+      const currentTemplates = guest.generatedLetterTemplateNames || [];
+      const newTemplates = [...currentTemplates];
+      if (!newTemplates.includes(template.name)) {
+        newTemplates.push(template.name);
+      }
+
       await setDoc(interactionRef, {
-        generatedLetter: content
+        resId: String(guest.RESID),
+        generatedLetter: content,
+        generatedLetterTemplateNames: newTemplates
       }, { merge: true });
     }
 
@@ -1284,7 +1233,15 @@ ${JSON.stringify(selectedGuests.map(g => ({
     const generatedIds = generated.map(g => g.guest.RESID);
     setGuests(prev => prev.map(g => {
       const gen = generated.find(item => item.guest.RESID === g.RESID);
-      return gen ? { ...g, generatedLetter: gen.content } : g;
+      if (gen) {
+        const currentTemplates = g.generatedLetterTemplateNames || [];
+        const newTemplates = [...currentTemplates];
+        if (!newTemplates.includes(template.name)) {
+          newTemplates.push(template.name);
+        }
+        return { ...g, generatedLetter: gen.content, generatedLetterTemplateNames: newTemplates };
+      }
+      return g;
     }));
 
     setBulkGeneratedLetters(generated);
@@ -1375,9 +1332,6 @@ ${JSON.stringify(selectedGuests.map(g => ({
     if (bulkGeneratedLetters.length === 0) return;
 
     try {
-      const { collection, writeBatch, doc, serverTimestamp } = await import('firebase/firestore');
-      const { db } = await import('../firebase');
-      
       const batch = writeBatch(db);
       const template = bulkTemplates.find(t => t.id === selectedBulkTemplateId);
       const templateName = template?.name || 'Toplu Şablon';
@@ -1408,10 +1362,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
     }
   };
 
-  const combinedAnalysisData = { ...firebaseCache.agenda };
-  Object.keys(firebaseCache.commentAnalytics).forEach(id => {
-    combinedAnalysisData[id] = { ...combinedAnalysisData[id], ...firebaseCache.commentAnalytics[id] };
-  });
+  const [combinedAnalysisData, setCombinedAnalysisData] = useState<Record<string, any>>({});
 
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50">
@@ -1485,6 +1436,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
               <option value="low_sentiment">Riskli Misafirler (Score &lt; %50)</option>
               <option value="survey_sent">Anket/Mektup Gönderilenler</option>
               <option value="no_welcome_call">Welcome Call Yapılmayanlar</option>
+              <option value="not_called_or_no_answer">↳ Ulaşılamayanlar (Tümü)</option>
               <option value="welcome_call_done">Welcome Call Yapılanlar (Tümü)</option>
               <option value="welcome_call_all_good">↳ Memnun Olanlar</option>
               <option value="welcome_call_has_request">↳ Talebi Olanlar</option>
@@ -1568,12 +1520,12 @@ ${JSON.stringify(selectedGuests.map(g => ({
       )}
 
       {/* Table Container - Data Grid */}
-      <div className="flex-1 overflow-auto p-6">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm min-w-[1000px]">
-          <table className="w-full text-left border-collapse">
+      <div className="flex-1 flex flex-col min-h-0 p-6 overflow-hidden">
+        <div className="flex-1 overflow-auto bg-white rounded-xl border border-slate-200 shadow-sm custom-scrollbar">
+          <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider sticky top-0 z-10">
-                <th className="p-3 w-10 bg-slate-50 align-top">
+              <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <th className="p-3 w-10 bg-slate-50 align-top sticky top-0 z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <div className="flex flex-col gap-2 items-center">
                     <div className="h-4"></div>
                     <input 
@@ -1584,8 +1536,8 @@ ${JSON.stringify(selectedGuests.map(g => ({
                     />
                   </div>
                 </th>
-                <th className="p-3 w-10 bg-slate-50 align-top"></th>
-                <th className="p-3 bg-slate-50 align-top min-w-[120px]">
+                <th className="p-3 w-10 bg-slate-50 align-top sticky top-0 z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]"></th>
+                <th className="p-3 bg-slate-50 align-top min-w-[120px] sticky top-0 z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-1">
                       Durum & Analiz
@@ -1593,7 +1545,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   </div>
                 </th>
                 
-                <th className="p-3 bg-slate-50 align-top min-w-[100px]">
+                <th className="p-3 bg-slate-50 align-top min-w-[100px] sticky top-0 z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('ROOMNO')}>
                       Oda <ArrowUpDown size={12} />
@@ -1607,7 +1559,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   </div>
                 </th>
 
-                <th className="p-3 bg-slate-50 align-top min-w-[200px]">
+                <th className="p-3 bg-slate-50 align-top min-w-[200px] sticky top-0 z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('GUESTNAMES')}>
                       Misafir Adı <ArrowUpDown size={12} />
@@ -1621,7 +1573,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   </div>
                 </th>
 
-                <th className="p-3 bg-slate-50 align-top min-w-[140px]">
+                <th className="p-3 bg-slate-50 align-top min-w-[140px] sticky top-0 z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('CHECKIN')}>
                       Giriş Tarihi <ArrowUpDown size={12} />
@@ -1635,7 +1587,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   </div>
                 </th>
 
-                <th className="p-3 bg-slate-50 align-top min-w-[140px]">
+                <th className="p-3 bg-slate-50 align-top min-w-[140px] sticky top-0 z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('CHECKOUT')}>
                       Çıkış Tarihi <ArrowUpDown size={12} />
@@ -1649,7 +1601,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   </div>
                 </th>
 
-                <th className="p-3 bg-slate-50 align-top min-w-[150px]">
+                <th className="p-3 bg-slate-50 align-top min-w-[150px] sticky top-0 z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('AGENCY')}>
                       Acenta <ArrowUpDown size={12} />
@@ -1663,7 +1615,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   </div>
                 </th>
 
-                <th className="p-3 bg-slate-50 align-top min-w-[120px]">
+                <th className="p-3 bg-slate-50 align-top min-w-[120px] sticky top-0 z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('ROOMTYPE')}>
                       Oda Tipi <ArrowUpDown size={12} />
@@ -1677,7 +1629,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                   </div>
                 </th>
 
-                <th className="p-3 bg-slate-50 align-top min-w-[120px]">
+                <th className="p-3 bg-slate-50 align-top min-w-[120px] sticky top-0 z-30 shadow-[0_1px_0_0_rgba(0,0,0,0.05)]">
                   <div className="flex flex-col gap-2">
                     <div className="flex items-center gap-1 cursor-pointer hover:text-slate-700 transition-colors" onClick={() => handleSort('NATIONALITY')}>
                       Uyruk <ArrowUpDown size={12} />
@@ -1745,9 +1697,15 @@ ${JSON.stringify(selectedGuests.map(g => ({
                             </div>
 
                             <div className="relative group/tooltip flex items-center justify-center">
-                              <FileText size={14} className={guest.generatedLetter ? "text-amber-500" : "text-slate-200"} />
+                              <FileText size={14} className={
+                                guest.generatedLetterTemplateNames && guest.generatedLetterTemplateNames.length > 1
+                                  ? "text-orange-600 drop-shadow-sm" 
+                                  : guest.generatedLetter ? "text-amber-500" : "text-slate-200"
+                              } />
                               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 bg-slate-800 text-white text-[10px] font-medium rounded-md opacity-0 group-hover/tooltip:opacity-100 transition-all duration-200 translate-y-1 group-hover/tooltip:translate-y-0 whitespace-nowrap pointer-events-none z-50 shadow-xl">
-                                {guest.generatedLetter ? "Mektup Üretildi" : "Mektup Üretilmedi"}
+                                {guest.generatedLetterTemplateNames && guest.generatedLetterTemplateNames.length > 0
+                                  ? `Mektup Üretildi: ${guest.generatedLetterTemplateNames.join(', ')}`
+                                  : guest.generatedLetter ? "Mektup Üretildi" : "Mektup Üretilmedi"}
                                 <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
                               </div>
                             </div>
@@ -2186,8 +2144,8 @@ ${JSON.stringify(selectedGuests.map(g => ({
           agendaNotes={combinedAnalysisData}
           type={bulkAnalysisType}
           onComplete={() => {
-            // Optional: refresh data
-            // fetchGuests(currentPage);
+            setIsBulkAnalysisModalOpen(false);
+            handleSearch(false);
           }}
         />
       )}
@@ -2395,7 +2353,7 @@ ${JSON.stringify(selectedGuests.map(g => ({
                 </div>
               </div>
 
-              {callStatus === 'answered_has_request' && (
+              {callStatus !== 'not_called' && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2 relative">
                   <label className="block text-sm font-semibold text-slate-700">Talepler / Notlar</label>
                   <div className="relative">
@@ -2404,7 +2362,13 @@ ${JSON.stringify(selectedGuests.map(g => ({
                       onChange={(e) => setCallNotes(e.target.value)}
                       onMouseUp={handleTextSelection}
                       onKeyUp={handleTextSelection}
-                      placeholder="Misafirin ekstra havlu, geç çıkış vb. taleplerini buraya yazın..."
+                      placeholder={
+                        callStatus === 'answered_has_request'
+                          ? "Misafirin ekstra havlu, geç çıkış vb. taleplerini buraya yazın..."
+                          : callStatus === 'no_answer'
+                          ? "Neden ulaşılamadığına dair notlar (örn: Telefondan ulaşılamadı, meşgul, daha sonra tekrar denenecek)..."
+                          : "Bu görüşmeye dair eklemek istediğiniz diğer notları buraya yazın..."
+                      }
                       className="w-full h-32 px-4 py-3 pb-10 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none"
                     />
                     <button

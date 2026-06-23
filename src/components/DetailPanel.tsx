@@ -150,6 +150,13 @@ export function DetailPanel({ comment }: DetailPanelProps) {
         const combinedActions = buildUnifiedTimeline(comment.ANSWER, fbActions);
 
         setTimelineActions(combinedActions);
+      }, (error) => {
+        console.error("DetailPanel comment_actions onSnapshot error:", error);
+        const msg = error?.message || '';
+        const code = error?.code || '';
+        if (msg.includes('Quota exceeded') || msg.includes('resource-exhausted') || code === 'resource-exhausted') {
+          window.dispatchEvent(new Event('firestore-quota-exceeded'));
+        }
       });
 
       return () => unsubscribe();
@@ -210,6 +217,13 @@ export function DetailPanel({ comment }: DetailPanelProps) {
         contactList.push({ id: doc.id, ...doc.data() } as PhonebookContact);
       });
       setPhonebook(contactList);
+    }, (error) => {
+      console.error("DetailPanel phonebook onSnapshot error:", error);
+      const msg = error?.message || '';
+      const code = error?.code || '';
+      if (msg.includes('Quota exceeded') || msg.includes('resource-exhausted') || code === 'resource-exhausted') {
+        window.dispatchEvent(new Event('firestore-quota-exceeded'));
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -642,7 +656,7 @@ ${JSON.stringify(timelineActions.map(a => ({
   }
 
   const isDissatisfied = (sentimentScore !== null && sentimentScore < 0.5) || 
-                         (deepAnalytics !== null && (deepAnalytics.overallScore < 50 || deepAnalytics.topics.some(t => t.score < 50)));
+                         (deepAnalytics !== null && (deepAnalytics.overallScore < 50 || (deepAnalytics.topics && deepAnalytics.topics.some(t => t.score < 50))));
 
   const hasLetterGenerated = timelineActions.some(action => 
     action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email' || action.type === 'manual_close'
@@ -880,7 +894,7 @@ ${JSON.stringify(timelineActions.map(a => ({
 
       {/* Right Column: Timeline & Case Management */}
       <div className="w-1/3 flex flex-col h-full bg-slate-50 print:hidden relative border-l border-slate-200">
-        <div className="p-5 border-b border-slate-200 bg-white flex justify-between items-center sticky top-0 z-10">
+        <div className="p-5 border-b border-slate-200 bg-white flex justify-between items-center sticky top-0 z-20">
           <h3 className="font-semibold text-slate-800 flex items-center gap-2">
             <Database size={18} className="text-slate-500" />
             Vaka Takibi

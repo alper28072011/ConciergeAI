@@ -10,6 +10,7 @@ interface SidebarProps {
   selectedIds: string[];
   onToggleSelect: (id: string) => void;
   onToggleSelectAll: () => void;
+  onToggleGroupSelect: (ids: string[]) => void;
   onFetch: (isLoadMore?: boolean) => void;
   isFetching: boolean;
   fetchLimit: number;
@@ -63,6 +64,7 @@ export function Sidebar({
   selectedIds,
   onToggleSelect,
   onToggleSelectAll,
+  onToggleGroupSelect,
   onFetch,
   isFetching,
   fetchLimit,
@@ -74,7 +76,7 @@ export function Sidebar({
   viewMode,
   onViewModeChange
 }: SidebarProps) {
-  const [filterMode, setFilterMode] = useState<'all' | 'waiting_letter' | 'low_score' | 'high_score' | 'face_to_face'>('all');
+  const [filterMode, setFilterMode] = useState<'all' | 'waiting_letter' | 'low_score'>('all');
 
   const filteredComments = useMemo(() => {
     return comments.filter(comment => {
@@ -84,9 +86,6 @@ export function Sidebar({
       
       const isDissatisfied = (sentimentScore !== null && sentimentScore !== undefined && sentimentScore < 0.5) || 
                              (deepAnalytics?.overallScore !== undefined && (deepAnalytics.overallScore < 50 || deepAnalytics.topics?.some((t: any) => t.score < 50)));
-      
-      const isHighScore = (sentimentScore !== null && sentimentScore !== undefined && sentimentScore >= 0.8) || 
-                          (deepAnalytics?.overallScore !== undefined && deepAnalytics.overallScore >= 80);
       
       const actions = commentActions[String(comment.ID)] || [];
       const hasLetterGenerated = actions.some(action => 
@@ -98,14 +97,6 @@ export function Sidebar({
       }
       if (filterMode === 'low_score') {
         return isDissatisfied;
-      }
-      if (filterMode === 'high_score') {
-        return isHighScore;
-      }
-      if (filterMode === 'face_to_face') {
-        if (!comment.COMMENTSOURCEID_NAME) return false;
-        const s = comment.COMMENTSOURCEID_NAME.toLocaleLowerCase('tr-TR').replace(/\s+/g, '');
-        return s.includes('yüzyüze') || s.includes('yuzyuze') || s.includes('facetoface');
       }
       return true;
     });
@@ -219,23 +210,11 @@ export function Sidebar({
             >
               Düşük Puanlı
             </button>
-            <button 
-              onClick={() => setFilterMode('high_score')}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${filterMode === 'high_score' ? 'bg-emerald-500 text-white shadow-sm' : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'}`}
-            >
-              Yüksek Puanlı
-            </button>
-            <button 
-              onClick={() => setFilterMode('face_to_face')}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium whitespace-nowrap transition-colors ${filterMode === 'face_to_face' ? 'bg-indigo-500 text-white shadow-sm' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}
-            >
-              Yüz Yüze
-            </button>
           </div>
         </div>
       </div>
       
-      <div className="flex-1 overflow-y-auto p-3 space-y-2 relative">
+      <div className="flex-1 overflow-y-auto relative custom-scrollbar">
         {isFetching && comments.length === 0 && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 z-10">
             <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4" />
@@ -247,151 +226,171 @@ export function Sidebar({
             Gösterilecek yorum bulunamadı.
           </div>
         )}
-        {groupedComments.map(([groupName, groupComments]) => (
-          <div key={groupName} className="space-y-2">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider px-1 sticky top-0 bg-white/90 backdrop-blur-sm py-1 z-10">
-              {groupName}
-            </h3>
-            <div className="space-y-2">
-              {groupComments.map((comment) => {
-                const note = agendaNotes[String(comment.ID)];
-                const score = note?.sentimentScore;
-                const deepAnalytics = note;
-                const isSelected = selectedId === comment.ID;
-                
-                const isDissatisfied = (score !== null && score !== undefined && score < 0.5) || 
-                                      (deepAnalytics?.overallScore !== undefined && (deepAnalytics.overallScore < 50 || deepAnalytics.topics?.some((t: any) => t.score < 50)));
-                
-                const actions = commentActions[String(comment.ID)] || [];
-                const hasLetterGenerated = actions.some(action => 
-                  action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email' || action.type === 'manual_close'
-                );
+        {groupedComments.map(([groupName, groupComments]) => {
+          const groupIds = groupComments.map(c => c.ID);
+          const isAllGroupSelected = groupIds.every(id => selectedIds.includes(id));
           
-          if (viewMode === 'compact') {
-            return (
-              <div
-                key={comment.ID || Math.random().toString()}
-                className={`px-3 py-2 rounded-lg border transition-all duration-200 cursor-pointer relative overflow-hidden ${
-                  isSelected
-                    ? 'bg-slate-50 border-slate-900 shadow-sm'
-                    : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'
-                }`}
-                onClick={() => onSelect(comment.ID)}
-              >
-                {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600" />}
-                <div className="flex items-center gap-2">
-                  <input 
-                    type="checkbox" 
-                    className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                    checked={selectedIds.includes(comment.ID)}
-                    onChange={(e) => {
-                      e.stopPropagation();
-                      onToggleSelect(comment.ID);
-                    }}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex justify-between items-center gap-2">
-                      <h3 className={`font-semibold text-slate-900 truncate text-xs ${isSelected ? 'text-indigo-600' : ''}`}>
-                        {comment.RESNAMEID_LOOKUP ? comment.RESNAMEID_LOOKUP.split('-')[1] : 'Misafir Yorumu'}
-                      </h3>
-                      <span className="text-[10px] text-slate-400 whitespace-nowrap font-medium">
-                        {formatTRDate(comment.COMMENTDATE)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 mt-0.5">
-                      <p className="text-[11px] text-slate-500 truncate flex-1">
-                        {comment.COMMENT}
-                      </p>
-                      {isDissatisfied && !hasLetterGenerated && (
-                        <span className="shrink-0 bg-amber-100 text-amber-700 text-[9px] font-bold px-1.5 py-0.5 rounded-md">
-                          Mektup Bekliyor
-                        </span>
-                      )}
-                      {score !== undefined && score !== null && (
-                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                          score >= 0.8 ? 'bg-emerald-500' :
-                          score >= 0.6 ? 'bg-blue-500' :
-                          score >= 0.4 ? 'bg-yellow-500' :
-                          'bg-red-500'
-                        }`} />
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          }
-
           return (
-            <div
-              key={comment.ID || Math.random().toString()}
-              className={`p-4 rounded-xl border transition-all duration-200 relative overflow-hidden ${
-                isSelected
-                  ? 'bg-slate-50 border-slate-900 shadow-sm'
-                  : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'
-              }`}
-            >
-              {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600" />}
-              <div className="flex items-start gap-3 mb-2">
-                <input 
-                  type="checkbox" 
-                  className="mt-1 w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
-                  checked={selectedIds.includes(comment.ID)}
-                  onChange={(e) => {
+            <div key={groupName} className="p-3 space-y-2">
+              <div className="sticky top-0 bg-white z-20 border-b border-slate-100 -mt-3 pt-3 mb-2 flex items-center justify-between px-1 py-2">
+                <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  {groupName}
+                </h3>
+                <button 
+                  onClick={(e) => {
                     e.stopPropagation();
-                    onToggleSelect(comment.ID);
+                    onToggleGroupSelect(groupIds);
                   }}
-                />
-                <div 
-                  className="flex-1 cursor-pointer"
-                  onClick={() => onSelect(comment.ID)}
+                  className={`text-[10px] font-bold px-2 py-1 rounded-md transition-colors ${
+                    isAllGroupSelected 
+                      ? 'text-slate-500 bg-slate-100 hover:bg-slate-200' 
+                      : 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100'
+                  }`}
                 >
-                  <div className="flex justify-between items-start mb-2 gap-2">
-                    <h3 className="font-medium text-slate-900 truncate pr-2">
-                      {comment.RESNAMEID_LOOKUP ? comment.RESNAMEID_LOOKUP.split('-')[1] : 'Misafir Yorumu'}
-                    </h3>
-                    {(comment.resolvedRoomNo || comment.ROOMNO) && (
-                      <div className="flex items-center gap-1 text-slate-700 bg-slate-100 px-2 py-1 rounded-md">
-                        <DoorOpen size={14} />
-                        <span className="text-xs font-bold whitespace-nowrap">Oda: {comment.resolvedRoomNo || comment.ROOMNO}</span>
+                  {isAllGroupSelected ? 'Seçimi Kaldır' : 'Grubu Seç'}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {groupComments.map((comment) => {
+                  const note = agendaNotes[String(comment.ID)];
+                  const score = note?.sentimentScore;
+                  const deepAnalytics = note;
+                  const isSelected = selectedId === comment.ID;
+                  
+                  const isDissatisfied = (score !== null && score !== undefined && score < 0.5) || 
+                                        (deepAnalytics?.overallScore !== undefined && (deepAnalytics.overallScore < 50 || deepAnalytics.topics?.some((t: any) => t.score < 50)));
+                  
+                  const actions = commentActions[String(comment.ID)] || [];
+                  const hasLetterGenerated = actions.some(action => 
+                    action.type === 'ai_letter' || action.type === 'template_letter' || action.type === 'email' || action.type === 'manual_close'
+                  );
+            
+                  if (viewMode === 'compact') {
+                    return (
+                      <div
+                        key={comment.ID || Math.random().toString()}
+                        className={`px-3 py-2 rounded-lg border transition-all duration-200 cursor-pointer relative overflow-hidden ${
+                          isSelected
+                            ? 'bg-slate-50 border-slate-900 shadow-sm'
+                            : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'
+                        }`}
+                        onClick={() => onSelect(comment.ID)}
+                      >
+                        {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600" />}
+                        <div className="flex items-center gap-2">
+                          <input 
+                            type="checkbox" 
+                            className="w-3.5 h-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                            checked={selectedIds.includes(comment.ID)}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              onToggleSelect(comment.ID);
+                            }}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex justify-between items-center gap-2">
+                              <h3 className={`font-semibold text-slate-900 truncate text-xs ${isSelected ? 'text-indigo-600' : ''}`}>
+                                {comment.RESNAMEID_LOOKUP ? comment.RESNAMEID_LOOKUP.split('-')[1] : 'Misafir Yorumu'}
+                              </h3>
+                              <span className="text-[10px] text-slate-400 whitespace-nowrap font-medium">
+                                {formatTRDate(comment.COMMENTDATE)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between gap-2 mt-0.5">
+                              <p className="text-[11px] text-slate-500 truncate flex-1">
+                                {comment.COMMENT}
+                              </p>
+                              {isDissatisfied && !hasLetterGenerated && (
+                                <span className="shrink-0 bg-amber-100 text-amber-700 text-[9px] font-bold px-1.5 py-0.5 rounded-md">
+                                  Mektup Bekliyor
+                                </span>
+                              )}
+                              {score !== undefined && score !== null && (
+                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                  score >= 0.8 ? 'bg-emerald-500' :
+                                  score >= 0.6 ? 'bg-blue-500' :
+                                  score >= 0.4 ? 'bg-yellow-500' :
+                                  'bg-red-500'
+                                }`} />
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
-                    <span className="flex items-center gap-1"><Globe size={12} /> {comment.NATIONALITY || 'Bilinmiyor'}</span>
-                    <span className="flex items-center gap-1"><Calendar size={12} /> {formatTRDate(comment.COMMENTDATE)}</span>
-                  </div>
-                  <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">
-                    {comment.COMMENT}
-                  </p>
-                  <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-medium text-slate-400">{comment.COMMENTSOURCEID_NAME}</span>
-                      {isDissatisfied && !hasLetterGenerated && (
-                        <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md">
-                          Mektup Bekliyor
-                        </span>
-                      )}
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={comment.ID || Math.random().toString()}
+                      className={`p-4 rounded-xl border transition-all duration-200 relative overflow-hidden ${
+                        isSelected
+                          ? 'bg-slate-50 border-slate-900 shadow-sm'
+                          : 'bg-white border-slate-100 hover:border-slate-300 hover:shadow-sm'
+                      }`}
+                    >
+                      {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-600" />}
+                      <div className="flex items-start gap-3 mb-2">
+                        <input 
+                          type="checkbox" 
+                          className="mt-1 w-4 h-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer"
+                          checked={selectedIds.includes(comment.ID)}
+                          onChange={(e) => {
+                            e.stopPropagation();
+                            onToggleSelect(comment.ID);
+                          }}
+                        />
+                        <div 
+                          className="flex-1 cursor-pointer"
+                          onClick={() => onSelect(comment.ID)}
+                        >
+                          <div className="flex justify-between items-start mb-2 gap-2">
+                            <h3 className="font-medium text-slate-900 truncate pr-2">
+                              {comment.RESNAMEID_LOOKUP ? comment.RESNAMEID_LOOKUP.split('-')[1] : 'Misafir Yorumu'}
+                            </h3>
+                            {(comment.resolvedRoomNo || comment.ROOMNO) && (
+                              <div className="flex items-center gap-1 text-slate-700 bg-slate-100 px-2 py-1 rounded-md">
+                                <DoorOpen size={14} />
+                                <span className="text-xs font-bold whitespace-nowrap">Oda: {comment.resolvedRoomNo || comment.ROOMNO}</span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 text-xs text-slate-500 mb-3">
+                            <span className="flex items-center gap-1"><Globe size={12} /> {comment.NATIONALITY || 'Bilinmiyor'}</span>
+                            <span className="flex items-center gap-1"><Calendar size={12} /> {formatTRDate(comment.COMMENTDATE)}</span>
+                          </div>
+                          <p className="text-sm text-slate-600 line-clamp-2 leading-relaxed">
+                            {comment.COMMENT}
+                          </p>
+                          <div className="mt-3 pt-3 border-t border-slate-100 flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-medium text-slate-400">{comment.COMMENTSOURCEID_NAME}</span>
+                              {isDissatisfied && !hasLetterGenerated && (
+                                <span className="bg-amber-100 text-amber-700 text-[10px] font-bold px-2 py-1 rounded-md">
+                                  Mektup Bekliyor
+                                </span>
+                              )}
+                            </div>
+                            {score !== undefined && score !== null && (
+                              <div className={`text-xs font-bold px-2 py-1 rounded-md ${
+                                score >= 0.8 ? 'bg-emerald-100 text-emerald-700' :
+                                score >= 0.6 ? 'bg-blue-100 text-blue-700' :
+                                score >= 0.4 ? 'bg-yellow-100 text-yellow-700' :
+                                'bg-red-100 text-red-700'
+                              }`}>
+                                Memnuniyet: %{(score * 100).toFixed(0)}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                    {score !== undefined && score !== null && (
-                      <div className={`text-xs font-bold px-2 py-1 rounded-md ${
-                        score >= 0.8 ? 'bg-emerald-100 text-emerald-700' :
-                        score >= 0.6 ? 'bg-blue-100 text-blue-700' :
-                        score >= 0.4 ? 'bg-yellow-100 text-yellow-700' :
-                        'bg-red-100 text-red-700'
-                      }`}>
-                        Memnuniyet: %{(score * 100).toFixed(0)}
-                      </div>
-                    )}
-                  </div>
-                </div>
+                  );
+                })}
               </div>
             </div>
           );
         })}
-            </div>
-          </div>
-        ))}
         
         {comments.length > 0 && hasMoreData && (
           <div className="pt-2 pb-4 flex justify-center">

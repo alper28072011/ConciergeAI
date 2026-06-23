@@ -27,6 +27,13 @@ export function PhonebookModule() {
       });
       setContacts(contactList);
       setIsLoading(false);
+    }, (error) => {
+      console.error("PhonebookModule onSnapshot error:", error);
+      const msg = error?.message || '';
+      const code = error?.code || '';
+      if (msg.includes('Quota exceeded') || msg.includes('resource-exhausted') || code === 'resource-exhausted') {
+        window.dispatchEvent(new Event('firestore-quota-exceeded'));
+      }
     });
 
     return () => unsubscribe();

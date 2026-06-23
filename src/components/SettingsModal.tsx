@@ -126,7 +126,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
   useEffect(() => {
     const loadSettings = async () => {
       // First load from localStorage for immediate UI update
-      const saved = localStorage.getItem('hotelApiSettings');
+      const saved = window.safeStorage.getItem('hotelApiSettings');
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
@@ -156,7 +156,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
         } catch (e) {}
       }
 
-      const savedMappings = localStorage.getItem('subRoomMappings');
+      const savedMappings = window.safeStorage.getItem('subRoomMappings');
       if (savedMappings) {
         try {
           const parsed = JSON.parse(savedMappings);
@@ -191,7 +191,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
             featureModels: data.featureModels || {}
           };
           setSettings(newSettings);
-          localStorage.setItem('hotelApiSettings', JSON.stringify(newSettings));
+          window.safeStorage.setItem('hotelApiSettings', JSON.stringify(newSettings));
         }
 
         const subRoomMappingsDoc = await getDoc(doc(db, "config", "sub_room_mappings"));
@@ -199,7 +199,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           const data = subRoomMappingsDoc.data();
           if (data.mappings && Array.isArray(data.mappings)) {
             setSubRoomMappings(data.mappings.map((m: any) => ({ ...m, subRoomsInput: m.subRooms.join(', ') })));
-            localStorage.setItem('subRoomMappings', JSON.stringify(data.mappings));
+            window.safeStorage.setItem('subRoomMappings', JSON.stringify(data.mappings));
           }
         }
       } catch (error) {
@@ -243,7 +243,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
       const appUrl = window.location.origin;
       const code = `javascript:(function(){
         try {
-          var t = localStorage.getItem('loginToken') || localStorage.getItem('token') || sessionStorage.getItem('loginToken');
+          var t = window.safeStorage.getItem('loginToken') || window.safeStorage.getItem('token') || sessionStorage.getItem('loginToken');
           if(!t) {
             alert('Elektraweb token bulunamadı! Lütfen giriş yapınız.');
             return;
@@ -323,8 +323,8 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
       return newMapping;
     });
 
-    localStorage.setItem('hotelApiSettings', JSON.stringify(settings));
-    localStorage.setItem('subRoomMappings', JSON.stringify(processedMappings));
+    window.safeStorage.setItem('hotelApiSettings', JSON.stringify(settings));
+    window.safeStorage.setItem('subRoomMappings', JSON.stringify(processedMappings));
     
     try {
       // Sync all settings to Firestore for centralized management

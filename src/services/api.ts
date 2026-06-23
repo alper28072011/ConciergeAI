@@ -1,7 +1,7 @@
 import { ApiSettings } from '../types';
 
 export const executeElektraQuery = async (payload: any): Promise<any> => {
-  const savedSettings = localStorage.getItem('hotelApiSettings');
+  const savedSettings = window.safeStorage.getItem('hotelApiSettings');
   if (!savedSettings) {
     throw new Error('API ayarları bulunamadı. Lütfen önce ayarları yapın.');
   }
@@ -17,7 +17,7 @@ export const executeElektraQuery = async (payload: any): Promise<any> => {
     throw new Error('API ayarları eksik (Base URL veya Hotel ID).');
   }
 
-  const activeToken = localStorage.getItem('loginToken') || settings.loginToken;
+  const activeToken = window.safeStorage.getItem('loginToken') || settings.loginToken;
   if (!activeToken) {
     throw new Error('Geçerli bir oturum token\'ı bulunamadı.');
   }

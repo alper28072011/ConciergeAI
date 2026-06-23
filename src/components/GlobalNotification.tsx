@@ -20,11 +20,11 @@ export function GlobalNotification() {
   useEffect(() => {
     if (cases.length === 0) return;
 
-    let lastDismissedStr = localStorage.getItem('last_dismissed_action_date');
+    let lastDismissedStr = window.safeStorage.getItem('last_dismissed_action_date');
     if (!lastDismissedStr) {
       // If first time, don't show old notifications. Only show new ones from now on.
       const now = Date.now().toString();
-      localStorage.setItem('last_dismissed_action_date', now);
+      window.safeStorage.setItem('last_dismissed_action_date', now);
       lastDismissedStr = now;
     }
     const lastDismissedDate = parseInt(lastDismissedStr, 10);
@@ -56,7 +56,7 @@ export function GlobalNotification() {
     e.stopPropagation();
     if (activeNotification) {
       const actionDate = new Date(activeNotification.action.date).getTime();
-      localStorage.setItem('last_dismissed_action_date', actionDate.toString());
+      window.safeStorage.setItem('last_dismissed_action_date', actionDate.toString());
       setActiveNotification(null);
     }
   };

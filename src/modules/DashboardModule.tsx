@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import ReactQuill from 'react-quill-new';
 import 'react-quill-new/dist/quill.snow.css';
 import { createPortal } from 'react-dom';
-import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query, orderBy, getDoc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, addDoc, doc, updateDoc, deleteDoc, query, orderBy, getDoc, setDoc, limit, where, getDocs } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 import { db, auth } from '../firebase';
 import { executeElektraQuery } from '../services/api';
@@ -73,6 +73,10 @@ const handleFirestoreError = (error: unknown, operationType: OperationType, path
     path
   }
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+  const errMsg = errInfo.error || '';
+  if (errMsg.includes('Quota exceeded') || errMsg.includes('resource-exhausted') || (error as any)?.code === 'resource-exhausted') {
+    window.dispatchEvent(new Event('firestore-quota-exceeded'));
+  }
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -183,10 +187,10 @@ const AVAILABLE_MODULES = [
 
 const getGuaranteedUserId = () => {
   if (auth.currentUser?.uid) return auth.currentUser.uid;
-  let localUid = localStorage.getItem('crm_device_uid');
+  let localUid = window.safeStorage.getItem('crm_device_uid');
   if (!localUid) {
     localUid = 'device_' + Math.random().toString(36).substr(2, 11);
-    localStorage.setItem('crm_device_uid', localUid);
+    window.safeStorage.setItem('crm_device_uid', localUid);
   }
   return localUid;
 };
@@ -197,16 +201,34 @@ export function DashboardModule() {
   const [taxonomy, setTaxonomy] = useState<HotelTaxonomy | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const dashboardRef = useRef<HTMLDivElement>(null);
+  const attemptedSyncIdsRef = useRef<Set<string>>(new Set());
   
   // Filters
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | '7days' | '30days' | 'thisYear' | 'custom'>('30days');
   const [isCompareActive, setIsCompareActive] = useState(false);
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
+  const [customCompareStartDate, setCustomCompareStartDate] = useState<string>('');
+  const [customCompareEndDate, setCustomCompareEndDate] = useState<string>('');
   const [selectedMainCategory, setSelectedMainCategory] = useState<string>('all');
   const [selectedSubCategory, setSelectedSubCategory] = useState<string>('all');
   const [selectedNationalities, setSelectedNationalities] = useState<string[]>([]);
   const [selectedSources, setSelectedSources] = useState<string[]>([]);
+
+  // The actual applied filters used for DB fetching and Dashboard rendering
+  const [appliedFilters, setAppliedFilters] = useState({
+    dateFilter: '30days' as 'today' | 'yesterday' | '7days' | '30days' | 'thisYear' | 'custom',
+    customStartDate: '',
+    customEndDate: '',
+    customCompareStartDate: '',
+    customCompareEndDate: '',
+    selectedMainCategory: 'all',
+    selectedSubCategory: 'all',
+    selectedNationalities: [] as string[],
+    selectedSources: [] as string[],
+    isCompareActive: false
+  });
+  const [isRaporlaLoading, setIsRaporlaLoading] = useState(false);
   const [isSourceExpanded, setIsSourceExpanded] = useState(false);
   const [isNationalityExpanded, setIsNationalityExpanded] = useState(false);
   const [isCategoryExpanded, setIsCategoryExpanded] = useState(false);
@@ -363,13 +385,33 @@ export function DashboardModule() {
   useEffect(() => {
     const syncMissingComments = async () => {
       try {
-        const missingComments = analytics.filter(c => !c.comment || c.comment.trim() === '' || c.comment === 'Yorum metni sistemde bulunamadı.' || c.answer == null);
+        // Filter elements that actually need to be synchronized
+        // We track processed IDs in attemptedSyncIdsRef to strictly prevent any infinite loop.
+        const missingComments = analytics.filter(c => {
+          const cId = String(c.commentId);
+          if (!cId || cId === 'undefined' || attemptedSyncIdsRef.current.has(cId)) return false;
+
+          const hasNoText = !c.comment || c.comment.trim() === '' || c.comment === 'Yorum metni sistemde bulunamadı.';
+          
+          // Only check/sync missing answers for recent comments (last 30 days) to optimize reads/writes
+          const isRecent = c.date ? (new Date().getTime() - new Date(c.date).getTime() < 30 * 24 * 60 * 60 * 1000) : true;
+          const hasNoAnswer = c.answer == null && isRecent;
+
+          return hasNoText || hasNoAnswer;
+        });
+
         if (missingComments.length === 0) return;
+
+        // Immediately add all target IDs to the attempted list before starting async calls
+        // This ensures subsequent onSnapshot triggers do NOT pick them up again.
+        missingComments.forEach(c => attemptedSyncIdsRef.current.add(String(c.commentId)));
 
         const missingIds = missingComments.map(c => Number(c.commentId)).filter(id => !isNaN(id));
         if (missingIds.length === 0) return;
 
-        const savedSettings = localStorage.getItem('hotelApiSettings');
+        console.log(`[Firestore Cache Optimizer] Syncing ${missingIds.length} missing comments/answers...`);
+
+        const savedSettings = window.safeStorage.getItem('hotelApiSettings');
         if (!savedSettings) return;
         const settings = JSON.parse(savedSettings);
         if (!settings.commentPayloadTemplate) return;
@@ -431,57 +473,79 @@ export function DashboardModule() {
     return () => clearTimeout(timeoutId);
   }, [analytics]);
 
+  const handleRaporlaClick = async () => {
+    setIsRaporlaLoading(true);
+    setIsLoading(true);
+    
+    const currentApplied = {
+      dateFilter,
+      customStartDate,
+      customEndDate,
+      customCompareStartDate,
+      customCompareEndDate,
+      selectedMainCategory,
+      selectedSubCategory,
+      selectedNationalities,
+      selectedSources,
+      isCompareActive
+    };
+    
+    setAppliedFilters(currentApplied);
+    
+    try {
+      // Fetch data without the 2500 limit completely! Because the dashboard itself works locally by filtering.
+      // Getting ALL documents initially isn't scalable for millions, but since this is CRM, we fetch all comment analytics and actions for the user.
+      const qAnalytics = query(collection(db, 'comment_analytics'), orderBy('date', 'desc'));
+      const analyticsSnap = await getDocs(qAnalytics);
+      const data: CommentAnalytics[] = [];
+      analyticsSnap.forEach((doc) => {
+        data.push(doc.data() as CommentAnalytics);
+      });
+      setAnalytics(data);
+
+      const qActions = query(collection(db, 'comment_actions'), orderBy('date', 'desc'));
+      const actionsSnap = await getDocs(qActions);
+      const actionsMap: Record<string, any[]> = {};
+      actionsSnap.forEach((doc) => {
+        const actionData = doc.data();
+        const commentId = actionData.commentId;
+        if (!actionsMap[commentId]) {
+          actionsMap[commentId] = [];
+        }
+        actionsMap[commentId].push({ id: doc.id, ...actionData });
+      });
+      Object.keys(actionsMap).forEach(key => {
+        actionsMap[key].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      });
+      setCommentActions(actionsMap);
+    } catch (error) {
+      console.error("Error fetching dashboard data:", error);
+    } finally {
+      setIsRaporlaLoading(false);
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
     setIsLoading(true);
     
-    const fetchTaxonomy = async () => {
+    const initData = async () => {
       try {
         const docRef = doc(db, 'system_memory', 'taxonomy');
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           setTaxonomy(docSnap.data() as HotelTaxonomy);
         }
+        // Initially fetch data once exactly like 'Raporla' without limit
+        await handleRaporlaClick();
       } catch (error) {
-        console.error("Error fetching taxonomy:", error);
+        console.error("Error fetching dashboard init data:", error);
       }
     };
-    fetchTaxonomy();
 
-    const unsubscribe = onSnapshot(collection(db, 'comment_analytics'), (querySnapshot) => {
-      const data: CommentAnalytics[] = [];
-      querySnapshot.forEach((doc) => {
-        data.push(doc.data() as CommentAnalytics);
-      });
-      setAnalytics(data);
-      setIsLoading(false);
-    }, (error) => {
-      console.error("Error fetching analytics:", error);
-      setIsLoading(false);
-      handleFirestoreError(error, OperationType.GET, 'comment_analytics');
-    });
-
-    const unsubscribeActions = onSnapshot(collection(db, 'comment_actions'), (querySnapshot) => {
-      const actionsMap: Record<string, any[]> = {};
-      querySnapshot.forEach((doc) => {
-        const data = doc.data();
-        const commentId = data.commentId;
-        if (!actionsMap[commentId]) {
-          actionsMap[commentId] = [];
-        }
-        actionsMap[commentId].push({ id: doc.id, ...data });
-      });
-      Object.keys(actionsMap).forEach(key => {
-        actionsMap[key].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-      });
-      setCommentActions(actionsMap);
-    }, (error) => {
-      console.error("Error fetching comment_actions:", error);
-      handleFirestoreError(error, OperationType.GET, 'comment_actions');
-    });
+    initData();
 
     return () => {
-      unsubscribe();
-      unsubscribeActions();
     };
   }, []);
 
@@ -501,7 +565,7 @@ export function DashboardModule() {
     return () => unsubscribe();
   }, []);
 
-  const { filteredAnalytics, previousFilteredAnalytics } = useMemo(() => {
+  const { filteredAnalytics, previousFilteredAnalytics, daysInPeriod, currentPeriodStr, previousPeriodStr } = useMemo(() => {
     const now = new Date();
     now.setHours(23, 59, 59, 999);
     const currentYear = now.getFullYear();
@@ -515,18 +579,31 @@ export function DashboardModule() {
       return new Date(dateStr);
     };
 
+    const {
+      dateFilter: apDate,
+      customStartDate: apCStart,
+      customEndDate: apCEnd,
+      customCompareStartDate: apCCmpStart,
+      customCompareEndDate: apCCmpEnd,
+      selectedMainCategory: apMainCat,
+      selectedSubCategory: apSubCat,
+      selectedNationalities: apNats,
+      selectedSources: apSources,
+      isCompareActive: apCompare
+    } = appliedFilters;
+
     let currentStart = new Date(now);
     let currentEnd = new Date(now);
     let previousStart = new Date(now);
     let previousEnd = new Date(now);
 
-    if (dateFilter === 'today') {
+    if (apDate === 'today') {
       currentStart.setHours(0, 0, 0, 0);
       previousEnd = new Date(currentStart);
       previousEnd.setMilliseconds(-1);
       previousStart = new Date(previousEnd);
       previousStart.setHours(0, 0, 0, 0);
-    } else if (dateFilter === 'yesterday') {
+    } else if (apDate === 'yesterday') {
       currentStart.setDate(currentStart.getDate() - 1);
       currentStart.setHours(0, 0, 0, 0);
       currentEnd.setDate(currentEnd.getDate() - 1);
@@ -534,27 +611,34 @@ export function DashboardModule() {
       previousEnd.setMilliseconds(-1);
       previousStart = new Date(previousEnd);
       previousStart.setHours(0, 0, 0, 0);
-    } else if (dateFilter === '7days') {
+    } else if (apDate === '7days') {
       currentStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
       previousEnd = new Date(currentStart);
       previousStart = new Date(currentStart.getTime() - 7 * 24 * 60 * 60 * 1000);
-    } else if (dateFilter === '30days') {
+    } else if (apDate === '30days') {
       currentStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       previousEnd = new Date(currentStart);
       previousStart = new Date(currentStart.getTime() - 30 * 24 * 60 * 60 * 1000);
-    } else if (dateFilter === 'thisYear') {
+    } else if (apDate === 'thisYear') {
       currentStart = new Date(currentYear, 0, 1);
       previousEnd = new Date(currentStart);
       previousEnd.setMilliseconds(-1);
       previousStart = new Date(currentYear - 1, 0, 1);
-    } else if (dateFilter === 'custom' && customStartDate && customEndDate) {
-      currentStart = new Date(customStartDate);
+    } else if (apDate === 'custom' && apCStart && apCEnd) {
+      currentStart = new Date(apCStart);
       currentStart.setHours(0, 0, 0, 0);
-      currentEnd = new Date(customEndDate);
+      currentEnd = new Date(apCEnd);
       currentEnd.setHours(23, 59, 59, 999);
-      const diffTime = currentEnd.getTime() - currentStart.getTime();
-      previousEnd = new Date(currentStart.getTime() - 1);
-      previousStart = new Date(previousEnd.getTime() - diffTime);
+      if (apCCmpStart && apCCmpEnd) {
+        previousStart = new Date(apCCmpStart);
+        previousStart.setHours(0, 0, 0, 0);
+        previousEnd = new Date(apCCmpEnd);
+        previousEnd.setHours(23, 59, 59, 999);
+      } else {
+        const diffTime = currentEnd.getTime() - currentStart.getTime();
+        previousEnd = new Date(currentStart.getTime() - 1);
+        previousStart = new Date(previousEnd.getTime() - diffTime);
+      }
     }
 
     const current: CommentAnalytics[] = [];
@@ -566,27 +650,27 @@ export function DashboardModule() {
         itemDate = parseDate(item.createdAt);
       }
       
-      if (selectedMainCategory !== 'all') {
-        const hasCategory = item.topics?.some(t => t.mainCategory === selectedMainCategory);
+      if (apMainCat !== 'all') {
+        const hasCategory = item.topics?.some(t => t.mainCategory === apMainCat);
         if (!hasCategory) return;
         
-        if (selectedSubCategory !== 'all') {
-          const hasSub = item.topics?.some(t => t.mainCategory === selectedMainCategory && t.subCategory === selectedSubCategory);
+        if (apSubCat !== 'all') {
+          const hasSub = item.topics?.some(t => t.mainCategory === apMainCat && t.subCategory === apSubCat);
           if (!hasSub) return;
         }
       }
 
-      if (selectedNationalities.length > 0) {
-        if (!selectedNationalities.includes(item.nationality || 'Bilinmiyor')) return;
+      if (apNats.length > 0) {
+        if (!apNats.includes(item.nationality || 'Bilinmiyor')) return;
       }
 
-      if (selectedSources.length > 0) {
-        if (!selectedSources.includes(item.source || 'Bilinmiyor')) return;
+      if (apSources.length > 0) {
+        if (!apSources.includes(item.source || 'Bilinmiyor')) return;
       }
 
       if (itemDate >= currentStart && itemDate <= currentEnd) {
         current.push(item);
-      } else if (isCompareActive && itemDate >= previousStart && itemDate <= previousEnd) {
+      } else if (apCompare && itemDate >= previousStart && itemDate <= previousEnd) {
         previous.push(item);
       }
     });
@@ -595,8 +679,21 @@ export function DashboardModule() {
     current.sort((a, b) => parseDate(b.date || (b as any).createdAt).getTime() - parseDate(a.date || (a as any).createdAt).getTime());
     previous.sort((a, b) => parseDate(b.date || (b as any).createdAt).getTime() - parseDate(a.date || (a as any).createdAt).getTime());
 
-    return { filteredAnalytics: current, previousFilteredAnalytics: previous };
-  }, [analytics, dateFilter, customStartDate, customEndDate, selectedMainCategory, selectedSubCategory, selectedNationalities, selectedSources, isCompareActive]);
+    const diffTime = Math.abs(currentEnd.getTime() - currentStart.getTime());
+    const daysInPeriod = Math.max(1, Math.ceil(diffTime / (1000 * 60 * 60 * 24)));
+
+    const formatDateForDisplay = (d: Date) => {
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      return `${dd}.${mm}.${yyyy}`;
+    };
+
+    const currentPeriodStr = `${formatDateForDisplay(currentStart)} - ${formatDateForDisplay(currentEnd)}`;
+    const previousPeriodStr = `${formatDateForDisplay(previousStart)} - ${formatDateForDisplay(previousEnd)}`;
+
+    return { filteredAnalytics: current, previousFilteredAnalytics: previous, daysInPeriod, currentPeriodStr, previousPeriodStr };
+  }, [analytics, appliedFilters]);
 
   const drillDownComments = useMemo(() => {
     if (drillDownFilter.type === 'all') return filteredAnalytics;
@@ -625,7 +722,7 @@ export function DashboardModule() {
     });
   }, [filteredAnalytics, drillDownFilter]);
 
-  const dashboardData = useMemo(() => getDashboardData(filteredAnalytics, isCompareActive ? previousFilteredAnalytics : undefined), [filteredAnalytics, previousFilteredAnalytics, isCompareActive]);
+  const dashboardData = useMemo(() => getDashboardData(filteredAnalytics, appliedFilters.isCompareActive ? previousFilteredAnalytics : undefined), [filteredAnalytics, previousFilteredAnalytics, appliedFilters.isCompareActive]);
   const previousDashboardData = useMemo(() => getDashboardData(previousFilteredAnalytics), [previousFilteredAnalytics]);
 
   const hierarchicalCategoryData = useMemo(() => {
@@ -893,12 +990,8 @@ export function DashboardModule() {
       `;
     }
 
-    const dateRangeLabel = dateFilter === 'today' ? 'Bugün' :
-                           dateFilter === 'yesterday' ? 'Dün' :
-                           dateFilter === '7days' ? 'Son 7 Gün' :
-                           dateFilter === '30days' ? 'Son 30 Gün' :
-                           dateFilter === 'thisYear' ? 'Bu Yıl' :
-                           dateFilter === 'custom' ? `${customStartDate} - ${customEndDate}` : 'Tümü';
+    const dateRangeLabel = currentPeriodStr;
+    const compareRangeLabel = isCompareActive ? previousPeriodStr : null;
 
     const html = `
 <!DOCTYPE html>
@@ -1024,6 +1117,11 @@ export function DashboardModule() {
                     <span class="px-4 py-1.5 bg-indigo-50 text-indigo-700 text-xs font-bold rounded-full border border-indigo-100">
                         Dönem: ${dateRangeLabel}
                     </span>
+                    ${compareRangeLabel ? `
+                    <span class="px-4 py-1.5 bg-slate-50 text-slate-700 text-xs font-bold rounded-full border border-slate-200">
+                        Karşılaştırma: ${compareRangeLabel}
+                    </span>
+                    ` : ''}
                     <span class="px-4 py-1.5 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full border border-emerald-100">
                         Kaynak: ${selectedSources.length === 0 ? 'Tümü' : selectedSources.join(', ')}
                     </span>
@@ -1307,31 +1405,67 @@ export function DashboardModule() {
     setIsAiMenuOpen(false);
     
     try {
+      const timelineData = dashboardData.satisfactionOverTime[timelineGranularity];
+      let timelineContext = '';
+      if (timelineData && timelineData.length > 0) {
+        const peakItem = [...timelineData].sort((a, b) => b.count - a.count)[0];
+        const highestScoreItem = [...timelineData].sort((a, b) => b.avgScore - a.avgScore)[0];
+        const lowestScoreItem = [...timelineData].sort((a, b) => a.avgScore - b.avgScore)[0];
+        const totalTimelineComments = timelineData.reduce((sum, item) => sum + item.count, 0);
+        const avgTimelineComments = Math.round(totalTimelineComments / timelineData.length);
+        
+        const unit = timelineGranularity === 'daily' ? 'gün' : timelineGranularity === 'weekly' ? 'hafta' : timelineGranularity === 'monthly' ? 'ay' : 'yıl';
+        
+        timelineContext = `
+      Zamana Göre Memnuniyet Skoru (${unit}lik kırılım):
+      - Toplam incelenen ${unit} sayısı: ${timelineData.length}
+      - Bu periyot için ortalama gelen yorum sayısı: ${avgTimelineComments} yorum / ${unit}
+      - En yoğun ${unit}: ${peakItem.date} (${peakItem.count} yorum)
+      - En yüksek memnuniyetli ${unit}: ${highestScoreItem.date} (%${highestScoreItem.avgScore} memnuniyet)
+      - En düşük memnuniyetli ${unit}: ${lowestScoreItem.date} (%${lowestScoreItem.avgScore} memnuniyet)
+      - Ham Veriler: ${JSON.stringify(timelineData.map(d => ({tarih: d.date, skor: d.avgScore, yorum_sayisi: d.count})).slice(0, 15))}
+        `;
+      }
+
       const prompt = `
-      Aşağıdaki otel müşteri yorumları analitik verilerini kullanarak, belirtilen her bir dashboard bölümü için 2-3 cümlelik doğal dilli, içgörü odaklı özetler oluştur.
-      Sadece sayıları tekrar etme; anomalileri, dikkat çeken başarıları veya gelişim alanlarını vurgula.
+      Sen 5 yıldızlı bir otelin baş veri analisti ve kalite müdürüsün.
+      Aşağıdaki otel müşteri yorumları analitik verilerini kullanarak, belirtilen her bir dashboard bölümü için 3-4 cümlelik "doğal dilli", çok profesyonel, "içgörü odaklı" özetler oluştur.
+      Sadece rakamları dümdüz okuma. Amacımız raporu okuyan kişinin (Genel Müdür vb.) anomalileri görmesini, dikkat çeken başarıları ve tehlikeli düşüşleri/gelişim alanlarını tespit edebilmesini sağlamaktır. Okuyucuyu yönlendirici ve açıklayıcı yorumlar kat.
       
-      Veriler:
+      Genel Veriler:
       Toplam Yorum: ${dashboardData.kpis.totalComments}
       Ortalama Skor: ${dashboardData.kpis.avgScore}
       
-      Kategoriler:
+      Kategoriler (Kategori Bazlı Memnuniyet):
       ${JSON.stringify(hierarchicalCategoryData.slice(0, 5), null, 2)}
       
-      Uyruklar:
+      Uyruklar (Uyruk Analizi):
       ${JSON.stringify(dashboardData.nationalityAnalysis.slice(0, 5), null, 2)}
       
-      Kanallar:
+      Kanallar (Kanal Dağılımı):
       ${JSON.stringify(dashboardData.sourceAnalysis.slice(0, 5), null, 2)}
       
-      Lütfen aşağıdaki JSON formatında yanıt ver. Sadece JSON döndür, markdown veya başka bir metin ekleme.
+      ${timelineContext}
+      
+      En Çok Konuşulan Konular (Top 10):
+      ${JSON.stringify(dashboardData.mostMentioned.slice(0, 10).map(m => ({ konu: m.subCategory, kategori: m.mainCategory, sayi: m.count, skor: m.avgScore })), null, 2)}
+      
+      En Çok Övülen Konular (Top 10):
+      ${JSON.stringify(dashboardData.topPositive.slice(0, 10).map(p => ({ konu: p.subCategory, kategori: p.mainCategory, sayi: p.count, skor: p.avgScore })), null, 2)}
+      
+      Acil Müdahale Gerekenler - Şikayetler (Top 10):
+      ${JSON.stringify(dashboardData.topNegative.slice(0, 10).map(n => ({ konu: n.subCategory, kategori: n.mainCategory, sayi: n.count, skor: n.avgScore })), null, 2)}
+      
+      Lütfen aşağıdaki JSON formatında yanıt ver. Sadece JSON döndür. MD veya metin kullanma.
       {
-        "kpi_cards": "KPI özet kartları için özet...",
-        "satisfaction_timeline": "Zamana göre memnuniyet için özet...",
-        "category_satisfaction": "Kategori bazlı memnuniyet için özet...",
-        "source_analysis": "Kanal dağılımı için özet...",
-        "nationality_analysis": "Uyruk analizi için özet...",
-        "hotel_agenda": "Otel gündemi için özet..."
+        "kpi_cards": "KPI özet kartları için içgörü...",
+        "satisfaction_timeline": "Zamana göre memnuniyet tablosunun içgörülü özeti...",
+        "category_satisfaction": "Kategori performansı içgörüleri...",
+        "source_analysis": "Kanal dağılımına dair dikkat çeken noktalar...",
+        "nationality_analysis": "Uyruk analizinin doğal dille özeti...",
+        "most_mentioned_topics": "En çok konuşulan gündem konularının değerlendirmesi...",
+        "top_positive_topics": "Misafirlerin en çok beğendiği konuların özeti...",
+        "top_negative_topics": "Acil müdahale gerektiren zayıf yönlerin alarm niteliğinde özeti..."
       }
       `;
       
@@ -1378,7 +1512,7 @@ export function DashboardModule() {
       3. Öne Çıkan Gündem Konuları (Trending Sub-Categories)
       4. Aksiyon Önerileri (Kaliteyi artırmak için 3 somut öneri)
       
-      Veriler (${dateFilter === 'today' ? 'Bugün' : dateFilter === 'yesterday' ? 'Dün' : dateFilter === '7days' ? 'Son 7 Gün' : dateFilter === '30days' ? 'Son 30 Gün' : dateFilter === 'thisYear' ? 'Bu Yıl' : 'Özel Tarih Aralığı'}):
+      Veriler (${appliedFilters.dateFilter === 'today' ? 'Bugün' : appliedFilters.dateFilter === 'yesterday' ? 'Dün' : appliedFilters.dateFilter === '7days' ? 'Son 7 Gün' : appliedFilters.dateFilter === '30days' ? 'Son 30 Gün' : appliedFilters.dateFilter === 'thisYear' ? 'Bu Yıl' : 'Özel Tarih Aralığı'}):
       - Toplam Yorum Sayısı: ${dashboardData.kpis.totalComments}
       - Ortalama Memnuniyet: %${dashboardData.kpis.avgScore}
       - En Başarılı Kategori: ${dashboardData.kpis.bestCategory}
@@ -1666,25 +1800,50 @@ export function DashboardModule() {
 
               {/* Custom Date Inputs - Always visible if 'custom' is selected, matching user request */}
               {dateFilter === 'custom' && (
-                <div className="grid grid-cols-2 gap-1.5 animate-in fade-in slide-in-from-top-1 py-1">
-                  <div className="space-y-0.5">
-                    <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Başlangıç</span>
-                    <input 
-                      type="date" 
-                      value={customStartDate}
-                      onChange={(e) => setCustomStartDate(e.target.value)}
-                      className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
-                    />
+                <div className="space-y-1.5 animate-in fade-in slide-in-from-top-1 py-1">
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <div className="space-y-0.5">
+                      <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Başlangıç</span>
+                      <input 
+                        type="date" 
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      />
+                    </div>
+                    <div className="space-y-0.5">
+                      <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Bitiş</span>
+                      <input 
+                        type="date" 
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
+                      />
+                    </div>
                   </div>
-                  <div className="space-y-0.5">
-                    <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Bitiş</span>
-                    <input 
-                      type="date" 
-                      value={customEndDate}
-                      onChange={(e) => setCustomEndDate(e.target.value)}
-                      className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
-                    />
-                  </div>
+                  
+                  {isCompareActive && (
+                    <div className="grid grid-cols-2 gap-1.5 pt-1.5 border-t border-slate-100 mt-1">
+                      <div className="space-y-0.5">
+                        <span className="text-[7px] font-bold text-indigo-400 uppercase ml-0.5">Karşılaştırma (Baş.)</span>
+                        <input 
+                          type="date" 
+                          value={customCompareStartDate}
+                          onChange={(e) => setCustomCompareStartDate(e.target.value)}
+                          className="w-full border border-indigo-100 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500 bg-indigo-50/30"
+                        />
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="text-[7px] font-bold text-indigo-400 uppercase ml-0.5">Karşılaştırma (Bit.)</span>
+                        <input 
+                          type="date" 
+                          value={customCompareEndDate}
+                          onChange={(e) => setCustomCompareEndDate(e.target.value)}
+                          className="w-full border border-indigo-100 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500 bg-indigo-50/30"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1761,13 +1920,13 @@ export function DashboardModule() {
                         className="w-full border border-slate-200 rounded-md px-1.5 py-1 text-[10px] text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500/20 focus:border-indigo-500"
                       >
                         <option value="all">Tümü</option>
-                        {taxonomy && Object.keys(taxonomy.categories).map(cat => (
+                        {taxonomy?.categories && Object.keys(taxonomy.categories).map(cat => (
                           <option key={cat} value={cat}>{cat}</option>
                         ))}
                       </select>
                     </div>
 
-                    {selectedMainCategory !== 'all' && taxonomy && taxonomy.categories[selectedMainCategory] && (
+                    {selectedMainCategory !== 'all' && taxonomy?.categories?.[selectedMainCategory] && (
                       <div className="space-y-1 animate-in fade-in slide-in-from-top-1">
                         <span className="text-[7px] font-bold text-slate-400 uppercase ml-0.5">Alt Kategori</span>
                         <select 
@@ -1854,6 +2013,19 @@ export function DashboardModule() {
 
           {/* Quick Actions */}
           <div className="flex flex-col gap-1.5">
+            <button
+              onClick={handleRaporlaClick}
+              disabled={isRaporlaLoading}
+              className="w-full bg-emerald-600 text-white p-2.5 rounded-lg font-bold text-[10px] flex items-center justify-center gap-2 hover:bg-emerald-700 transition-all shadow-md shadow-emerald-100 group disabled:opacity-50"
+            >
+              {isRaporlaLoading ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <CheckCircle2 size={14} className="group-hover:scale-110 transition-transform" />
+              )}
+              {isRaporlaLoading ? 'Yükleniyor...' : 'Raporla'}
+            </button>
+
             <div className="relative">
               <button
                 onClick={() => setIsAiMenuOpen(!isAiMenuOpen)}
@@ -1916,6 +2088,35 @@ export function DashboardModule() {
         {/* Middle Column: Graphics Area (Scrollable) */}
         <main className="flex-1 min-w-0 flex flex-col gap-6 overflow-y-auto pr-4 custom-scrollbar pb-20" ref={dashboardRef}>
           
+          <div className="flex flex-col md:flex-row items-baseline md:items-center justify-between gap-4 w-full bg-white px-5 py-3 rounded-xl border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-2">
+              <div className="p-1.5 bg-indigo-50 text-indigo-600 rounded-md">
+                <CalendarIcon size={16} />
+              </div>
+              <div className="flex flex-col">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Rapor Dönemi</span>
+                <span className="text-sm font-black text-slate-800">{currentPeriodStr}</span>
+              </div>
+            </div>
+            
+            {isCompareActive && (
+              <>
+                <div className="hidden md:flex items-center justify-center p-2 text-slate-300">
+                  <ChevronRight size={16} />
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-slate-50 text-slate-500 rounded-md border border-slate-100">
+                    <History size={16} />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Karşılaştırılan Dönem</span>
+                    <span className="text-sm font-bold text-slate-600">{previousPeriodStr}</span>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
           {activeModules.length === 0 && (
             <div className="flex flex-col items-center justify-center py-20 bg-white rounded-xl border-2 border-dashed border-slate-200 text-slate-400">
               <LayoutGrid size={48} className="mb-4 opacity-20" />
@@ -1943,6 +2144,7 @@ export function DashboardModule() {
                         label: 'Toplam Yorum Sayısı', 
                         value: dashboardData.kpis.totalComments, 
                         change: dashboardData.kpis.commentChange, 
+                        subValue: `Günlük Ort: ${(dashboardData.kpis.totalComments / daysInPeriod).toFixed(1)}`,
                         icon: MessageSquare, 
                         color: 'blue' 
                       },
@@ -1986,7 +2188,12 @@ export function DashboardModule() {
                             )}
                           </div>
                           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">{kpi.label}</p>
-                          <h4 className="text-xl font-black text-slate-900 truncate">{kpi.value}</h4>
+                          <div className="flex items-baseline gap-2">
+                            <h4 className="text-xl font-black text-slate-900 truncate">{kpi.value}</h4>
+                            {(kpi as any).subValue && (
+                              <span className="text-xs font-semibold text-slate-500">{(kpi as any).subValue}</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -2099,11 +2306,25 @@ export function DashboardModule() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {data.map((item, idx) => (
-                                  <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                                    <td className="py-3 px-4 text-sm font-bold text-slate-700">{item.date}</td>
-                                    <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">{item.count}</td>
-                                    <td className="py-3 px-4">
+                                {data.map((item, idx) => {
+                                  let divisor = 1;
+                                  if (granularity === 'weekly') divisor = 7;
+                                  if (granularity === 'monthly') divisor = 30;
+                                  if (granularity === 'yearly') divisor = 365;
+                                  const avgCount = (item.count / divisor).toFixed(1);
+                                  
+                                  return (
+                                    <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                                      <td className="py-3 px-4 text-sm font-bold text-slate-700">{item.date}</td>
+                                      <td className="py-3 px-4 text-center">
+                                        <div className="flex flex-col items-center">
+                                          <span className="text-sm text-slate-500 font-mono">{item.count}</span>
+                                          {granularity !== 'daily' && (
+                                            <span className="text-[10px] text-slate-400 font-medium mt-0.5">Günlük Ort: {avgCount}</span>
+                                          )}
+                                        </div>
+                                      </td>
+                                      <td className="py-3 px-4">
                                       <div className="flex items-center gap-3">
                                         <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
                                           <div 
@@ -2127,7 +2348,8 @@ export function DashboardModule() {
                                       </div>
                                     </td>
                                   </tr>
-                                ))}
+                                  );
+                                })}
                               </tbody>
                             </table>
                           </div>
@@ -2470,8 +2692,11 @@ export function DashboardModule() {
                                   <span className="text-sm font-semibold text-slate-700">{item.name}</span>
                                 </div>
                               </td>
-                              <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono">
-                                {item.count}
+                              <td className="py-3 px-4 text-center">
+                                <div className="flex flex-col items-center">
+                                  <span className="text-sm text-slate-500 font-mono">{item.count}</span>
+                                  <span className="text-[10px] text-slate-400 font-medium mt-0.5">Ort: {(item.count / daysInPeriod).toFixed(1)}</span>
+                                </div>
                               </td>
                               {isCompareActive && (
                                 <td className="py-3 px-4 text-sm text-slate-400 text-center font-mono">
@@ -2876,6 +3101,7 @@ export function DashboardModule() {
                         </button>
                       </div>
                     )}
+                    {renderAiSummary('most_mentioned_topics')}
                   </section>
 
                   {/* En Çok Övülenler */}
@@ -3011,6 +3237,7 @@ export function DashboardModule() {
                         </button>
                       </div>
                     )}
+                    {renderAiSummary('top_positive_topics')}
                   </section>
 
                   {/* Acil Müdahale Gerekenler */}
@@ -3146,8 +3373,8 @@ export function DashboardModule() {
                         </button>
                       </div>
                     )}
+                    {renderAiSummary('top_negative_topics')}
                   </section>
-                  {renderAiSummary('hotel_agenda')}
                 </div>
               );
             }

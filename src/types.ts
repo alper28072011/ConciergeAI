@@ -18,6 +18,7 @@ export interface CaseTracker {
   updatedAt?: string;
   createdBy: string;
   actions: CaseAction[];
+  isDeleted?: boolean;
   guestDetails?: {
     agency?: string;
     phone?: string;
@@ -172,6 +173,7 @@ export interface GuestData {
   sentimentScore?: number;
   sentimentAnalysisDate?: string;
   generatedLetter?: string;
+  generatedLetterTemplateNames?: string[];
   letterSentDate?: string;
   welcomeCallStatus?: 'not_called' | 'answered_all_good' | 'answered_has_request' | 'no_answer';
   welcomeCallNotes?: string;

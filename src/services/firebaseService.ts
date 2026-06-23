@@ -1,4 +1,4 @@
-import { doc, deleteDoc, collection, query, where, getDocs, writeBatch, addDoc, updateDoc, onSnapshot, serverTimestamp, orderBy } from 'firebase/firestore';
+import { doc, deleteDoc, collection, query, where, getDocs, writeBatch, addDoc, updateDoc, onSnapshot, serverTimestamp, orderBy, documentId } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CaseTracker, CaseAction } from '../types';
 
@@ -43,7 +43,36 @@ export const listenToCases = (callback: (cases: CaseTracker[]) => void) => {
       cases.push({ id: doc.id, ...doc.data() } as CaseTracker);
     });
     callback(cases);
+  }, (error) => {
+    console.error("listenToCases error:", error);
+    const msg = error?.message || '';
+    const code = error?.code || '';
+    if (msg.includes('Quota exceeded') || msg.includes('resource-exhausted') || code === 'resource-exhausted') {
+      window.dispatchEvent(new Event('firestore-quota-exceeded'));
+    }
   });
+};
+
+export const fetchDocsInChunks = async (collectionName: string, idField: string, ids: (string | number)[]) => {
+  const uniqueIds = Array.from(new Set(ids.map(id => String(id)))).filter(id => id != null && id !== '');
+  if (uniqueIds.length === 0) return [];
+  
+  const results: any[] = [];
+  const chunkSize = 30;
+  
+  for (let i = 0; i < uniqueIds.length; i += chunkSize) {
+    const chunk = uniqueIds.slice(i, i + chunkSize);
+    let q;
+    if (idField === '__name__') {
+      q = query(collection(db, collectionName), where(documentId(), 'in', chunk));
+    } else {
+      q = query(collection(db, collectionName), where(idField, 'in', chunk));
+    }
+    const snapshot = await getDocs(q);
+    snapshot.forEach(doc => results.push({ id: doc.id, ...(doc.data() as any) }));
+  }
+  
+  return results;
 };
 
 export const deleteCommentData = async (commentId: string) => {
