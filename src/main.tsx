@@ -3,6 +3,16 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
+window.addEventListener('error', (event) => {
+  // Maskelenmiş veya boş Script Error'lerin uygulamayı beyaz ekranda kilitlemesini önler
+  if (event.message === 'Script error.') {
+    console.warn('CORS kaynaklı Script Error izole edildi, render akışı korunuyor.');
+    event.preventDefault();
+    return;
+  }
+  console.error('Küresel Hata Yakalandı:', event.error);
+});
+
 const _localStorage = window.localStorage;
 
 (window as any).safeStorage = {

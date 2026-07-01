@@ -54,30 +54,14 @@ interface FirestoreErrorInfo {
 }
 
 const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  const errMsg = errInfo.error || '';
-  if (errMsg.includes('Quota exceeded') || errMsg.includes('resource-exhausted') || (error as any)?.code === 'resource-exhausted') {
+  const msg = error instanceof Error ? error.message : String(error);
+  console.error(`Firestore Error [${operationType}] on [${path}]:`, msg);
+  
+  if (msg.includes('Quota exceeded') || msg.includes('resource-exhausted') || (error as any)?.code === 'resource-exhausted') {
     window.dispatchEvent(new Event('firestore-quota-exceeded'));
   }
-  throw new Error(JSON.stringify(errInfo));
+  
+  throw new Error(`Veritabanı Hatası: ${msg}`);
 }
 
 const COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#71717a'];
