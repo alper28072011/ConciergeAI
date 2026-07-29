@@ -254,6 +254,12 @@ export function DashboardModule() {
   const [isAiMenuOpen, setIsAiMenuOpen] = useState(false);
   const [sectionSummaries, setSectionSummaries] = useState<Record<string, string>>({});
   const [isGeneratingSectionSummaries, setIsGeneratingSectionSummaries] = useState(false);
+  const [deepAnalytics, setDeepAnalytics] = useState<Record<string, string>>({});
+  const [isGeneratingDeepAnalytics, setIsGeneratingDeepAnalytics] = useState(false);
+  const [deepAnalyticsProgress, setDeepAnalyticsProgress] = useState('');
+
+  const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
   const [exportOptions, setExportOptions] = useState({
     includeComments: true,
     includeFilters: true,
@@ -1000,6 +1006,13 @@ export function DashboardModule() {
         .recharts-text { font-family: 'Inter', sans-serif !important; font-size: 12px !important; }
         .recharts-legend-wrapper { position: relative !important; bottom: auto !important; left: auto !important; right: auto !important; top: auto !important; width: 100% !important; height: auto !important; }
         
+        /* --- DERİN ANALİZ STİLLERİ --- */
+        .deep-analytics-block { background-color: #fffbeb !important; border: 1px solid #fde68a !important; border-left: 5px solid #f59e0b !important; padding: 20px !important; border-radius: 12px !important; margin-top: 20px !important; display: flex !important; gap: 16px !important; }
+        .deep-analytics-content h3 { font-size: 15px !important; font-weight: 800 !important; color: #78350f !important; margin-top: 12px !important; margin-bottom: 8px !important; border-bottom: 1px solid #fef3c7 !important; padding-bottom: 4px !important; }
+        .deep-analytics-content h3:first-of-type { margin-top: 0 !important; }
+        .deep-analytics-content ul { list-style-type: disc !important; padding-left: 20px !important; margin-bottom: 12px !important; }
+        .deep-analytics-content li { font-size: 13px !important; line-height: 1.6 !important; color: #451a03 !important; margin-bottom: 6px !important; }
+
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 10px; }
@@ -1470,6 +1483,334 @@ export function DashboardModule() {
     }
   };
 
+  const prepareMonthlyChunks = () => {
+    const parseDateLocal = (dateStr: string) => {
+      if (!dateStr) return new Date();
+      if (typeof dateStr === 'string' && dateStr.includes('.') && dateStr.split('.').length === 3) {
+        const [d, m, y] = dateStr.split('.');
+        return new Date(`${y}-${m}-${d}`);
+      }
+      return new Date(dateStr);
+    };
+
+    const getMonthKey = (d: Date) => {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    };
+
+    const getMonthNameTr = (monthIndex: number) => {
+      const months = [
+        'Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+        'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'
+      ];
+      return months[monthIndex];
+    };
+
+    const currentGrouped: Record<string, CommentAnalytics[]> = {};
+    filteredAnalytics.forEach(item => {
+      const d = parseDateLocal(item.date || item.createdAt);
+      if (!isNaN(d.getTime())) {
+        const key = getMonthKey(d);
+        if (!currentGrouped[key]) currentGrouped[key] = [];
+        currentGrouped[key].push(item);
+      }
+    });
+
+    const previousGrouped: Record<string, CommentAnalytics[]> = {};
+    const compareActive = appliedFilters.isCompareActive;
+    
+    if (compareActive && previousFilteredAnalytics.length > 0) {
+      previousFilteredAnalytics.forEach(item => {
+        const d = parseDateLocal(item.date || item.createdAt);
+        if (!isNaN(d.getTime())) {
+          const key = getMonthKey(d);
+          if (!previousGrouped[key]) previousGrouped[key] = [];
+          previousGrouped[key].push(item);
+        }
+      });
+    } else {
+      analytics.forEach(item => {
+        const d = parseDateLocal(item.date || item.createdAt);
+        if (!isNaN(d.getTime())) {
+          const key = getMonthKey(d);
+          if (!previousGrouped[key]) previousGrouped[key] = [];
+          previousGrouped[key].push(item);
+        }
+      });
+    }
+
+    const sortedCurrentKeys = Object.keys(currentGrouped).sort();
+    
+    return sortedCurrentKeys.map(key => {
+      const [yearStr, monthStr] = key.split('-');
+      const year = parseInt(yearStr);
+      const monthIdx = parseInt(monthStr) - 1;
+      const monthName = getMonthNameTr(monthIdx);
+      
+      const thisYearItems = currentGrouped[key] || [];
+      const thisYearVolume = thisYearItems.length;
+      const thisYearScore = thisYearVolume > 0 
+        ? Math.round(thisYearItems.reduce((sum, item) => sum + (item.overallScore || 0), 0) / thisYearVolume)
+        : 0;
+
+      const topicCounts: Record<string, { count: number, totalScore: number }> = {};
+      thisYearItems.forEach(item => {
+        item.topics?.forEach(t => {
+          const name = t.subCategory;
+          if (!topicCounts[name]) topicCounts[name] = { count: 0, totalScore: 0 };
+          topicCounts[name].count += 1;
+          topicCounts[name].totalScore += t.score || 0;
+        });
+      });
+      const thisYearTopTopics = Object.entries(topicCounts)
+        .map(([name, val]) => ({ topic: name, count: val.count, avgScore: Math.round(val.totalScore / val.count) }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3);
+
+      // Channel (Source) counts
+      const sourceCounts: Record<string, { count: number, totalScore: number }> = {};
+      thisYearItems.forEach(item => {
+        const src = item.source || 'Bilinmiyor';
+        if (!sourceCounts[src]) sourceCounts[src] = { count: 0, totalScore: 0 };
+        sourceCounts[src].count += 1;
+        sourceCounts[src].totalScore += item.overallScore || 0;
+      });
+      const thisYearTopSources = Object.entries(sourceCounts)
+        .map(([name, val]) => ({ source: name, count: val.count, avgScore: Math.round(val.totalScore / val.count) }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3);
+
+      // Nationality (Market) counts
+      const nationalityCounts: Record<string, { count: number, totalScore: number }> = {};
+      thisYearItems.forEach(item => {
+        const nat = item.nationality || 'Bilinmiyor';
+        if (!nationalityCounts[nat]) nationalityCounts[nat] = { count: 0, totalScore: 0 };
+        nationalityCounts[nat].count += 1;
+        nationalityCounts[nat].totalScore += item.overallScore || 0;
+      });
+      const thisYearTopNationalities = Object.entries(nationalityCounts)
+        .map(([name, val]) => ({ nationality: name, count: val.count, avgScore: Math.round(val.totalScore / val.count) }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 4);
+
+      const lastYearKey = `${year - 1}-${monthStr}`;
+      const lastYearItems = previousGrouped[lastYearKey] || [];
+      const lastYearVolume = lastYearItems.length;
+      const lastYearScore = lastYearVolume > 0
+        ? Math.round(lastYearItems.reduce((sum, item) => sum + (item.overallScore || 0), 0) / lastYearVolume)
+        : 0;
+
+      const lastYearTopicCounts: Record<string, { count: number, totalScore: number }> = {};
+      lastYearItems.forEach(item => {
+        item.topics?.forEach(t => {
+          const name = t.subCategory;
+          if (!lastYearTopicCounts[name]) lastYearTopicCounts[name] = { count: 0, totalScore: 0 };
+          lastYearTopicCounts[name].count += 1;
+          lastYearTopicCounts[name].totalScore += t.score || 0;
+        });
+      });
+      const lastYearTopTopics = Object.entries(lastYearTopicCounts)
+        .map(([name, val]) => ({ topic: name, count: val.count, avgScore: Math.round(val.totalScore / val.count) }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3);
+
+      // Last Year Channels
+      const lastYearSourceCounts: Record<string, { count: number, totalScore: number }> = {};
+      lastYearItems.forEach(item => {
+        const src = item.source || 'Bilinmiyor';
+        if (!lastYearSourceCounts[src]) lastYearSourceCounts[src] = { count: 0, totalScore: 0 };
+        lastYearSourceCounts[src].count += 1;
+        lastYearSourceCounts[src].totalScore += item.overallScore || 0;
+      });
+      const lastYearTopSources = Object.entries(lastYearSourceCounts)
+        .map(([name, val]) => ({ source: name, count: val.count, avgScore: Math.round(val.totalScore / val.count) }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3);
+
+      // Last Year Nationalities
+      const lastYearNationalityCounts: Record<string, { count: number, totalScore: number }> = {};
+      lastYearItems.forEach(item => {
+        const nat = item.nationality || 'Bilinmiyor';
+        if (!lastYearNationalityCounts[nat]) lastYearNationalityCounts[nat] = { count: 0, totalScore: 0 };
+        lastYearNationalityCounts[nat].count += 1;
+        lastYearNationalityCounts[nat].totalScore += item.overallScore || 0;
+      });
+      const lastYearTopNationalities = Object.entries(lastYearNationalityCounts)
+        .map(([name, val]) => ({ nationality: name, count: val.count, avgScore: Math.round(val.totalScore / val.count) }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 4);
+
+      return {
+        monthName: `${monthName} ${year}`,
+        compareMonthName: `${monthName} ${year - 1}`,
+        thisYear: {
+          volume: thisYearVolume,
+          score: thisYearScore,
+          topTopics: thisYearTopTopics,
+          topSources: thisYearTopSources,
+          topNationalities: thisYearTopNationalities
+        },
+        lastYear: {
+          volume: lastYearVolume,
+          score: lastYearScore,
+          topTopics: lastYearTopTopics,
+          topSources: lastYearTopSources,
+          topNationalities: lastYearTopNationalities
+        }
+      };
+    });
+  };
+
+  const handleGenerateDeepAnalytics = async () => {
+    if (filteredAnalytics.length === 0) {
+      alert("Analiz edilecek veri bulunamadı.");
+      return;
+    }
+
+    setIsGeneratingDeepAnalytics(true);
+    setIsAiMenuOpen(false);
+    setDeepAnalyticsProgress("Veriler hazırlanıyor ve zaman dilimlerine bölünüyor...");
+    
+    try {
+      await sleep(1000);
+      const chunks = prepareMonthlyChunks();
+      
+      for (const chunk of chunks) {
+        setDeepAnalyticsProgress(`${chunk.monthName} verileri karşılaştırılıyor...`);
+        await sleep(1500);
+      }
+
+      setDeepAnalyticsProgress("Anomali taraması yapılıyor...");
+      await sleep(1500);
+
+      setDeepAnalyticsProgress("Memnuniyet ve eğilim sapmaları tespit ediliyor...");
+      await sleep(1200);
+
+      setDeepAnalyticsProgress("Stratejik rapor mizanpajı oluşturuluyor...");
+
+      const systemPrompt = `
+Rolün: 5 Yıldızlı bir otelin Stratejik Kalite Direktörü ve Kıdemli Veri Analistisin. 
+Görevin: Sana parça parça verilen dönem ve geçen yılın aynı dönemine ait misafir memnuniyet verilerini, üst düzey yöneticilerin (C-Level) okuyacağı katı bir teşhis raporuna dönüştürmek.
+
+Kesin Kurallar:
+1. KESİNLİKLE operasyonel tavsiye veya aksiyon planı vermeyeceksin ("Klimayı tamir edin", "Eğitim verin" gibi cümleler yasaktır). Görevin sadece durumu teşhis etmektir.
+2. Verileri tane tane, zamana yayarak (aylık değişimler, trend eğilimleri) analiz edeceksin.
+3. Bu analizin bir Misafir Yorum Analizi (Guest Comment Analysis) değerlendirmesi olduğunu unutma ve dili buna göre yapılandır.
+4. "Cari Dönem" ifadesi yerine sadece "Dönem" veya "Bu Dönem" ifadesini kullan.
+5. "Trend Kayması" ifadesini çok fazla kullanmak rahatsız edicidir. Bunun yerine "Gidişat Eğilimi", "Algı Kayması", "Yön Değişimi", "Memnuniyet Salınımı", "Hacimsel Dalgalanma" veya "Performans Sapması" gibi daha uygun ve çeşitli profesyonel ifadeler kullanacaksın.
+6. Beklenmedik dalgalanmaları, pazar (uyruk) veya kanal bazlı ani kopmaları "Anomali" başlığı altında topla.
+7. Çıktıyı HTML <h3> ve <ul>-<li> formatında, üst yönetimin gözünün hemen çarpacağı net sayılarla (Skor değişim yüzdeleri, yorum hacmi farkları) tane tane listele.
+      `;
+
+      const chunksContext = chunks.map(c => `
+Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
+- Dönem Yorum Hacmi: ${c.thisYear.volume} yorum, Memnuniyet Skoru: %${c.thisYear.score}
+- Geçen Yıl Aynı Dönem Yorum Hacmi: ${c.lastYear.volume} yorum, Memnuniyet Skoru: %${c.lastYear.score}
+- Dönem Öne Çıkan Alt Konular: ${c.thisYear.topTopics.map(t => `${t.topic} (Yorum: ${t.count}, Skor: %${t.avgScore})`).join(', ') || 'Veri Yok'}
+- Geçen Yıl Aynı Dönem Öne Çıkan Alt Konular: ${c.lastYear.topTopics.map(t => `${t.topic} (Yorum: ${t.count}, Skor: %${t.avgScore})`).join(', ') || 'Veri Yok'}
+- Dönem Öne Çıkan Kanallar (Kaynaklar): ${c.thisYear.topSources.map(s => `${s.source} (Yorum: ${s.count}, Skor: %${s.avgScore})`).join(', ') || 'Veri Yok'}
+- Geçen Yıl Aynı Dönem Öne Çıkan Kanallar (Kaynaklar): ${c.lastYear.topSources.map(s => `${s.source} (Yorum: ${s.count}, Skor: %${s.avgScore})`).join(', ') || 'Veri Yok'}
+- Dönem Öne Çıkan Uyruklar (Pazarlar): ${c.thisYear.topNationalities.map(n => `${n.nationality} (Yorum: ${n.count}, Skor: %${n.avgScore})`).join(', ') || 'Veri Yok'}
+- Geçen Yıl Aynı Dönem Öne Çıkan Uyruklar (Pazarlar): ${c.lastYear.topNationalities.map(n => `${n.nationality} (Yorum: ${n.count}, Skor: %${n.avgScore})`).join(', ') || 'Veri Yok'}
+      `).join('\n\n');
+
+      const userPrompt = `
+      Aşağıdaki zaman dilimi bazlı kırılımları ve karşılaştırma verilerini kullanarak, her bir dashboard modülü için derinlemesine stratejik teşhis (Deep Diagnostics) üret.
+      
+      Karşılaştırma Verileri:
+      ${chunksContext}
+      
+      Lütfen her bölüm için ayrı ayrı HTML formatında teşhis yazısı içeren bir JSON yanıt döndür.
+      Yalnızca geçerli bir JSON objesi döndür. Markdown etiketleri (\`\`\`json vb.) kullanma.
+      
+      ÖNEMLİ: JSON'da mutlaka "overall_summary" anahtarını da döndür. Bu alanda tüm sürecin bütünsel bir stratejik sentezini (Yönetici Özeti) yapmalısın. "Tüm bu sürecin özeti nedir? Aklımızda neyin kalması gerekiyor? Misafirlerimizin bu dönemki geri bildirimlerindeki ana yönelim, temel memnuniyet/hoşnutsuzluk kaynağı ve pazar/kanal dinamikleri arasındaki en kritik bağlantı nedir?" sorularının tamamına yanıt vermelisin. Kullanıcının aklında hiçbir soru işareti kalmamalıdır.
+      
+      JSON Şeması:
+      {
+        "kpi_cards": "<h3>Genel KPI Eğilim Teşhisi</h3><ul><li>...</li></ul>",
+        "satisfaction_timeline": "<h3>Zaman Çizelgesi & Hacim Teşhisi</h3><ul><li>...</li></ul>",
+        "category_satisfaction": "<h3>Kategori Performans Teşhisi</h3><ul><li>...</li></ul>",
+        "source_analysis": "<h3>Kanal Kaynaklı Memnuniyet Teşhisi</h3><ul><li>...</li></ul>",
+        "nationality_analysis": "<h3>Pazar / Uyruk Teşhisi</h3><ul><li>...</li></ul>",
+        "most_mentioned_topics": "<h3>Gündem & Algı Teşhisi</h3><ul><li>...</li></ul>",
+        "top_positive_topics": "<h3>Güçlü Alanlar & İstikrar Teşhisi</h3><ul><li>...</li></ul>",
+        "top_negative_topics": "<h3>Zayıf Alanlar & Anomali Teşhisi</h3><ul><li>...</li></ul>",
+        "overall_summary": "<h3>Misafir Yorum Analizi Stratejik Sentez & Yönetici Özeti</h3><ul><li>...</li></ul>"
+      }
+      `;
+
+      const prompt = `${systemPrompt}\n\n${userPrompt}`;
+      const response = await generateAIContent(prompt, 'Dashboard Derin Analizler', 'dashboardDeepAnalytics');
+      
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const diagnostics = JSON.parse(jsonMatch[0]);
+        setDeepAnalytics(diagnostics);
+      } else {
+        throw new Error("Geçerli JSON bulunamadı.");
+      }
+    } catch (error) {
+      console.error("Derin analizler üretilirken hata:", error);
+      alert("Derin analizler üretilirken bir hata oluştu.");
+    } finally {
+      setIsGeneratingDeepAnalytics(false);
+      setDeepAnalyticsProgress('');
+    }
+  };
+
+  const renderDeepAnalytics = (moduleId: string) => {
+    if (isGeneratingDeepAnalytics) {
+      return (
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="mt-4 bg-amber-50/50 border border-amber-100 rounded-xl p-4 overflow-hidden relative"
+        >
+          <div className="flex justify-between items-center mb-2">
+            <span className="text-xs font-bold text-amber-800 flex items-center gap-1.5 animate-pulse">
+              <TrendingUp size={14} className="animate-bounce" />
+              Derin Analiz Motoru Çalışıyor...
+            </span>
+            <span className="text-[10px] font-mono font-bold text-amber-600">
+              {deepAnalyticsProgress || 'Veriler işleniyor...'}
+            </span>
+          </div>
+          <div className="w-full bg-amber-100 h-1.5 rounded-full overflow-hidden">
+            <motion.div 
+              className="bg-gradient-to-r from-amber-500 to-indigo-600 h-full rounded-full"
+              initial={{ width: "10%" }}
+              animate={{ width: "95%" }}
+              transition={{ duration: 15, ease: "easeInOut" }}
+            />
+          </div>
+        </motion.div>
+      );
+    }
+
+    if (!deepAnalytics[moduleId]) return null;
+
+    return (
+      <motion.div 
+        initial={{ opacity: 0, y: -10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mt-4 bg-amber-50/30 border border-amber-100 rounded-xl p-5 flex gap-4 relative overflow-hidden deep-analytics-block"
+      >
+        <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-amber-400 to-indigo-600"></div>
+        <div className="p-2.5 bg-white rounded-xl shrink-0 h-fit shadow-sm border border-amber-100">
+          <TrendingUp size={18} className="text-amber-500" />
+        </div>
+        <div className="flex-1 min-w-0 prose prose-sm max-w-none text-slate-700">
+          <h4 className="text-xs font-black text-amber-900 uppercase tracking-widest mb-2 flex items-center gap-1">
+            <span>DERİN STRATEJİK TEŞHİS</span>
+          </h4>
+          <div 
+            className="text-sm leading-relaxed space-y-2 deep-analytics-content"
+            dangerouslySetInnerHTML={{ __html: deepAnalytics[moduleId] }}
+          />
+        </div>
+      </motion.div>
+    );
+  };
+
   const handleGenerateDashboardReport = async () => {
     if (filteredAnalytics.length === 0) {
       alert("Raporlanacak veri bulunamadı.");
@@ -1612,6 +1953,18 @@ export function DashboardModule() {
               <Sparkles size={16} />
             )}
             {isGeneratingSectionSummaries ? 'Özetleniyor...' : 'AI Özeti Üret'}
+          </button>
+          <button 
+            onClick={handleGenerateDeepAnalytics}
+            disabled={isGeneratingDeepAnalytics || filteredAnalytics.length === 0}
+            className="px-5 py-2 rounded-xl font-bold text-sm shadow-md flex items-center gap-2 transition-all bg-amber-500 hover:bg-amber-600 text-white shadow-amber-200 disabled:opacity-70"
+          >
+            {isGeneratingDeepAnalytics ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <TrendingUp size={16} />
+            )}
+            {isGeneratingDeepAnalytics ? 'Analiz Ediliyor...' : 'Derin Analizleri Çalıştır'}
           </button>
           <button 
             onClick={handleSavePreferences}
@@ -2038,7 +2391,7 @@ export function DashboardModule() {
                     <button
                       onClick={handleGenerateSectionSummaries}
                       disabled={isGeneratingSectionSummaries}
-                      className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2 disabled:opacity-50"
+                      className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2 disabled:opacity-50 border-b border-slate-50"
                     >
                       {isGeneratingSectionSummaries ? (
                         <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-indigo-500 border-t-transparent"></div>
@@ -2046,6 +2399,18 @@ export function DashboardModule() {
                         <Brain size={14} className="text-indigo-500" />
                       )}
                       Bölüm Özetleri Ekle
+                    </button>
+                    <button
+                      onClick={handleGenerateDeepAnalytics}
+                      disabled={isGeneratingDeepAnalytics}
+                      className="w-full text-left px-4 py-3 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2 disabled:opacity-50"
+                    >
+                      {isGeneratingDeepAnalytics ? (
+                        <div className="animate-spin rounded-full h-3.5 w-3.5 border-2 border-amber-500 border-t-transparent"></div>
+                      ) : (
+                        <TrendingUp size={14} className="text-amber-500" />
+                      )}
+                      Derin Analizleri Çalıştır
                     </button>
                   </motion.div>
                 )}
@@ -2183,6 +2548,7 @@ export function DashboardModule() {
                     ))}
                   </div>
                   {renderAiSummary('kpi_cards')}
+                  {renderDeepAnalytics('kpi_cards')}
                 </div>
               );
             }
@@ -2342,6 +2708,7 @@ export function DashboardModule() {
                     </div>
                   )}
                   {renderAiSummary('satisfaction_timeline')}
+                  {renderDeepAnalytics('satisfaction_timeline')}
                 </section>
               );
             }
@@ -2588,6 +2955,7 @@ export function DashboardModule() {
                     </div>
                   )}
                   {renderAiSummary('category_satisfaction')}
+                  {renderDeepAnalytics('category_satisfaction')}
                 </section>
               );
             }
@@ -2724,6 +3092,7 @@ export function DashboardModule() {
                     </div>
                   )}
                   {renderAiSummary('source_analysis')}
+                  {renderDeepAnalytics('source_analysis')}
                 </section>
               );
             }
@@ -2936,6 +3305,7 @@ export function DashboardModule() {
                     </div>
                   )}
                   {renderAiSummary('nationality_analysis')}
+                  {renderDeepAnalytics('nationality_analysis')}
                 </section>
               );
             }
@@ -3086,6 +3456,7 @@ export function DashboardModule() {
                       </div>
                     )}
                     {renderAiSummary('most_mentioned_topics')}
+                    {renderDeepAnalytics('most_mentioned_topics')}
                   </section>
 
                   {/* En Çok Övülenler */}
@@ -3222,6 +3593,7 @@ export function DashboardModule() {
                       </div>
                     )}
                     {renderAiSummary('top_positive_topics')}
+                    {renderDeepAnalytics('top_positive_topics')}
                   </section>
 
                   {/* Acil Müdahale Gerekenler */}
@@ -3358,6 +3730,7 @@ export function DashboardModule() {
                       </div>
                     )}
                     {renderAiSummary('top_negative_topics')}
+                    {renderDeepAnalytics('top_negative_topics')}
                   </section>
                 </div>
               );
@@ -3365,6 +3738,30 @@ export function DashboardModule() {
 
             return null;
           })}
+
+          {deepAnalytics['overall_summary'] && (
+            <motion.section 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="bg-gradient-to-br from-indigo-50/60 via-purple-50/30 to-amber-50/50 border border-indigo-100 rounded-2xl p-6 shadow-md relative overflow-hidden mt-2"
+            >
+              <div className="absolute top-0 left-0 w-2 h-full bg-gradient-to-b from-indigo-500 via-purple-500 to-amber-400"></div>
+              <div className="flex gap-4">
+                <div className="p-3 bg-white rounded-2xl shrink-0 h-fit shadow-md border border-indigo-100/50">
+                  <Sparkles size={24} className="text-indigo-600 animate-pulse" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <span className="text-[10px] font-black text-indigo-700 bg-indigo-100/60 px-2.5 py-1 rounded-full uppercase tracking-widest inline-block mb-3">
+                    Stratejik Sentez & Yönetici Özeti (Özet Değerlendirme)
+                  </span>
+                  <div 
+                    className="text-sm leading-relaxed space-y-3 deep-analytics-content text-slate-700"
+                    dangerouslySetInnerHTML={{ __html: deepAnalytics['overall_summary'] }}
+                  />
+                </div>
+              </div>
+            </motion.section>
+          )}
 
           {/* Bottom Spacing */}
           <div className="h-12 shrink-0" />
