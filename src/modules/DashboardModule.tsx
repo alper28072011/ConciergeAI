@@ -230,6 +230,7 @@ export function DashboardModule() {
   const [timelineGranularity, setTimelineGranularity] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   const [expandedActions, setExpandedActions] = useState<Record<string, boolean>>({});
+  const [expandedGuestDetails, setExpandedGuestDetails] = useState<Record<string, boolean>>({});
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
   
   // Show All Toggles
@@ -415,8 +416,8 @@ export function DashboardModule() {
           
           const payload = {
             ...basePayload,
-            // 1. DÜZELTME: ANSWER kolonunu da API'den istiyoruz!
-            Select: ["ID", "COMMENT", "ANSWER"],
+            // 1. DÜZELTME: ANSWER ve misafir/konaklama verilerini de API'den istiyoruz!
+            Select: ["ID", "COMMENT", "ANSWER", "ROOMNO", "AGENCY", "CHECKIN", "CHECKOUT", "GUESTNAMES", "NATIONALITY"],
             Where: [
               ...((basePayload.Where && Array.isArray(basePayload.Where)) ? basePayload.Where : []),
               { Column: "ID", Operator: "IN", Value: chunk }
@@ -437,6 +438,12 @@ export function DashboardModule() {
                   if (item.COMMENT) updateData.comment = item.COMMENT;
                   // 2. DÜZELTME: Gelen ANSWER verisini Firestore'a (answer adıyla) kaydediyoruz!
                   if (item.ANSWER !== undefined) updateData.answer = item.ANSWER || '';
+                  if (item.ROOMNO) updateData.roomNumber = item.ROOMNO;
+                  if (item.AGENCY) updateData.agency = item.AGENCY;
+                  if (item.CHECKIN) updateData.checkIn = item.CHECKIN;
+                  if (item.CHECKOUT) updateData.checkOut = item.CHECKOUT;
+                  if (item.GUESTNAMES) updateData.guestName = item.GUESTNAMES;
+                  if (item.NATIONALITY) updateData.nationality = item.NATIONALITY;
 
                   if (Object.keys(updateData).length > 0) {
                     await updateDoc(docRef, updateData).catch(e => console.warn("Sessiz güncelleme atlandı:", e));
@@ -920,7 +927,7 @@ export function DashboardModule() {
           if (unifiedActions.length > 0) {
             actionsHtml = `
               <div class="mt-4 pt-4 border-t border-slate-100">
-                <button class="text-[10px] font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-800 transition-colors uppercase" onclick="const content = this.nextElementSibling; const icon = this.querySelector('svg'); content.classList.toggle('expanded'); icon.classList.toggle('rotated');">
+                <button class="text-[10px] font-bold text-indigo-600 flex items-center gap-1 hover:text-indigo-800 transition-colors uppercase cursor-pointer" onclick="const content = this.nextElementSibling; const icon = this.querySelector('svg'); content.classList.toggle('expanded'); icon.classList.toggle('rotated');">
                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="accordion-icon"><path d="m6 9 6 6 6-6"/></svg>
                   Alınan Aksiyonlar (${unifiedActions.length})
                 </button>
@@ -936,6 +943,60 @@ export function DashboardModule() {
               </div>
             `;
           }
+
+          const roomNo = commentData.resolvedRoomNo || commentData.roomNumber || (commentData as any).roomNo || (commentData as any).ROOMNO || (commentData as any).ROOM || 'Belirtilmemiş';
+          const guestNat = commentData.nationality || (commentData as any).NATIONALITY || 'Bilinmiyor';
+          const guestAgency = commentData.agency || (commentData as any).AGENCY || (commentData as any).AGENCYNAME || commentData.source || 'Bilinmiyor';
+
+          const checkInRaw = commentData.checkIn || (commentData as any).CHECKIN || (commentData as any).checkInDate;
+          const checkOutRaw = commentData.checkOut || (commentData as any).CHECKOUT || (commentData as any).checkOutDate;
+          let stayDatesStr = '';
+          if (checkInRaw && checkOutRaw) {
+            const cIn = new Date(checkInRaw).toLocaleDateString('tr-TR');
+            const cOut = new Date(checkOutRaw).toLocaleDateString('tr-TR');
+            stayDatesStr = `${cIn} - ${cOut}`;
+          } else if (checkInRaw) {
+            stayDatesStr = new Date(checkInRaw).toLocaleDateString('tr-TR');
+          } else {
+            stayDatesStr = dateStr;
+          }
+
+          const gName = commentData.guestName || (commentData as any).GUESTNAMES || (commentData as any).GUESTNAME || '';
+
+          const guestDetailsHtml = `
+            <div class="mt-3 pt-3 border-t border-slate-100">
+              <button class="text-[10px] font-bold text-slate-600 hover:text-indigo-600 flex items-center gap-1 transition-colors uppercase cursor-pointer" onclick="const content = this.nextElementSibling; const icon = this.querySelector('svg'); content.classList.toggle('expanded'); icon.classList.toggle('rotated');">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="accordion-icon"><path d="m6 9 6 6 6-6"/></svg>
+                Konaklama & Misafir Detayları
+              </button>
+              <div class="accordion-content pl-2 border-l-2 border-slate-200">
+                <div class="grid grid-cols-2 gap-2 bg-slate-50/80 p-2.5 rounded-lg border border-slate-100 text-xs mt-2">
+                  <div>
+                    <span class="text-[9px] font-bold text-slate-400 block uppercase">Oda Numarası</span>
+                    <span class="font-bold text-slate-800">${roomNo}</span>
+                  </div>
+                  <div>
+                    <span class="text-[9px] font-bold text-slate-400 block uppercase">Uyruk</span>
+                    <span class="font-bold text-slate-800">${guestNat}</span>
+                  </div>
+                  <div>
+                    <span class="text-[9px] font-bold text-slate-400 block uppercase">Acente / Kaynak</span>
+                    <span class="font-bold text-slate-800">${guestAgency}</span>
+                  </div>
+                  <div>
+                    <span class="text-[9px] font-bold text-slate-400 block uppercase">Konaklama Tarihleri</span>
+                    <span class="font-bold text-slate-800">${stayDatesStr}</span>
+                  </div>
+                  ${gName ? `
+                  <div class="col-span-2 pt-1.5 border-t border-slate-200/60">
+                    <span class="text-[9px] font-bold text-slate-400 block uppercase">Misafir Adı</span>
+                    <span class="font-bold text-slate-800">${gName}</span>
+                  </div>
+                  ` : ''}
+                </div>
+              </div>
+            </div>
+          `;
 
           const oScore = commentData.overallScore || 0;
           let oColorClass = 'bg-slate-50 text-slate-700 border-slate-200';
@@ -959,6 +1020,7 @@ export function DashboardModule() {
               </div>
               <div class="relative">${textHtml}</div>
               ${topicsHtml}
+              ${guestDetailsHtml}
               ${actionsHtml}
           </div>`;
         });
@@ -3850,6 +3912,70 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                           );
                         })}
                       </div>
+
+                      {(() => {
+                        const roomNo = commentData.resolvedRoomNo || commentData.roomNumber || (commentData as any).roomNo || (commentData as any).ROOMNO || (commentData as any).ROOM || 'Belirtilmemiş';
+                        const guestNat = commentData.nationality || (commentData as any).NATIONALITY || 'Bilinmiyor';
+                        const guestAgency = commentData.agency || (commentData as any).AGENCY || (commentData as any).AGENCYNAME || commentData.source || 'Bilinmiyor';
+                        
+                        const checkInRaw = commentData.checkIn || (commentData as any).CHECKIN || (commentData as any).checkInDate;
+                        const checkOutRaw = commentData.checkOut || (commentData as any).CHECKOUT || (commentData as any).checkOutDate;
+                        let stayDatesStr = '';
+                        if (checkInRaw && checkOutRaw) {
+                          const cIn = new Date(checkInRaw).toLocaleDateString('tr-TR');
+                          const cOut = new Date(checkOutRaw).toLocaleDateString('tr-TR');
+                          stayDatesStr = `${cIn} - ${cOut}`;
+                        } else if (checkInRaw) {
+                          stayDatesStr = new Date(checkInRaw).toLocaleDateString('tr-TR');
+                        } else {
+                          stayDatesStr = commentData.date ? new Date(commentData.date).toLocaleDateString('tr-TR') : 'Belirtilmemiş';
+                        }
+
+                        const gName = commentData.guestName || (commentData as any).GUESTNAMES || (commentData as any).GUESTNAME || '';
+
+                        const isGuestDetailsExpanded = !!expandedGuestDetails[commentData.commentId];
+
+                        return (
+                          <div className="mt-3 pt-3 border-t border-slate-50">
+                            <button 
+                              onClick={() => setExpandedGuestDetails(prev => ({ ...prev, [commentData.commentId]: !prev[commentData.commentId] }))}
+                              className="text-[10px] font-bold text-slate-600 hover:text-indigo-600 flex items-center gap-1 transition-colors uppercase"
+                            >
+                              <ChevronDown className={`w-3 h-3 transition-transform ${isGuestDetailsExpanded ? 'rotate-180' : ''}`} />
+                              Konaklama & Misafir Detayları
+                            </button>
+                            
+                            {isGuestDetailsExpanded && (
+                              <div className="mt-2.5 p-2.5 bg-slate-50/80 rounded-xl border border-slate-100 text-xs space-y-2">
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div>
+                                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Oda Numarası</span>
+                                    <span className="font-bold text-slate-800">{roomNo}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Uyruk</span>
+                                    <span className="font-bold text-slate-800">{guestNat}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Acente / Kaynak</span>
+                                    <span className="font-bold text-slate-800">{guestAgency}</span>
+                                  </div>
+                                  <div>
+                                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Konaklama Tarihleri</span>
+                                    <span className="font-bold text-slate-800">{stayDatesStr}</span>
+                                  </div>
+                                </div>
+                                {gName && (
+                                  <div className="pt-1.5 border-t border-slate-200/60">
+                                    <span className="text-[9px] font-bold text-slate-400 block uppercase">Misafir Adı</span>
+                                    <span className="font-bold text-slate-800">{gName}</span>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                       
                       {(() => {
                         const localAnswer = commentData.answer || (commentData as any).ANSWER || '';

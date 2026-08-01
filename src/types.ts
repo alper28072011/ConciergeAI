@@ -47,6 +47,17 @@ export interface CommentAnalytics {
   answer?: string;
   topics: UnifiedTopicAnalysis[];
   createdAt: string;
+  roomNumber?: string;
+  ROOMNO?: string;
+  resolvedRoomNo?: string;
+  agency?: string;
+  AGENCY?: string;
+  guestName?: string;
+  GUESTNAMES?: string;
+  checkIn?: string;
+  CHECKIN?: string;
+  checkOut?: string;
+  CHECKOUT?: string;
 }
 
 export interface HotelTaxonomy {
@@ -89,13 +100,21 @@ export interface CommentData {
   EMAIL?: string;
   NATIONALITY?: string;
   ROOMNO?: string;
+  roomNumber?: string;
   ALLNOTES?: string;
   resolvedRoomNo?: string;
   GUESTID?: number;
+  GUESTNAMES?: string;
+  guestName?: string;
   RESNAMEID_LOOKUP?: string;
   COMMENTSOURCEID_NAME?: string;
+  AGENCY?: string;
+  AGENCYNAME?: string;
+  agency?: string;
   CHECKIN?: string;
+  checkIn?: string;
   CHECKOUT?: string;
+  checkOut?: string;
   GDPRCONFIRMED?: boolean;
   EMAILCONFIRMED?: boolean;
   PHONECONFIRMED?: boolean;

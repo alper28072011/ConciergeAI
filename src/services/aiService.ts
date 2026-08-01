@@ -219,7 +219,12 @@ ${comment.COMMENT || ''}`;
       comment: comment.COMMENT || '',
       answer: comment.ANSWER || '',
       topics: topics,
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      roomNumber: comment.ROOMNO || comment.resolvedRoomNo || comment.roomNumber || '',
+      agency: comment.AGENCY || comment.AGENCYNAME || comment.agency || comment.COMMENTSOURCEID_NAME || '',
+      checkIn: comment.CHECKIN || comment.checkIn || '',
+      checkOut: comment.CHECKOUT || comment.checkOut || '',
+      guestName: comment.GUESTNAMES || comment.guestName || ''
     };
 
     await setDoc(doc(db, 'comment_analytics', String(comment.ID)), analyticsData);
