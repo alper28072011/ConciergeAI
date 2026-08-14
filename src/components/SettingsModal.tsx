@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ChevronDown, ChevronUp, Eye, EyeOff, Brain, DollarSign, Activity, Settings2, Database, Plus, Trash2, DoorOpen } from 'lucide-react';
+import { 
+  X, ChevronDown, ChevronUp, Eye, EyeOff, Brain, DollarSign, Activity, 
+  Settings2, Database, Plus, Trash2, DoorOpen, Globe, Server, CheckCircle2, 
+  AlertCircle, RefreshCw, Sliders, ExternalLink, Check, ArrowRight, Radio
+} from 'lucide-react';
 import { ApiSettings, AILog, SubRoomMapping } from '../types';
+import { DEFAULT_API_BASE_URL } from '../utils/constants';
+import { testApiConnection, normalizeBaseUrl } from '../services/api';
 import { doc, setDoc, collection, getDocs, getDoc } from "firebase/firestore";
 import { db } from '../firebase';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -101,7 +107,7 @@ const DEFAULT_CHECKOUT_TEMPLATE = JSON.stringify({
 
 export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
   const [settings, setSettings] = useState<ApiSettings>({
-    baseUrl: '',
+    baseUrl: DEFAULT_API_BASE_URL,
     loginToken: '',
     hotelId: '',
     commentPayloadTemplate: DEFAULT_COMMENT_TEMPLATE,
@@ -118,10 +124,14 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [showGeminiKey, setShowGeminiKey] = useState(false);
-  const [activeTab, setActiveTab] = useState<'api' | 'ai'>('api');
+  const [activeTab, setActiveTab] = useState<'api' | 'ai' | 'rooms'>('api');
   const [aiLogs, setAiLogs] = useState<AILog[]>([]);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const bookmarkletRef = useRef<HTMLAnchorElement>(null);
+
+  // Connection testing state
+  const [isTestingConnection, setIsTestingConnection] = useState(false);
+  const [testConnectionResult, setTestConnectionResult] = useState<{ success: boolean; message: string; status?: number } | null>(null);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -141,7 +151,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           }
 
           setSettings({
-            baseUrl: parsed.baseUrl || '',
+            baseUrl: parsed.baseUrl || DEFAULT_API_BASE_URL,
             loginToken: parsed.loginToken || parsed.token || '',
             hotelId: parsed.hotelId || '',
             commentPayloadTemplate: commentTemplate,
@@ -178,7 +188,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
           }
 
           const newSettings = {
-            baseUrl: data.baseUrl || '',
+            baseUrl: data.baseUrl || DEFAULT_API_BASE_URL,
             loginToken: data.loginToken || data.token || '',
             hotelId: data.hotelId || '',
             commentPayloadTemplate: commentTemplate,
@@ -209,6 +219,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
 
     if (isOpen) {
       loadSettings();
+      setTestConnectionResult(null);
     }
 
     window.addEventListener('hotelApiSettingsUpdated', loadSettings);
@@ -277,10 +288,33 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
     }));
   };
 
+  const handleTestConnection = async () => {
+    const targetUrl = settings.baseUrl || DEFAULT_API_BASE_URL;
+    setIsTestingConnection(true);
+    setTestConnectionResult(null);
+    try {
+      const result = await testApiConnection(targetUrl);
+      setTestConnectionResult(result);
+    } catch (err: any) {
+      setTestConnectionResult({
+        success: false,
+        message: err.message || 'Bağlantı testi başarısız oldu.'
+      });
+    } finally {
+      setIsTestingConnection(false);
+    }
+  };
+
+  const setBaseUrlPreset = (presetUrl: string) => {
+    setSettings(prev => ({ ...prev, baseUrl: presetUrl }));
+    setTestConnectionResult(null);
+  };
+
   const resetToDefault = (name: keyof ApiSettings) => {
     if (confirm('Bu şablonu varsayılan ayarlara döndürmek istediğinize emin misiniz?')) {
       let defaultValue = '';
       switch (name) {
+        case 'baseUrl': defaultValue = DEFAULT_API_BASE_URL; break;
         case 'commentPayloadTemplate': defaultValue = DEFAULT_COMMENT_TEMPLATE; break;
         case 'commentDetailPayloadTemplate': defaultValue = DEFAULT_COMMENT_DETAIL_TEMPLATE; break;
         case 'inhousePayloadTemplate': defaultValue = DEFAULT_INHOUSE_TEMPLATE; break;
@@ -453,14 +487,146 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
         
         <div className="p-6 space-y-6 overflow-y-auto flex-1">
           {activeTab === 'api' && (
-            <>
-              {/* Basic Settings */}
+            <div className="space-y-6">
+              {/* API Base URL Configuration Card */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg border border-emerald-100">
+                      <Globe size={18} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-bold text-slate-800">API Sunucu Adresi (Base URL)</h3>
+                        <span className="px-2 py-0.5 text-[10px] font-semibold bg-emerald-100 text-emerald-800 rounded-full border border-emerald-200">
+                          Parametrik Değişken
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Tüm Elektraweb API isteklerinin yönlendirileceği hedef sunucu kök adresi.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setBaseUrlPreset(DEFAULT_API_BASE_URL)}
+                    className="text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                    title="Varsayılan adresi yükle (http://4001.hoteladvisor.net)"
+                  >
+                    <RefreshCw size={12} />
+                    Varsayılan Adres
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                        <Server size={16} />
+                      </div>
+                      <input
+                        type="text"
+                        name="baseUrl"
+                        value={settings.baseUrl}
+                        onChange={handleChange}
+                        placeholder={DEFAULT_API_BASE_URL}
+                        className="w-full pl-9 pr-3 py-2.5 bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm font-mono transition-all text-slate-800"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleTestConnection}
+                      disabled={isTestingConnection}
+                      className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-2 shrink-0 disabled:opacity-50"
+                    >
+                      {isTestingConnection ? (
+                        <>
+                          <RefreshCw size={14} className="animate-spin" />
+                          <span>Test Ediliyor...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Radio size={14} className="text-emerald-400" />
+                          <span>Bağlantıyı Test Et</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Preset Shortcuts */}
+                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                    <span className="text-[11px] font-medium text-slate-500">Hızlı Seçim:</span>
+                    {[
+                      { label: '4001 (Varsayılan)', url: 'http://4001.hoteladvisor.net' },
+                      { label: '4002 (Alternatif)', url: 'http://4002.hoteladvisor.net' },
+                      { label: '4001 (HTTPS)', url: 'https://4001.hoteladvisor.net' },
+                      { label: 'Elektra Cloud', url: 'https://app.elektraweb.com' }
+                    ].map((preset) => {
+                      const isSelected = (settings.baseUrl || DEFAULT_API_BASE_URL).trim() === preset.url;
+                      return (
+                        <button
+                          key={preset.url}
+                          type="button"
+                          onClick={() => setBaseUrlPreset(preset.url)}
+                          className={`px-2.5 py-1 text-xs rounded-md transition-all flex items-center gap-1 font-mono ${
+                            isSelected
+                              ? 'bg-emerald-600 text-white font-semibold shadow-xs'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200'
+                          }`}
+                        >
+                          {isSelected && <Check size={12} />}
+                          <span>{preset.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Dynamic Endpoint Structure Preview */}
+                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs space-y-1">
+                    <div className="flex items-center justify-between text-slate-500 font-medium">
+                      <span>Dinamik İstek URL Şablonu:</span>
+                      <span className="font-mono text-[11px] text-slate-600">{"[Base URL]/[Action]/[Object]"}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-700 bg-white px-2.5 py-1.5 rounded border border-slate-200 font-mono text-[11px] overflow-x-auto">
+                      <span className="text-emerald-600 font-semibold shrink-0">POST</span>
+                      <span className="text-slate-800 break-all">
+                        {normalizeBaseUrl(settings.baseUrl)}/Select/QA_HOTEL_GUEST_COMMENT
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Test Connection Result Alert */}
+                  {testConnectionResult && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className={`p-3 rounded-lg text-xs flex items-start gap-2.5 border ${
+                        testConnectionResult.success
+                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                          : 'bg-amber-50 text-amber-900 border-amber-200'
+                      }`}
+                    >
+                      {testConnectionResult.success ? (
+                        <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
+                      ) : (
+                        <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                      )}
+                      <div>
+                        <p className="font-semibold">{testConnectionResult.message}</p>
+                        <p className="text-[11px] opacity-80 mt-0.5">
+                          {testConnectionResult.success 
+                            ? 'Hedef sunucu ve port istek almaya hazır.' 
+                            : 'Girdiğiniz adresi, ağ bağlantınızı veya güvenlik duvarı ayarlarını kontrol ediniz.'}
+                        </p>
+                      </div>
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+
+              {/* Basic Settings: Hotel ID & Token */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Base URL</label>
-                    <input type="text" name="baseUrl" value={settings.baseUrl} onChange={handleChange} placeholder="https://4001.hoteladvisor.net" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
-                  </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1">Hotel ID</label>
                     <input type="text" name="hotelId" value={settings.hotelId} onChange={handleChange} placeholder="21390" className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-900 focus:border-transparent text-sm" />
@@ -519,7 +685,7 @@ export function SettingsModal({ isOpen, onClose, onSave }: SettingsModalProps) {
                   {renderAccordionItem('Ayrılanlar (Checkout) Şablonu', 'checkoutPayloadTemplate')}
                 </div>
               </div>
-            </>
+            </div>
           )}
           {activeTab === 'ai' && (
             <div className="space-y-8">

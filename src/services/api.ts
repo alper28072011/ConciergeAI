@@ -1,4 +1,58 @@
 import { ApiSettings } from '../types';
+import { DEFAULT_API_BASE_URL } from '../utils/constants';
+
+export const normalizeBaseUrl = (url?: string): string => {
+  if (!url || !url.trim()) return DEFAULT_API_BASE_URL;
+  let trimmed = url.trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(trimmed)) {
+    // If protocol is missing, default to http://
+    trimmed = `http://${trimmed}`;
+  }
+  return trimmed;
+};
+
+export const testApiConnection = async (targetUrl: string): Promise<{ success: boolean; message: string; status?: number }> => {
+  try {
+    const baseUrl = normalizeBaseUrl(targetUrl);
+    // Test endpoint using a lightweight fetch or head request
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+    const response = await fetch(`${baseUrl}/Select/QA_HOTEL_GUEST_COMMENT`, {
+      method: 'OPTIONS',
+      signal: controller.signal
+    }).catch(async () => {
+      // If OPTIONS fails, try a simple POST with empty object to test reachability
+      return await fetch(`${baseUrl}/Select/QA_HOTEL_GUEST_COMMENT`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Action: 'Ping' }),
+        signal: controller.signal
+      });
+    });
+
+    clearTimeout(timeoutId);
+
+    if (response && (response.status < 500 || response.status === 401 || response.status === 403 || response.status === 200)) {
+      return { 
+        success: true, 
+        message: `Sunucuya başarıyla ulaşıldı (HTTP ${response.status}). Endpoint aktif.`, 
+        status: response.status 
+      };
+    } else {
+      return { 
+        success: false, 
+        message: `Sunucudan beklenmeyen yanıt alındı (HTTP ${response?.status || 'Bilinmiyor'}).`, 
+        status: response?.status 
+      };
+    }
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      return { success: false, message: 'Zaman aşımı: Sunucu 6 saniye içinde yanıt vermedi.' };
+    }
+    return { success: false, message: `Bağlantı hatası: ${err.message || 'Sunucuya ulaşılamadı. Adresi ve ağ erişiminizi kontrol edin.'}` };
+  }
+};
 
 export const executeElektraQuery = async (payload: any): Promise<any> => {
   const savedSettings = window.safeStorage.getItem('hotelApiSettings');
@@ -13,8 +67,9 @@ export const executeElektraQuery = async (payload: any): Promise<any> => {
     throw new Error('API ayarları okunamadı.');
   }
 
-  if (!settings.baseUrl || !settings.hotelId) {
-    throw new Error('API ayarları eksik (Base URL veya Hotel ID).');
+  const rawBaseUrl = settings.baseUrl?.trim() || DEFAULT_API_BASE_URL;
+  if (!settings.hotelId) {
+    throw new Error('API ayarları eksik (Hotel ID belirtilmelidir).');
   }
 
   const activeToken = window.safeStorage.getItem('loginToken') || settings.loginToken;
@@ -29,8 +84,8 @@ export const executeElektraQuery = async (payload: any): Promise<any> => {
     LoginToken: activeToken
   };
 
-  // Construct dynamic endpoint
-  const baseUrl = settings.baseUrl.replace(/\/+$/, '');
+  // Construct dynamic endpoint using normalized user-defined baseUrl
+  const baseUrl = normalizeBaseUrl(rawBaseUrl);
   const endpoint = `${baseUrl}/${payload.Action}/${payload.Object}`;
 
   try {

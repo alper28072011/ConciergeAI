@@ -1,5 +1,6 @@
 {
   "name": "AI Guest Letter Assistant",
   "description": "AI-powered guest letter generator for hotel guest relations.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

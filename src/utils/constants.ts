@@ -1,3 +1,5 @@
+export const DEFAULT_API_BASE_URL = 'http://4001.hoteladvisor.net';
+
 export const HOTEL_MAIN_CATEGORIES = [
   'Yiyecek Deneyimi',
   'İçecek Deneyimi',
