@@ -6,6 +6,10 @@ export interface MostMentionedTopic {
   subCategory: string;
   count: number;
   avgScore: number;
+  positiveCount: number;
+  negativeCount: number;
+  neutralCount: number;
+  positiveRate: number;
   prevScore?: number;
   prevCount?: number;
   scoreDelta?: number;
@@ -16,11 +20,14 @@ export interface MostMentionedTopic {
 export interface TopPositiveTopic {
   mainCategory: string;
   subCategory: string;
-  count: number;
-  avgScore: number;
+  count: number; // Övgü Yorum Sayısı (Positive count)
+  avgScore: number; // Övgü Memnuniyet Skoru (Positive avg score)
+  totalCount: number; // Toplam Yorum Sayısı (All mentions)
+  overallScore: number; // Konunun Tüm Yorumlardaki Genel Skoru
+  negativeCount: number; // Varsa şikayet sayısı
   weightedScore: number;
-  prevScore?: number;
-  prevCount?: number;
+  prevScore?: number; // Önceki dönem övgü skoru
+  prevCount?: number; // Önceki dönem övgü adedi
   scoreDelta?: number;
   countDelta?: number;
   growthRate?: number;
@@ -29,11 +36,14 @@ export interface TopPositiveTopic {
 export interface TopNegativeTopic {
   mainCategory: string;
   subCategory: string;
-  count: number;
-  avgScore: number;
+  count: number; // Şikayet Yorum Sayısı (Negative count)
+  avgScore: number; // Şikayet Memnuniyet Skoru (Negative avg score)
+  totalCount: number; // Toplam Yorum Sayısı (All mentions)
+  overallScore: number; // Konunun Tüm Yorumlardaki Genel Skoru
+  positiveCount: number; // Varsa övgü sayısı
   weightedScore: number;
-  prevScore?: number;
-  prevCount?: number;
+  prevScore?: number; // Önceki dönem şikayet skoru
+  prevCount?: number; // Önceki dönem şikayet adedi
   scoreDelta?: number;
   countDelta?: number;
   growthRate?: number;
@@ -99,17 +109,40 @@ export interface DashboardData {
 }
 
 export const calculateMostMentioned = (analytics: CommentAnalytics[]): MostMentionedTopic[] => {
-  const topicMap = new Map<string, { count: number; totalScore: number; mainCategory: string; subCategory: string }>();
+  const topicMap = new Map<string, { 
+    count: number; 
+    totalScore: number; 
+    posCount: number;
+    negCount: number;
+    neuCount: number;
+    mainCategory: string; 
+    subCategory: string; 
+  }>();
 
   analytics.forEach(item => {
     item.topics?.forEach(topic => {
       const key = `${topic.mainCategory}|${topic.subCategory}`;
       if (!topicMap.has(key)) {
-        topicMap.set(key, { count: 0, totalScore: 0, mainCategory: topic.mainCategory, subCategory: topic.subCategory });
+        topicMap.set(key, { 
+          count: 0, 
+          totalScore: 0, 
+          posCount: 0,
+          negCount: 0,
+          neuCount: 0,
+          mainCategory: topic.mainCategory, 
+          subCategory: topic.subCategory 
+        });
       }
       const data = topicMap.get(key)!;
       data.count += 1;
       data.totalScore += topic.score;
+      if (topic.sentiment === 'positive' || topic.score >= 70) {
+        data.posCount += 1;
+      } else if (topic.sentiment === 'negative' || topic.score < 40) {
+        data.negCount += 1;
+      } else {
+        data.neuCount += 1;
+      }
     });
   });
 
@@ -118,69 +151,123 @@ export const calculateMostMentioned = (analytics: CommentAnalytics[]): MostMenti
       mainCategory: data.mainCategory,
       subCategory: data.subCategory,
       count: data.count,
-      avgScore: Math.round(data.totalScore / data.count)
+      avgScore: Math.round(data.totalScore / data.count),
+      positiveCount: data.posCount,
+      negativeCount: data.negCount,
+      neutralCount: data.neuCount,
+      positiveRate: data.count > 0 ? Math.round((data.posCount / data.count) * 100) : 0
     }))
     .sort((a, b) => b.count - a.count);
 };
 
 export const calculateTopPositive = (analytics: CommentAnalytics[]): TopPositiveTopic[] => {
-  const topicMap = new Map<string, { count: number; totalScore: number; mainCategory: string; subCategory: string }>();
+  const topicMap = new Map<string, { 
+    posCount: number; 
+    posScore: number; 
+    totalCount: number;
+    totalScore: number;
+    negCount: number;
+    mainCategory: string; 
+    subCategory: string; 
+  }>();
 
   analytics.forEach(item => {
     item.topics?.forEach(topic => {
+      const key = `${topic.mainCategory}|${topic.subCategory}`;
+      if (!topicMap.has(key)) {
+        topicMap.set(key, { 
+          posCount: 0, 
+          posScore: 0, 
+          totalCount: 0,
+          totalScore: 0,
+          negCount: 0,
+          mainCategory: topic.mainCategory, 
+          subCategory: topic.subCategory 
+        });
+      }
+      const data = topicMap.get(key)!;
+      data.totalCount += 1;
+      data.totalScore += topic.score;
       if (topic.sentiment === 'positive' || topic.score >= 70) {
-        const key = `${topic.mainCategory}|${topic.subCategory}`;
-        if (!topicMap.has(key)) {
-          topicMap.set(key, { count: 0, totalScore: 0, mainCategory: topic.mainCategory, subCategory: topic.subCategory });
-        }
-        const data = topicMap.get(key)!;
-        data.count += 1;
-        data.totalScore += topic.score;
+        data.posCount += 1;
+        data.posScore += topic.score;
+      } else if (topic.sentiment === 'negative' || topic.score < 40) {
+        data.negCount += 1;
       }
     });
   });
 
   return Array.from(topicMap.values())
+    .filter(data => data.posCount > 0)
     .map(data => {
-      const avgScore = Math.round(data.totalScore / data.count);
+      const avgScore = Math.round(data.posScore / data.posCount);
+      const overallScore = Math.round(data.totalScore / data.totalCount);
       return {
         mainCategory: data.mainCategory,
         subCategory: data.subCategory,
-        count: data.count,
+        count: data.posCount,
         avgScore,
-        weightedScore: avgScore * Math.log10(data.count + 1)
+        totalCount: data.totalCount,
+        overallScore,
+        negativeCount: data.negCount,
+        weightedScore: avgScore * Math.log10(data.posCount + 1)
       };
     })
     .sort((a, b) => b.weightedScore - a.weightedScore);
 };
 
 export const calculateTopNegative = (analytics: CommentAnalytics[]): TopNegativeTopic[] => {
-  const topicMap = new Map<string, { count: number; totalScore: number; mainCategory: string; subCategory: string }>();
+  const topicMap = new Map<string, { 
+    negCount: number; 
+    negScore: number; 
+    totalCount: number;
+    totalScore: number;
+    posCount: number;
+    mainCategory: string; 
+    subCategory: string; 
+  }>();
 
   analytics.forEach(item => {
     item.topics?.forEach(topic => {
+      const key = `${topic.mainCategory}|${topic.subCategory}`;
+      if (!topicMap.has(key)) {
+        topicMap.set(key, { 
+          negCount: 0, 
+          negScore: 0, 
+          totalCount: 0,
+          totalScore: 0,
+          posCount: 0,
+          mainCategory: topic.mainCategory, 
+          subCategory: topic.subCategory 
+        });
+      }
+      const data = topicMap.get(key)!;
+      data.totalCount += 1;
+      data.totalScore += topic.score;
       if (topic.sentiment === 'negative' || topic.score < 40) {
-        const key = `${topic.mainCategory}|${topic.subCategory}`;
-        if (!topicMap.has(key)) {
-          topicMap.set(key, { count: 0, totalScore: 0, mainCategory: topic.mainCategory, subCategory: topic.subCategory });
-        }
-        const data = topicMap.get(key)!;
-        data.count += 1;
-        data.totalScore += topic.score;
+        data.negCount += 1;
+        data.negScore += topic.score;
+      } else if (topic.sentiment === 'positive' || topic.score >= 70) {
+        data.posCount += 1;
       }
     });
   });
 
   return Array.from(topicMap.values())
+    .filter(data => data.negCount > 0)
     .map(data => {
-      const avgScore = Math.round(data.totalScore / data.count);
+      const avgScore = Math.round(data.negScore / data.negCount);
+      const overallScore = Math.round(data.totalScore / data.totalCount);
       return {
         mainCategory: data.mainCategory,
         subCategory: data.subCategory,
-        count: data.count,
+        count: data.negCount,
         avgScore,
+        totalCount: data.totalCount,
+        overallScore,
+        positiveCount: data.posCount,
         // Criticality: High mention count + Low score = High weighted score
-        weightedScore: (100 - avgScore) * Math.log10(data.count + 1)
+        weightedScore: (100 - avgScore) * Math.log10(data.negCount + 1)
       };
     })
     .sort((a, b) => b.weightedScore - a.weightedScore);
@@ -393,9 +480,9 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
       }
     });
 
+    const prevTopPositive = calculateTopPositive(previousAnalytics);
     topPositive.forEach(topic => {
-      // Find accurate previous topic from full previous mentioned topics
-      const prevTopic = prevMostMentioned.find(p => p.mainCategory === topic.mainCategory && p.subCategory === topic.subCategory);
+      const prevTopic = prevTopPositive.find(p => p.mainCategory === topic.mainCategory && p.subCategory === topic.subCategory);
       if (prevTopic) {
         topic.prevScore = prevTopic.avgScore;
         topic.prevCount = prevTopic.count;
@@ -411,9 +498,9 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
       }
     });
 
+    const prevTopNegative = calculateTopNegative(previousAnalytics);
     topNegative.forEach(topic => {
-      // Find accurate previous topic from full previous mentioned topics
-      const prevTopic = prevMostMentioned.find(p => p.mainCategory === topic.mainCategory && p.subCategory === topic.subCategory);
+      const prevTopic = prevTopNegative.find(p => p.mainCategory === topic.mainCategory && p.subCategory === topic.subCategory);
       if (prevTopic) {
         topic.prevScore = prevTopic.avgScore;
         topic.prevCount = prevTopic.count;

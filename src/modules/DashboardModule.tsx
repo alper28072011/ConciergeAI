@@ -14,7 +14,7 @@ import {
   Filter, Brain, Globe, Database, CheckCircle2, PieChart as PieChartIcon,
   ChevronRight, ArrowUpRight, ArrowDownRight, Printer, Sparkles, Layout,
   Settings, Eye, EyeOff, LayoutGrid, List, ChevronDown, ChevronUp, Layers, History,
-  MousePointerClick
+  MousePointerClick, Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { generateAIContent } from '../services/aiService';
@@ -3426,20 +3426,68 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
             if (module.id === 'hotel_agenda') {
               return (
                 <div key="hotel_agenda" className="flex flex-col gap-8">
+                  {/* Analitik & Metrik Rehber Kartı */}
+                  <div className="bg-gradient-to-r from-slate-50 via-indigo-50/40 to-slate-50 border border-slate-200/90 rounded-2xl p-4.5 shadow-sm">
+                    <div className="flex items-start gap-3.5">
+                      <div className="p-2.5 bg-indigo-600 text-white rounded-xl shrink-0 mt-0.5 shadow-sm">
+                        <Info size={18} />
+                      </div>
+                      <div className="text-xs text-slate-600 leading-relaxed flex-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                          <p className="font-black text-slate-800 text-sm flex items-center gap-2">
+                            <span>Metrik & Çok Boyutlu Duygu Analizi Rehberi</span>
+                            <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">İş Zekası & Karşılaştırma Standartları</span>
+                          </p>
+                        </div>
+                        <p className="text-slate-600">
+                          Misafir yorumları çok boyutludur: Bir konu (örneğin <strong>"Tutum/İletişim"</strong>) bazı misafirler tarafından takdir edilirken (<strong>Övgü Skoru: %85+</strong>), bazı misafirlerce eleştirilebilir (<strong>Şikayet Skoru: %19</strong>). Sistemimiz bu boyutları operasyonel netlik için 3 ayrı perspektifle sunar:
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 mt-3 pt-3 border-t border-slate-200/70 font-medium text-[11px]">
+                          <div className="bg-white/80 p-2.5 rounded-xl border border-indigo-100 flex items-start gap-2 shadow-xs">
+                            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shrink-0 mt-0.5"></span>
+                            <div>
+                              <strong className="text-indigo-900 block font-bold">1. En Çok Konuşulanlar (Gündem):</strong>
+                              <span className="text-slate-500 text-[10px]">Tüm olumlu, nötr ve olumsuz yorumların toplam hacmi ve genel ağırlıklı ortalama puanı.</span>
+                            </div>
+                          </div>
+                          <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100 flex items-start gap-2 shadow-xs">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 mt-0.5"></span>
+                            <div>
+                              <strong className="text-emerald-900 block font-bold">2. En Çok Övülenler (Başarı):</strong>
+                              <span className="text-slate-500 text-[10px]">Yalnızca memnun misafirlerin pozitif geri bildirim adedi ve övgü memnuniyet skoru.</span>
+                            </div>
+                          </div>
+                          <div className="bg-white/80 p-2.5 rounded-xl border border-rose-100 flex items-start gap-2 shadow-xs">
+                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 mt-0.5"></span>
+                            <div>
+                              <strong className="text-rose-900 block font-bold">3. Acil Müdahale (Risk & Şikayet):</strong>
+                              <span className="text-slate-500 text-[10px]">Yalnızca şikayetçi misafirlerin olumsuz yorum adedi ve memnuniyetsizlik şiddeti.</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* En Çok Konuşulanlar */}
                   <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
                     <div className="flex items-center justify-between mb-6">
                       <div>
-                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                          <div className="p-1.5 bg-indigo-50 rounded-lg">
-                            <TrendingUp size={18} className="text-indigo-600" />
-                          </div>
-                          En Çok Konuşulan Konular
-                        </h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            <div className="p-1.5 bg-indigo-50 rounded-lg">
+                              <TrendingUp size={18} className="text-indigo-600" />
+                            </div>
+                            En Çok Konuşulan Konular (Gündem Analizi)
+                          </h3>
+                          <span className="text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded-full border border-indigo-100">
+                            Tüm Yorumlar
+                          </span>
+                        </div>
                         <p className="text-xs text-slate-500 mt-1">
                           {isCompareActive 
-                            ? 'En yüksek yorum hacmine sahip konuların önceki döneme göre değişim ve büyüme analizi' 
-                            : 'En yüksek yorum hacmine sahip, gündemi belirleyen alt kategoriler'}
+                            ? 'Otel genelinde en yüksek yorum hacmine sahip konuların önceki döneme göre toplam hacim ve puan değişimi' 
+                            : 'En yüksek yorum hacmine sahip, tesis gündemini belirleyen ana ve alt konular'}
                         </p>
                       </div>
                     </div>
@@ -3476,7 +3524,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                 if (!active || !payload || !payload.length) return null;
                                 const item = payload[0].payload;
                                 return (
-                                  <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[220px]">
+                                  <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[240px]">
                                     <p className="text-xs font-black text-slate-800 uppercase tracking-tight mb-2 border-b border-slate-100 pb-1.5 flex items-center justify-between">
                                       <span>{item.subCategory}</span>
                                       <span className="text-[9px] text-slate-400 font-normal lowercase">({item.mainCategory})</span>
@@ -3484,12 +3532,18 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                     <div className="space-y-1.5 text-xs">
                                       <div className="flex items-center justify-between font-medium">
                                         <span className="text-indigo-600 flex items-center gap-1.5 font-bold">
-                                          <span className="w-2 h-2 rounded-full bg-indigo-600"></span> Bu Dönem:
+                                          <span className="w-2 h-2 rounded-full bg-indigo-600"></span> Toplam Yorum (Bu Dönem):
                                         </span>
-                                        <span className="font-bold font-mono">{item.count} yorum <span className="text-slate-500 font-normal">(%{item.avgScore})</span></span>
+                                        <span className="font-bold font-mono">{item.count} yorum <span className="text-slate-500 font-normal">(Genel Skor: %{item.avgScore})</span></span>
+                                      </div>
+                                      <div className="flex items-center justify-between text-[11px] text-slate-500 pt-0.5">
+                                        <span>Duygu Dağılımı:</span>
+                                        <span className="font-bold font-mono text-[10px]">
+                                          <strong className="text-emerald-600 font-bold">{item.positiveCount || 0} Olumlu</strong> / <strong className="text-rose-600 font-bold">{item.negativeCount || 0} Olumsuz</strong>
+                                        </span>
                                       </div>
                                       {isCompareActive && (
-                                        <div className="flex items-center justify-between font-medium text-slate-500">
+                                        <div className="flex items-center justify-between font-medium text-slate-500 pt-1 border-t border-slate-100">
                                           <span className="flex items-center gap-1.5">
                                             <span className="w-2 h-2 rounded-full bg-slate-300"></span> Önceki Dönem:
                                           </span>
@@ -3523,7 +3577,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             {isCompareActive && (
                               <Bar 
                                 dataKey="prevCount" 
-                                name="Önceki Dönem"
+                                name="Önceki Dönem (Toplam Hacim)"
                                 fill="#cbd5e1" 
                                 radius={[0, 6, 6, 0]} 
                                 barSize={12}
@@ -3531,7 +3585,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             )}
                             <Bar 
                               dataKey="count" 
-                              name="Bu Dönem"
+                              name="Bu Dönem (Toplam Hacim)"
                               fill="#6366f1" 
                               radius={[0, 6, 6, 0]} 
                               barSize={isCompareActive ? 12 : 24}
@@ -3548,10 +3602,13 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Alt Kategori</th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ana Kategori</th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
-                                {isCompareActive ? 'Bahsedilme (Bu Dönem / Önceki)' : 'Bahsedilme Sayısı'}
+                                {isCompareActive ? 'Toplam Hacim (Bu / Önceki)' : 'Toplam Yorum Sayısı'}
+                              </th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                Duygu Dağılımı (Övgü / Şikayet)
                               </th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                {isCompareActive ? 'Memnuniyet Skoru & Fark' : 'Skor'}
+                                {isCompareActive ? 'Genel Skor & Değişim' : 'Genel Memnuniyet Skoru'}
                               </th>
                               {isCompareActive && (
                                 <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
@@ -3564,6 +3621,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             {dashboardData.mostMentioned.map((item, idx) => {
                               const growthRate = item.growthRate;
                               const scoreDelta = item.scoreDelta;
+                              const posRate = item.positiveRate || (item.count > 0 ? Math.round(((item.positiveCount || 0) / item.count) * 100) : 0);
 
                               return (
                               <tr 
@@ -3600,9 +3658,20 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                     <span className="text-sm font-black text-indigo-600">{item.count}</span>
                                   )}
                                 </td>
+                                <td className="py-4 px-4 text-center min-w-[130px]">
+                                  <div className="flex flex-col gap-1 items-center">
+                                    <div className="w-full h-2 bg-rose-200 rounded-full overflow-hidden flex">
+                                      <div className="h-full bg-emerald-500" style={{ width: `${posRate}%` }} />
+                                    </div>
+                                    <div className="flex items-center justify-between w-full text-[10px] font-bold">
+                                      <span className="text-emerald-600">%{posRate} Olumlu ({item.positiveCount || 0})</span>
+                                      <span className="text-rose-600">{item.negativeCount || 0} Şikayet</span>
+                                    </div>
+                                  </div>
+                                </td>
                                 <td className="py-4 px-4">
                                   <div className="flex items-center gap-3">
-                                    <div className="flex-1 flex flex-col gap-1 min-w-[120px]">
+                                    <div className="flex-1 flex flex-col gap-1 min-w-[100px]">
                                       <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                                         <div className={`h-full rounded-full ${
                                           item.avgScore >= 80 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]' :
@@ -3701,16 +3770,21 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                   <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
                     <div className="flex items-center justify-between mb-6">
                       <div>
-                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                          <div className="p-1.5 bg-emerald-50 rounded-lg">
-                            <Award size={18} className="text-emerald-600" />
-                          </div>
-                          En Çok Övülen Konular
-                        </h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            <div className="p-1.5 bg-emerald-50 rounded-lg">
+                              <Award size={18} className="text-emerald-600" />
+                            </div>
+                            En Çok Övülen Konular (Pozitif Geri Bildirimler)
+                          </h3>
+                          <span className="text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-100">
+                            Yalnızca Övgüler
+                          </span>
+                        </div>
                         <p className="text-xs text-slate-500 mt-1">
                           {isCompareActive 
-                            ? 'Misafirlerin en çok beğendiği alanların önceki döneme göre puan artışı ve başarı performansı' 
-                            : 'Misafirlerin en yüksek puan verdiği ve memnuniyetin zirve yaptığı alanlar'}
+                            ? 'Misafirlerin övgüyle bahsettiği alanların önceki döneme göre övgü adedi ve memnuniyet puanı artış analizi' 
+                            : 'Yalnızca olumlu geri bildirim içeren yorumlar baz alınarak misafirlerin en yüksek puan verdiği alanlar'}
                         </p>
                       </div>
                     </div>
@@ -3747,7 +3821,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                 if (!active || !payload || !payload.length) return null;
                                 const item = payload[0].payload;
                                 return (
-                                  <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[220px]">
+                                  <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[240px]">
                                     <p className="text-xs font-black text-slate-800 uppercase tracking-tight mb-2 border-b border-slate-100 pb-1.5 flex items-center justify-between">
                                       <span>{item.subCategory}</span>
                                       <span className="text-[9px] text-slate-400 font-normal lowercase">({item.mainCategory})</span>
@@ -3755,21 +3829,27 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                     <div className="space-y-1.5 text-xs">
                                       <div className="flex items-center justify-between font-medium">
                                         <span className="text-emerald-600 flex items-center gap-1.5 font-bold">
-                                          <span className="w-2 h-2 rounded-full bg-emerald-600"></span> Bu Dönem:
+                                          <span className="w-2 h-2 rounded-full bg-emerald-600"></span> Övgü Memnuniyet Skoru:
                                         </span>
-                                        <span className="font-bold font-mono">%{item.avgScore} <span className="text-slate-400 text-[10px]">({item.count} yorum)</span></span>
+                                        <span className="font-bold font-mono">%{item.avgScore} <span className="text-slate-400 text-[10px]">({item.count} övgü)</span></span>
                                       </div>
+                                      {item.overallScore !== undefined && (
+                                        <div className="flex items-center justify-between text-[11px] text-slate-500">
+                                          <span>Konunun Genel Ortalaması:</span>
+                                          <span className="font-bold font-mono text-slate-700">%{item.overallScore} <span className="text-slate-400 font-normal">(Toplam {item.totalCount} yorum)</span></span>
+                                        </div>
+                                      )}
                                       {isCompareActive && (
-                                        <div className="flex items-center justify-between font-medium text-slate-500">
+                                        <div className="flex items-center justify-between font-medium text-slate-500 pt-1 border-t border-slate-100">
                                           <span className="flex items-center gap-1.5">
-                                            <span className="w-2 h-2 rounded-full bg-slate-300"></span> Önceki Dönem:
+                                            <span className="w-2 h-2 rounded-full bg-slate-300"></span> Önceki Dönem (Övgü):
                                           </span>
-                                          <span className="font-bold font-mono">%{item.prevScore || 0} <span className="text-slate-400 text-[10px]">({item.prevCount || 0} yorum)</span></span>
+                                          <span className="font-bold font-mono">%{item.prevScore || 0} <span className="text-slate-400 text-[10px]">({item.prevCount || 0} övgü)</span></span>
                                         </div>
                                       )}
                                       {isCompareActive && item.scoreDelta !== undefined && (
                                         <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold">
-                                          <span className="text-slate-500">Puan Değişimi:</span>
+                                          <span className="text-slate-500">Övgü Puan Değişimi:</span>
                                           <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
                                             item.scoreDelta > 0 ? 'bg-emerald-50 text-emerald-700' : 
                                             item.scoreDelta < 0 ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'
@@ -3787,7 +3867,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             {isCompareActive && (
                               <Bar 
                                 dataKey="prevScore" 
-                                name="Önceki Dönem"
+                                name="Önceki Dönem (Övgü Skoru)"
                                 fill="#cbd5e1" 
                                 radius={[0, 6, 6, 0]} 
                                 barSize={12}
@@ -3795,7 +3875,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             )}
                             <Bar 
                               dataKey="avgScore" 
-                              name="Bu Dönem"
+                              name="Bu Dönem (Övgü Skoru)"
                               fill="#10b981" 
                               radius={[0, 6, 6, 0]} 
                               barSize={isCompareActive ? 12 : 24}
@@ -3812,10 +3892,10 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Alt Kategori</th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ana Kategori</th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
-                                {isCompareActive ? 'Övgü Hacmi (Bu Dönem / Önceki)' : 'Bahsedilme Sayısı'}
+                                {isCompareActive ? 'Övgü Hacmi (Bu / Önceki)' : 'Övgü Yorum Sayısı'}
                               </th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                {isCompareActive ? 'Memnuniyet Skoru & Puan Artışı' : 'Memnuniyet Skoru'}
+                                {isCompareActive ? 'Övgü Memnuniyet Skoru & Artış' : 'Övgü Memnuniyet Skoru'}
                               </th>
                               {isCompareActive && (
                                 <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
@@ -3848,7 +3928,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                   {isCompareActive ? (
                                     <div className="flex flex-col items-center justify-center gap-0.5">
                                       <div className="flex items-center gap-1.5 font-mono">
-                                        <span className="text-sm font-black text-emerald-600">{item.count}</span>
+                                        <span className="text-sm font-black text-emerald-600">{item.count} övgü</span>
                                         <span className="text-xs text-slate-400 font-semibold">/ {item.prevCount || 0}</span>
                                       </div>
                                       {item.prevCount && item.prevCount > 0 ? (
@@ -3862,7 +3942,12 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                       )}
                                     </div>
                                   ) : (
-                                    <span className="text-xs font-bold text-slate-500">{item.count}</span>
+                                    <div className="flex flex-col items-center">
+                                      <span className="text-sm font-black text-emerald-600">{item.count} övgü</span>
+                                      {item.totalCount > item.count && (
+                                        <span className="text-[10px] text-slate-400">Toplam {item.totalCount} yorum</span>
+                                      )}
+                                    </div>
                                   )}
                                 </td>
                                 <td className="py-4 px-4">
@@ -3871,12 +3956,12 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                       <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                                         <div className="h-full bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.3)]" style={{ width: `${item.avgScore}%` }} />
                                       </div>
-                                      {isCompareActive && item.prevScore !== undefined && (
-                                        <div className="flex items-center justify-between text-[10px] text-slate-400">
-                                          <span>Bu: <strong className="text-slate-700 font-bold">%{item.avgScore}</strong></span>
-                                          <span>Önceki: <strong className="text-slate-500 font-semibold">%{item.prevScore}</strong></span>
-                                        </div>
-                                      )}
+                                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                        <span>Övgü Skoru: <strong className="text-emerald-700 font-bold">%{item.avgScore}</strong></span>
+                                        {item.overallScore !== undefined && (
+                                          <span>Genel Ort: <strong className="text-slate-600 font-medium">%{item.overallScore}</strong></span>
+                                        )}
+                                      </div>
                                     </div>
                                     <div className="flex flex-col items-end min-w-[55px]">
                                       <span className="text-xs font-black text-emerald-600 w-10">%{item.avgScore}</span>
@@ -3946,16 +4031,21 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                   <section className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
                     <div className="flex items-center justify-between mb-6">
                       <div>
-                        <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                          <div className="p-1.5 bg-rose-50 rounded-lg">
-                            <AlertTriangle size={18} className="text-rose-600" />
-                          </div>
-                          Acil Müdahale Gerekenler
-                        </h3>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                            <div className="p-1.5 bg-rose-50 rounded-lg">
+                              <AlertTriangle size={18} className="text-rose-600" />
+                            </div>
+                            Acil Müdahale Gerekenler (Şikayet & Risk Analizi)
+                          </h3>
+                          <span className="text-[10px] font-bold bg-rose-50 text-rose-700 px-2 py-0.5 rounded-full border border-rose-100">
+                            Yalnızca Şikayetler
+                          </span>
+                        </div>
                         <p className="text-xs text-slate-500 mt-1">
                           {isCompareActive 
-                            ? 'En düşük performans gösteren alanların şikayet hacmi ve memnuniyet puanı değişim analizi' 
-                            : 'En düşük performans gösteren ve operasyonel müdahale bekleyen kritik konular'}
+                            ? 'En çok şikayet alan konuların önceki döneme göre şikayet hacmi ve memnuniyetsizlik şiddeti değişimi' 
+                            : 'Yalnızca olumsuz geri bildirim içeren şikayetler baz alınarak acil operasyonel müdahale bekleyen konular'}
                         </p>
                       </div>
                     </div>
@@ -3992,7 +4082,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                 if (!active || !payload || !payload.length) return null;
                                 const item = payload[0].payload;
                                 return (
-                                  <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[220px]">
+                                  <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[240px]">
                                     <p className="text-xs font-black text-slate-800 uppercase tracking-tight mb-2 border-b border-slate-100 pb-1.5 flex items-center justify-between">
                                       <span>{item.subCategory}</span>
                                       <span className="text-[9px] text-slate-400 font-normal lowercase">({item.mainCategory})</span>
@@ -4000,14 +4090,20 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                     <div className="space-y-1.5 text-xs">
                                       <div className="flex items-center justify-between font-medium">
                                         <span className="text-rose-600 flex items-center gap-1.5 font-bold">
-                                          <span className="w-2 h-2 rounded-full bg-rose-600"></span> Bu Dönem:
+                                          <span className="w-2 h-2 rounded-full bg-rose-600"></span> Şikayet Skoru (Şiddeti):
                                         </span>
                                         <span className="font-bold font-mono">%{item.avgScore} <span className="text-slate-400 text-[10px]">({item.count} şikayet)</span></span>
                                       </div>
+                                      {item.overallScore !== undefined && (
+                                        <div className="flex items-center justify-between text-[11px] text-slate-500">
+                                          <span>Konunun Genel Ortalaması:</span>
+                                          <span className="font-bold font-mono text-slate-700">%{item.overallScore} <span className="text-slate-400 font-normal">(Toplam {item.totalCount} yorum)</span></span>
+                                        </div>
+                                      )}
                                       {isCompareActive && (
-                                        <div className="flex items-center justify-between font-medium text-slate-500">
+                                        <div className="flex items-center justify-between font-medium text-slate-500 pt-1 border-t border-slate-100">
                                           <span className="flex items-center gap-1.5">
-                                            <span className="w-2 h-2 rounded-full bg-slate-300"></span> Önceki Dönem:
+                                            <span className="w-2 h-2 rounded-full bg-slate-300"></span> Önceki Dönem (Şikayet):
                                           </span>
                                           <span className="font-bold font-mono">%{item.prevScore || 0} <span className="text-slate-400 text-[10px]">({item.prevCount || 0} şikayet)</span></span>
                                         </div>
@@ -4017,7 +4113,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                           <span className="text-slate-500">Şikayet / Skor Değişimi:</span>
                                           <div className="flex items-center gap-1.5">
                                             <span className="text-rose-600 font-black">
-                                              {item.countDelta !== undefined && item.countDelta >= 0 ? `+${item.countDelta}` : item.countDelta} yorum
+                                              {item.countDelta !== undefined && item.countDelta >= 0 ? `+${item.countDelta}` : item.countDelta} şikayet
                                             </span>
                                             {item.scoreDelta !== undefined && (
                                               <span className={`text-[10px] px-1 py-0.2 rounded font-black ${
@@ -4039,7 +4135,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             {isCompareActive && (
                               <Bar 
                                 dataKey="prevScore" 
-                                name="Önceki Dönem"
+                                name="Önceki Dönem (Şikayet Skoru)"
                                 fill="#cbd5e1" 
                                 radius={[0, 6, 6, 0]} 
                                 barSize={12}
@@ -4047,7 +4143,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             )}
                             <Bar 
                               dataKey="avgScore" 
-                              name="Bu Dönem"
+                              name="Bu Dönem (Şikayet Skoru)"
                               fill="#ef4444" 
                               radius={[0, 6, 6, 0]} 
                               barSize={isCompareActive ? 12 : 24}
@@ -4064,10 +4160,10 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Alt Kategori</th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ana Kategori</th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
-                                {isCompareActive ? 'Şikayet Hacmi (Bu Dönem / Önceki)' : 'Bahsedilme Sayısı'}
+                                {isCompareActive ? 'Şikayet Hacmi (Bu / Önceki)' : 'Şikayet Yorum Sayısı'}
                               </th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                                {isCompareActive ? 'Memnuniyet Skoru & Değişim' : 'Memnuniyet Skoru'}
+                                {isCompareActive ? 'Şikayet Skoru & Değişim' : 'Şikayet Skoru (Şiddeti)'}
                               </th>
                               {isCompareActive && (
                                 <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
@@ -4100,7 +4196,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                   {isCompareActive ? (
                                     <div className="flex flex-col items-center justify-center gap-0.5">
                                       <div className="flex items-center gap-1.5 font-mono">
-                                        <span className="text-sm font-black text-rose-600">{item.count}</span>
+                                        <span className="text-sm font-black text-rose-600">{item.count} şikayet</span>
                                         <span className="text-xs text-slate-400 font-semibold">/ {item.prevCount || 0}</span>
                                       </div>
                                       {item.prevCount && item.prevCount > 0 ? (
@@ -4114,7 +4210,12 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                       )}
                                     </div>
                                   ) : (
-                                    <span className="text-xs font-bold text-slate-500">{item.count}</span>
+                                    <div className="flex flex-col items-center">
+                                      <span className="text-sm font-black text-rose-600">{item.count} şikayet</span>
+                                      {item.totalCount > item.count && (
+                                        <span className="text-[10px] text-slate-400">Toplam {item.totalCount} yorum</span>
+                                      )}
+                                    </div>
                                   )}
                                 </td>
                                 <td className="py-4 px-4">
@@ -4123,12 +4224,12 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                       <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
                                         <div className="h-full bg-rose-500 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.3)]" style={{ width: `${item.avgScore}%` }} />
                                       </div>
-                                      {isCompareActive && item.prevScore !== undefined && (
-                                        <div className="flex items-center justify-between text-[10px] text-slate-400">
-                                          <span>Bu: <strong className="text-slate-700 font-bold">%{item.avgScore}</strong></span>
-                                          <span>Önceki: <strong className="text-slate-500 font-semibold">%{item.prevScore}</strong></span>
-                                        </div>
-                                      )}
+                                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                        <span>Şikayet Skoru: <strong className="text-rose-700 font-bold">%{item.avgScore}</strong></span>
+                                        {item.overallScore !== undefined && (
+                                          <span>Genel Ort: <strong className="text-slate-600 font-medium">%{item.overallScore}</strong></span>
+                                        )}
+                                      </div>
                                     </div>
                                     <div className="flex flex-col items-end min-w-[55px]">
                                       <span className="text-xs font-black text-rose-600 w-10">%{item.avgScore}</span>
