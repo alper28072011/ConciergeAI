@@ -2522,7 +2522,11 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                         </div>
                         Zamana Göre Memnuniyet Skoru
                       </h3>
-                      <p className="text-xs text-slate-500 mt-1">Seçilen periyoda göre ortalama memnuniyet değişimi</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {isCompareActive 
+                          ? 'Seçilen periyoda göre memnuniyet skoru ve yorum hacminin önceki dönemle karşılaştırması' 
+                          : 'Seçilen periyoda göre ortalama memnuniyet değişimi'}
+                      </p>
                     </div>
                     <div className="flex p-1 bg-slate-100 rounded-lg interactive-timeline-tabs">
                       {[
@@ -2548,7 +2552,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                   </div>
 
                   {globalViewMode === 'chart' ? (
-                    <div className="h-[300px] w-full relative min-w-0 min-h-0">
+                    <div className="h-[320px] w-full relative min-w-0 min-h-0">
                       {['daily', 'weekly', 'monthly', 'yearly'].map(granularity => {
                         const data = dashboardData.satisfactionOverTime[granularity as keyof typeof dashboardData.satisfactionOverTime];
                         const isActive = timelineGranularity === granularity;
@@ -2559,7 +2563,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             className={`absolute inset-0 transition-opacity duration-300 ${isActive ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}
                           >
                             <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                              <LineChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: isCompareActive ? 25 : 10 }}>
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                 <XAxis 
                                   dataKey="date" 
@@ -2576,16 +2580,84 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                   tickFormatter={(v) => `%${v}`}
                                 />
                                 <Tooltip 
-                                  contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
-                                  formatter={(value: any) => [`%${value}`, 'Ort. Skor']}
+                                  content={({ active, payload }) => {
+                                    if (!active || !payload || !payload.length) return null;
+                                    const item = payload[0].payload;
+                                    const scoreDelta = item.scoreDelta;
+                                    const growthRate = item.growthRate;
+                                    return (
+                                      <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[220px]">
+                                        <p className="text-xs font-black text-slate-800 uppercase tracking-tight mb-2 border-b border-slate-100 pb-1.5 flex items-center justify-between">
+                                          <span>{item.date}</span>
+                                          {item.prevDate && <span className="text-[9px] text-slate-400 font-normal lowercase">(Önceki: {item.prevDate})</span>}
+                                        </p>
+                                        <div className="space-y-1.5 text-xs">
+                                          <div className="flex items-center justify-between font-medium">
+                                            <span className="text-indigo-600 flex items-center gap-1.5 font-bold">
+                                              <span className="w-2 h-2 rounded-full bg-indigo-600"></span> Bu Dönem:
+                                            </span>
+                                            <span className="font-bold font-mono">%{item.avgScore} <span className="text-slate-400 text-[10px]">({item.count} yorum)</span></span>
+                                          </div>
+                                          {isCompareActive && item.prevAvgScore !== undefined && (
+                                            <div className="flex items-center justify-between font-medium text-slate-500">
+                                              <span className="flex items-center gap-1.5">
+                                                <span className="w-2 h-2 rounded-full bg-slate-300"></span> Önceki Dönem:
+                                              </span>
+                                              <span className="font-bold font-mono">%{item.prevAvgScore} <span className="text-slate-400 text-[10px]">({item.prevCount || 0} yorum)</span></span>
+                                            </div>
+                                          )}
+                                          {isCompareActive && scoreDelta !== undefined && (
+                                            <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold">
+                                              <span className="text-slate-500">Skor Değişimi:</span>
+                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                                scoreDelta > 0 ? 'bg-emerald-50 text-emerald-700' : 
+                                                scoreDelta < 0 ? 'bg-rose-50 text-rose-700' : 
+                                                'bg-slate-100 text-slate-600'
+                                              }`}>
+                                                {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} puan {scoreDelta > 0 ? '↗' : scoreDelta < 0 ? '↘' : '▬'}
+                                              </span>
+                                            </div>
+                                          )}
+                                          {isCompareActive && growthRate !== undefined && item.prevCount !== undefined && (
+                                            <div className="flex items-center justify-between text-[11px] font-bold">
+                                              <span className="text-slate-500">Yorum Hacmi:</span>
+                                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                                growthRate >= 0 ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                                              }`}>
+                                                {growthRate >= 0 ? `+${growthRate}% ▲` : `${growthRate}% ▼`}
+                                              </span>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    );
+                                  }}
                                 />
+                                {isCompareActive && (
+                                  <Legend 
+                                    wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} 
+                                    verticalAlign="bottom"
+                                  />
+                                )}
+                                {isCompareActive && (
+                                  <Line 
+                                    type="monotone" 
+                                    dataKey="prevAvgScore" 
+                                    name="Önceki Dönem" 
+                                    stroke="#94a3b8" 
+                                    strokeWidth={2} 
+                                    strokeDasharray="4 4" 
+                                    dot={{ r: 3, fill: '#94a3b8', strokeWidth: 1.5, stroke: '#fff' }} 
+                                  />
+                                )}
                                 <Line 
                                   type="monotone" 
                                   dataKey="avgScore" 
+                                  name="Bu Dönem" 
                                   stroke="#6366f1" 
                                   strokeWidth={3} 
-                                  dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }}
-                                  activeDot={{ r: 6, strokeWidth: 0 }}
+                                  dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }} 
+                                  activeDot={{ r: 6, strokeWidth: 0 }} 
                                 />
                               </LineChart>
                             </ResponsiveContainer>
@@ -2608,8 +2680,17 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                               <thead>
                                 <tr className="border-b border-slate-100">
                                   <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Tarih / Periyot</th>
-                                  <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
-                                  <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">Ort. Memnuniyet</th>
+                                  <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">
+                                    {isCompareActive ? 'Yorum Sayısı (Bu / Önceki)' : 'Yorum Sayısı'}
+                                  </th>
+                                  <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                                    {isCompareActive ? 'Memnuniyet Skoru & Karşılaştırma' : 'Ort. Memnuniyet'}
+                                  </th>
+                                  {isCompareActive && (
+                                    <th className="py-3 px-4 text-[10px] font-black text-slate-400 uppercase tracking-wider text-center">
+                                      Performans Eğilimi
+                                    </th>
+                                  )}
                                 </tr>
                               </thead>
                               <tbody>
@@ -2619,42 +2700,103 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                   if (granularity === 'monthly') divisor = 30;
                                   if (granularity === 'yearly') divisor = 365;
                                   const avgCount = (item.count / divisor).toFixed(1);
+                                  const scoreDelta = item.scoreDelta;
+                                  const growthRate = item.growthRate;
                                   
                                   return (
                                     <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
-                                      <td className="py-3 px-4 text-sm font-bold text-slate-700">{item.date}</td>
-                                      <td className="py-3 px-4 text-center">
-                                        <div className="flex flex-col items-center">
-                                          <span className="text-sm text-slate-500 font-mono">{item.count}</span>
-                                          {granularity !== 'daily' && (
-                                            <span className="text-[10px] text-slate-400 font-medium mt-0.5">Günlük Ort: {avgCount}</span>
+                                      <td className="py-3 px-4 text-sm font-bold text-slate-700">
+                                        <div className="flex flex-col">
+                                          <span>{item.date}</span>
+                                          {isCompareActive && item.prevDate && (
+                                            <span className="text-[10px] text-slate-400 font-normal">Önceki: {item.prevDate}</span>
                                           )}
                                         </div>
                                       </td>
+                                      <td className="py-3 px-4 text-center">
+                                        {isCompareActive ? (
+                                          <div className="flex flex-col items-center justify-center gap-0.5">
+                                            <div className="flex items-center gap-1.5 font-mono">
+                                              <span className="text-sm font-black text-slate-800">{item.count}</span>
+                                              <span className="text-xs text-slate-400 font-semibold">/ {item.prevCount || 0}</span>
+                                            </div>
+                                            {item.prevCount !== undefined && item.prevCount > 0 ? (
+                                              <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full inline-flex items-center gap-0.5 ${
+                                                growthRate !== undefined && growthRate >= 0 ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                                              }`}>
+                                                {growthRate !== undefined && growthRate >= 0 ? `+${growthRate}% ▲` : `${growthRate}% ▼`}
+                                              </span>
+                                            ) : (
+                                              <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1 rounded">Yeni ✨</span>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <div className="flex flex-col items-center">
+                                            <span className="text-sm text-slate-500 font-mono">{item.count}</span>
+                                            {granularity !== 'daily' && (
+                                              <span className="text-[10px] text-slate-400 font-medium mt-0.5">Günlük Ort: {avgCount}</span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </td>
                                       <td className="py-3 px-4">
-                                      <div className="flex items-center gap-3">
-                                        <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
-                                          <div 
-                                            className={`h-full rounded-full ${
-                                              item.avgScore >= 80 ? 'bg-emerald-500' :
-                                              item.avgScore >= 60 ? 'bg-blue-500' :
-                                              item.avgScore >= 40 ? 'bg-amber-500' :
-                                              'bg-red-500'
-                                            }`}
-                                            style={{ width: `${item.avgScore}%` }}
-                                          />
+                                        <div className="flex items-center gap-3">
+                                          <div className="flex-1 flex flex-col gap-1 min-w-[120px]">
+                                            <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                              <div 
+                                                className={`h-full rounded-full transition-all duration-500 ${
+                                                  item.avgScore >= 80 ? 'bg-emerald-500' :
+                                                  item.avgScore >= 60 ? 'bg-blue-500' :
+                                                  item.avgScore >= 40 ? 'bg-amber-500' :
+                                                  'bg-red-500'
+                                                }`}
+                                                style={{ width: `${item.avgScore}%` }}
+                                              />
+                                            </div>
+                                            {isCompareActive && item.prevAvgScore !== undefined && (
+                                              <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                                <span>Bu: <strong className="text-slate-700 font-bold">%{item.avgScore}</strong></span>
+                                                <span>Önceki: <strong className="text-slate-500 font-semibold">%{item.prevAvgScore}</strong></span>
+                                              </div>
+                                            )}
+                                          </div>
+                                          <div className="flex flex-col items-end min-w-[50px]">
+                                            <span className={`text-xs font-black ${
+                                              item.avgScore >= 80 ? 'text-emerald-600' :
+                                              item.avgScore >= 60 ? 'text-blue-600' :
+                                              item.avgScore >= 40 ? 'text-amber-600' :
+                                              'text-red-600'
+                                            }`}>
+                                              %{item.avgScore}
+                                            </span>
+                                            {isCompareActive && scoreDelta !== undefined && (
+                                              <span className={`text-[10px] font-black leading-none mt-0.5 ${
+                                                scoreDelta > 0 ? 'text-emerald-600' : 
+                                                scoreDelta < 0 ? 'text-rose-600' : 
+                                                'text-slate-400'
+                                              }`}>
+                                                {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} p.
+                                              </span>
+                                            )}
+                                          </div>
                                         </div>
-                                        <span className={`text-xs font-black w-10 ${
-                                          item.avgScore >= 80 ? 'text-emerald-600' :
-                                          item.avgScore >= 60 ? 'text-blue-600' :
-                                          item.avgScore >= 40 ? 'text-amber-600' :
-                                          'text-red-600'
-                                        }`}>
-                                          %{item.avgScore}
-                                        </span>
-                                      </div>
-                                    </td>
-                                  </tr>
+                                      </td>
+                                      {isCompareActive && (
+                                        <td className="py-3 px-4 text-center">
+                                          {scoreDelta !== undefined ? (
+                                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black tracking-tight ${
+                                              scoreDelta > 3 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                                              scoreDelta < -3 ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                                              'bg-slate-50 text-slate-600 border border-slate-200'
+                                            }`}>
+                                              {scoreDelta > 0 ? `+${scoreDelta} p. ↗` : scoreDelta < 0 ? `${scoreDelta} p. ↘` : '▬ Dengeli'}
+                                            </span>
+                                          ) : (
+                                            <span className="text-xs text-slate-400 font-medium">-</span>
+                                          )}
+                                        </td>
+                                      )}
+                                    </tr>
                                   );
                                 })}
                               </tbody>
@@ -3074,61 +3216,137 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
             }
 
             if (module.id === 'source_analysis') {
+              const totalCurrentSourceCount = dashboardData.sourceAnalysis.reduce((acc, cur) => acc + cur.count, 0);
               return (
                 <section key="source_analysis" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
                   <div className="flex items-center justify-between mb-6">
                     <div>
                       <h3 className="text-lg font-bold text-slate-900">Kanal Dağılımı</h3>
-                      <p className="text-xs text-slate-500">Yorumların geldiği platformlar ve kanal bazlı performans</p>
+                      <p className="text-xs text-slate-500">
+                        {isCompareActive 
+                          ? 'Yorum kanalları, pazar payı ve performansın önceki dönemle karşılaştırması' 
+                          : 'Yorumların geldiği platformlar ve kanal bazlı performans'}
+                      </p>
                     </div>
                   </div>
 
                   {globalViewMode === 'chart' ? (
-                    <div className="h-[300px] w-full relative min-w-0 min-h-0">
-                      <ResponsiveContainer width="100%" height={300}>
-                        <PieChart
-                          onClick={(data: any) => {
-                            if (data && data.activePayload && data.activePayload[0]) {
-                              setDrillDownFilter({ type: 'source', value: data.activePayload[0].name });
-                            }
-                          }}
-                        >
-                          <Pie
-                            data={dashboardData.sourceAnalysis}
-                            innerRadius={80}
-                            outerRadius={110}
-                            paddingAngle={8}
-                            dataKey="count"
-                            nameKey="name"
-                          >
-                            {dashboardData.sourceAnalysis.map((entry, index) => (
-                              <Cell 
-                                key={`cell-${index}`} 
-                                fill={COLORS[index % COLORS.length]} 
-                                className="interactive-filter-trigger cursor-pointer"
-                                data-filter-type="source"
-                                data-filter-value={entry.name}
-                              />
-                            ))}
-                          </Pie>
-                          <Tooltip 
-                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                            formatter={(value: any, name: string, props: any) => {
-                              if (isCompareActive && props.payload.prevCount !== undefined) {
-                                return [
-                                  <div key="tooltip-content" className="flex flex-col gap-1">
-                                    <span>Bu Dönem: {value}</span>
-                                    <span className="text-slate-400">Önceki Dönem: {props.payload.prevCount}</span>
-                                  </div>,
-                                  name
-                                ];
+                    <div className="space-y-4">
+                      <div className="h-[300px] w-full relative min-w-0 min-h-0">
+                        <ResponsiveContainer width="100%" height={300}>
+                          <PieChart
+                            onClick={(data: any) => {
+                              if (data && data.activePayload && data.activePayload[0]) {
+                                setDrillDownFilter({ type: 'source', value: data.activePayload[0].name });
                               }
-                              return [value, name];
                             }}
-                          />
-                          <Legend verticalAlign="bottom" iconType="circle" iconSize={10} wrapperStyle={{ fontSize: '12px', fontWeight: 600, paddingTop: '15px' }} />
-                        </PieChart>
-                      </ResponsiveContainer>
+                          >
+                            <Pie
+                              data={dashboardData.sourceAnalysis}
+                              innerRadius={80}
+                              outerRadius={110}
+                              paddingAngle={8}
+                              dataKey="count"
+                              nameKey="name"
+                            >
+                              {dashboardData.sourceAnalysis.map((entry, index) => (
+                                <Cell 
+                                  key={`cell-${index}`} 
+                                  fill={COLORS[index % COLORS.length]} 
+                                  className="interactive-filter-trigger cursor-pointer"
+                                  data-filter-type="source"
+                                  data-filter-value={entry.name}
+                                />
+                              ))}
+                            </Pie>
+                            <Tooltip 
+                              content={({ active, payload }) => {
+                                if (!active || !payload || !payload.length) return null;
+                                const data = payload[0].payload;
+                                const scoreDelta = data.scoreDelta;
+                                const growthRate = data.growthRate;
+                                const share = totalCurrentSourceCount > 0 ? ((data.count / totalCurrentSourceCount) * 100).toFixed(1) : '0';
+                                return (
+                                  <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[220px]">
+                                    <p className="text-xs font-black text-slate-800 uppercase tracking-tight mb-2 border-b border-slate-100 pb-1.5 flex items-center justify-between">
+                                      <span>{data.name}</span>
+                                      <span className="text-[10px] text-slate-400 font-bold">%{share} Pazar Payı</span>
+                                    </p>
+                                    <div className="space-y-1.5 text-xs">
+                                      <div className="flex items-center justify-between font-medium">
+                                        <span className="text-indigo-600 font-bold">Bu Dönem:</span>
+                                        <span className="font-bold font-mono">%{data.avgScore} <span className="text-slate-400 text-[10px]">({data.count} yorum)</span></span>
+                                      </div>
+                                      {isCompareActive && data.prevScore !== undefined && (
+                                        <div className="flex items-center justify-between font-medium text-slate-500">
+                                          <span>Önceki Dönem:</span>
+                                          <span className="font-bold font-mono">%{data.prevScore} <span className="text-slate-400 text-[10px]">({data.prevCount || 0} yorum)</span></span>
+                                        </div>
+                                      )}
+                                      {isCompareActive && scoreDelta !== undefined && (
+                                        <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold">
+                                          <span className="text-slate-500">Skor Değişimi:</span>
+                                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                            scoreDelta > 0 ? 'bg-emerald-50 text-emerald-700' : 
+                                            scoreDelta < 0 ? 'bg-rose-50 text-rose-700' : 
+                                            'bg-slate-100 text-slate-600'
+                                          }`}>
+                                            {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} puan {scoreDelta > 0 ? '↗' : scoreDelta < 0 ? '↘' : '▬'}
+                                          </span>
+                                        </div>
+                                      )}
+                                      {isCompareActive && growthRate !== undefined && data.prevCount !== undefined && (
+                                        <div className="flex items-center justify-between text-[11px] font-bold">
+                                          <span className="text-slate-500">Yorum Hacmi:</span>
+                                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                            growthRate >= 0 ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                                          }`}>
+                                            {growthRate >= 0 ? `+${growthRate}% ▲` : `${growthRate}% ▼`}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
+                              }}
+                            />
+                            <Legend verticalAlign="bottom" iconType="circle" iconSize={10} wrapperStyle={{ fontSize: '12px', fontWeight: 600, paddingTop: '15px' }} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+
+                      {isCompareActive && (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 pt-2 border-t border-slate-100">
+                          {dashboardData.sourceAnalysis.map((item, idx) => {
+                            const scoreDelta = item.scoreDelta;
+                            const growthRate = item.growthRate;
+                            return (
+                              <div key={idx} className="p-2.5 rounded-xl bg-slate-50/80 border border-slate-100 flex flex-col gap-1">
+                                <div className="flex items-center gap-1.5">
+                                  <div className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                                  <span className="text-xs font-bold text-slate-700 truncate">{item.name}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="font-bold text-slate-800">%{item.avgScore}</span>
+                                  {scoreDelta !== undefined && (
+                                    <span className={`text-[10px] font-black ${scoreDelta > 0 ? 'text-emerald-600' : scoreDelta < 0 ? 'text-rose-600' : 'text-slate-400'}`}>
+                                      {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} p.
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] text-slate-500">
+                                  <span>{item.count} yorum</span>
+                                  {growthRate !== undefined && item.prevCount !== undefined && item.prevCount > 0 && (
+                                    <span className={`font-black ${growthRate >= 0 ? 'text-indigo-600' : 'text-slate-500'}`}>
+                                      {growthRate >= 0 ? `+${growthRate}%` : `${growthRate}%`}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div className="overflow-x-auto">
@@ -3136,70 +3354,127 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                         <thead>
                           <tr className="border-b border-slate-100">
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kanal Kaynağı</th>
-                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
-                            {isCompareActive && <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Önceki Yorum Sayısı</th>}
-                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
-                            {isCompareActive && <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Önceki Memnuniyet</th>}
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">
+                              {isCompareActive ? 'Yorum Hacmi (Bu / Önceki)' : 'Yorum Sayısı'}
+                            </th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              {isCompareActive ? 'Memnuniyet Skoru & Karşılaştırma' : 'Memnuniyet Skoru'}
+                            </th>
+                            {isCompareActive && (
+                              <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">
+                                Performans Eğilimi
+                              </th>
+                            )}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
-                          {dashboardData.sourceAnalysis.map((item, idx) => (
-                            <tr 
-                              key={idx} 
-                              className="hover:bg-slate-50 transition-colors cursor-pointer interactive-filter-trigger"
-                              data-filter-type="source"
-                              data-filter-value={item.name}
-                              onClick={() => setDrillDownFilter({ type: 'source', value: item.name })}
-                            >
-                              <td className="py-3 px-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
-                                  <span className="text-sm font-semibold text-slate-700">{item.name}</span>
-                                </div>
-                              </td>
-                              <td className="py-3 px-4 text-center">
-                                <div className="flex flex-col items-center">
-                                  <span className="text-sm text-slate-500 font-mono">{item.count}</span>
-                                  <span className="text-[10px] text-slate-400 font-medium mt-0.5">Ort: {(item.count / daysInPeriod).toFixed(1)}</span>
-                                </div>
-                              </td>
-                              {isCompareActive && (
-                                <td className="py-3 px-4 text-sm text-slate-400 text-center font-mono">
-                                  {item.prevCount || 0}
-                                </td>
-                              )}
-                              <td className="py-3 px-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
-                                    <div 
-                                      className={`h-full rounded-full ${
-                                        item.avgScore >= 80 ? 'bg-emerald-500' :
-                                        item.avgScore >= 60 ? 'bg-blue-500' :
-                                        item.avgScore >= 40 ? 'bg-amber-500' :
-                                        'bg-red-500'
-                                      }`}
-                                      style={{ width: `${item.avgScore}%` }}
-                                    />
-                                  </div>
-                                  <span className={`text-xs font-bold w-10 ${
-                                    item.avgScore >= 80 ? 'text-emerald-600' :
-                                    item.avgScore >= 60 ? 'text-blue-600' :
-                                    item.avgScore >= 40 ? 'text-amber-600' :
-                                    'text-red-600'
-                                  }`}>
-                                    %{item.avgScore}
-                                  </span>
-                                </div>
-                              </td>
-                              {isCompareActive && (
+                          {dashboardData.sourceAnalysis.map((item, idx) => {
+                            const scoreDelta = item.scoreDelta;
+                            const countDelta = item.countDelta;
+                            const growthRate = item.growthRate;
+                            const share = totalCurrentSourceCount > 0 ? ((item.count / totalCurrentSourceCount) * 100).toFixed(1) : '0';
+
+                            return (
+                              <tr 
+                                key={idx} 
+                                className="hover:bg-slate-50 transition-colors cursor-pointer interactive-filter-trigger"
+                                data-filter-type="source"
+                                data-filter-value={item.name}
+                                onClick={() => setDrillDownFilter({ type: 'source', value: item.name })}
+                              >
                                 <td className="py-3 px-4">
-                                  <span className="text-xs font-bold text-slate-400">
-                                    %{item.prevScore || 0}
-                                  </span>
+                                  <div className="flex items-center gap-3">
+                                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                                    <div className="flex flex-col">
+                                      <span className="text-sm font-bold text-slate-800">{item.name}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Pay: %{share}</span>
+                                    </div>
+                                  </div>
                                 </td>
-                              )}
-                            </tr>
-                          ))}
+                                <td className="py-3 px-4 text-center">
+                                  {isCompareActive ? (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <div className="flex items-center gap-1.5 font-mono">
+                                        <span className="text-sm font-black text-slate-800">{item.count}</span>
+                                        <span className="text-xs text-slate-400 font-semibold">/ {item.prevCount || 0}</span>
+                                      </div>
+                                      {item.prevCount !== undefined && item.prevCount > 0 ? (
+                                        <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full inline-flex items-center gap-0.5 ${
+                                          growthRate !== undefined && growthRate >= 0 ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                                        }`}>
+                                          {growthRate !== undefined && growthRate >= 0 ? `+${growthRate}% ▲` : `${growthRate}% ▼`}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1 rounded">Yeni ✨</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center">
+                                      <span className="text-sm text-slate-500 font-mono">{item.count}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium mt-0.5">Ort: {(item.count / daysInPeriod).toFixed(1)}</span>
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="py-3 px-4">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex-1 flex flex-col gap-1 min-w-[120px]">
+                                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                        <div 
+                                          className={`h-full rounded-full transition-all duration-500 ${
+                                            item.avgScore >= 80 ? 'bg-emerald-500' :
+                                            item.avgScore >= 60 ? 'bg-blue-500' :
+                                            item.avgScore >= 40 ? 'bg-amber-500' :
+                                            'bg-red-500'
+                                          }`}
+                                          style={{ width: `${item.avgScore}%` }}
+                                        />
+                                      </div>
+                                      {isCompareActive && item.prevScore !== undefined && (
+                                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                          <span>Bu: <strong className="text-slate-700 font-bold">%{item.avgScore}</strong></span>
+                                          <span>Önceki: <strong className="text-slate-500 font-semibold">%{item.prevScore}</strong></span>
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="flex flex-col items-end min-w-[50px]">
+                                      <span className={`text-xs font-black ${
+                                        item.avgScore >= 80 ? 'text-emerald-600' :
+                                        item.avgScore >= 60 ? 'text-blue-600' :
+                                        item.avgScore >= 40 ? 'text-amber-600' :
+                                        'text-red-600'
+                                      }`}>
+                                        %{item.avgScore}
+                                      </span>
+                                      {isCompareActive && scoreDelta !== undefined && (
+                                        <span className={`text-[10px] font-black leading-none mt-0.5 ${
+                                          scoreDelta > 0 ? 'text-emerald-600' : 
+                                          scoreDelta < 0 ? 'text-rose-600' : 
+                                          'text-slate-400'
+                                        }`}>
+                                          {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} p.
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+                                {isCompareActive && (
+                                  <td className="py-3 px-4 text-center">
+                                    {scoreDelta !== undefined ? (
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black tracking-tight ${
+                                        scoreDelta > 3 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                                        scoreDelta < -3 ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                                        'bg-slate-50 text-slate-600 border border-slate-200'
+                                      }`}>
+                                        {scoreDelta > 0 ? `+${scoreDelta} p. ↗` : scoreDelta < 0 ? `${scoreDelta} p. ↘` : '▬ Dengeli'}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-slate-400 font-medium">-</span>
+                                    )}
+                                  </td>
+                                )}
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -3211,12 +3486,17 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
             }
 
             if (module.id === 'nationality_analysis') {
+              const totalCurrentNatCount = dashboardData.nationalityAnalysis.reduce((acc, cur) => acc + cur.count, 0);
               return (
                 <section key="nationality_analysis" className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
                   <div className="flex items-center justify-between mb-6">
                     <div>
                       <h3 className="text-lg font-bold text-slate-900">Uyruk Memnuniyet Endeksi</h3>
-                      <p className="text-xs text-slate-500">Pazar bazlı ortalama skorlar ve misafir dağılımı</p>
+                      <p className="text-xs text-slate-500">
+                        {isCompareActive 
+                          ? 'Pazar bazlı ortalama skorlar, hacim ve değişimin önceki dönemle karşılaştırması' 
+                          : 'Pazar bazlı ortalama skorlar ve misafir dağılımı'}
+                      </p>
                     </div>
                   </div>
 
@@ -3224,7 +3504,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                     <div className="w-full overflow-y-auto custom-scrollbar pr-2" style={{ maxHeight: '500px' }}>
                       <div 
                         className="w-full relative min-w-0 min-h-0 overflow-hidden" 
-                        style={{ height: `${Math.max(400, dashboardData.nationalityAnalysis.length * 45)}px` }}
+                        style={{ height: `${Math.max(400, dashboardData.nationalityAnalysis.length * (isCompareActive ? 52 : 45))}px` }}
                       >
                         <ResponsiveContainer width="100%" height="100%">
                         <BarChart 
@@ -3288,15 +3568,66 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                           />
                           <Tooltip 
                             cursor={{ fill: '#f8fafc' }}
-                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                            formatter={(value: any, name: string) => {
-                              if (name === 'avgScore') return [`%${value}`, 'Bu Dönem Memnuniyet'];
-                              if (name === 'prevScore') return [`%${value}`, 'Önceki Dönem Memnuniyet'];
-                              if (name === 'count') return [value, 'Bahsedilme Sayısı'];
-                              return [value, name];
+                            content={({ active, payload, label }) => {
+                              if (!active || !payload || !payload.length) return null;
+                              const item = payload[0].payload;
+                              const countryCode = getCountryCode(item.name);
+                              const scoreDelta = item.scoreDelta;
+                              const growthRate = item.growthRate;
+                              return (
+                                <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[220px]">
+                                  <div className="flex items-center gap-2 mb-2 border-b border-slate-100 pb-1.5">
+                                    {countryCode && (
+                                      <img 
+                                        src={`https://flagcdn.com/w40/${countryCode}.png`}
+                                        width="18"
+                                        height="12"
+                                        alt=""
+                                        className="rounded-sm"
+                                        referrerPolicy="no-referrer"
+                                      />
+                                    )}
+                                    <span className="text-xs font-black text-slate-800 uppercase tracking-tight">{item.name}</span>
+                                  </div>
+                                  <div className="space-y-1.5 text-xs">
+                                    <div className="flex items-center justify-between font-medium">
+                                      <span className="text-indigo-600 font-bold">Bu Dönem:</span>
+                                      <span className="font-bold font-mono">%{item.avgScore} <span className="text-slate-400 text-[10px]">({item.count} yorum)</span></span>
+                                    </div>
+                                    {isCompareActive && item.prevScore !== undefined && (
+                                      <div className="flex items-center justify-between font-medium text-slate-500">
+                                        <span>Önceki Dönem:</span>
+                                        <span className="font-bold font-mono">%{item.prevScore} <span className="text-slate-400 text-[10px]">({item.prevCount || 0} yorum)</span></span>
+                                      </div>
+                                    )}
+                                    {isCompareActive && scoreDelta !== undefined && (
+                                      <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold">
+                                        <span className="text-slate-500">Skor Değişimi:</span>
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                          scoreDelta > 0 ? 'bg-emerald-50 text-emerald-700' : 
+                                          scoreDelta < 0 ? 'bg-rose-50 text-rose-700' : 
+                                          'bg-slate-100 text-slate-600'
+                                        }`}>
+                                          {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} puan {scoreDelta > 0 ? '↗' : scoreDelta < 0 ? '↘' : '▬'}
+                                        </span>
+                                      </div>
+                                    )}
+                                    {isCompareActive && growthRate !== undefined && item.prevCount !== undefined && (
+                                      <div className="flex items-center justify-between text-[11px] font-bold">
+                                        <span className="text-slate-500">Yorum Hacmi:</span>
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                          growthRate >= 0 ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                                        }`}>
+                                          {growthRate >= 0 ? `+${growthRate}% ▲` : `${growthRate}% ▼`}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
                             }}
                           />
-                          {isCompareActive && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
+                          {isCompareActive && <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px', fontWeight: 600 }} />}
                           {isCompareActive && (
                             <Bar 
                               dataKey="prevScore" 
@@ -3311,7 +3642,13 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             name="Bu Dönem"
                             radius={[0, 4, 4, 0]} 
                             barSize={isCompareActive ? 12 : 24}
-                            label={{ position: 'right', fontSize: 12, fontWeight: 700, fill: '#4f46e5', formatter: (val: any) => `%${val}` }}
+                            label={{ 
+                              position: 'right', 
+                              fontSize: 11, 
+                              fontWeight: 700, 
+                              fill: '#4f46e5', 
+                              formatter: (val: any) => `%${val}` 
+                            }}
                           >
                             {dashboardData.nationalityAnalysis.map((entry, index) => (
                               <Cell 
@@ -3333,15 +3670,27 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                         <thead>
                           <tr className="border-b border-slate-100">
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Uyruk / Pazar</th>
-                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Yorum Sayısı</th>
-                            {isCompareActive && <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Önceki Yorum Sayısı</th>}
-                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
-                            {isCompareActive && <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Önceki Memnuniyet</th>}
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">
+                              {isCompareActive ? 'Yorum Hacmi (Bu / Önceki)' : 'Yorum Sayısı'}
+                            </th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              {isCompareActive ? 'Memnuniyet Skoru & Karşılaştırma' : 'Memnuniyet Skoru'}
+                            </th>
+                            {isCompareActive && (
+                              <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">
+                                Performans Eğilimi
+                              </th>
+                            )}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
                           {dashboardData.nationalityAnalysis.map((item, idx) => {
                             const countryCode = getCountryCode(item.name);
+                            const scoreDelta = item.scoreDelta;
+                            const countDelta = item.countDelta;
+                            const growthRate = item.growthRate;
+                            const share = totalCurrentNatCount > 0 ? ((item.count / totalCurrentNatCount) * 100).toFixed(1) : '0';
+
                             return (
                               <tr 
                                 key={idx} 
@@ -3369,45 +3718,91 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                         <Globe className="w-3 h-3 text-slate-400" />
                                       </div>
                                     )}
-                                    <span className="text-sm font-bold text-slate-800 tracking-tight truncate">{item.name}</span>
+                                    <div className="flex flex-col">
+                                      <span className="text-sm font-bold text-slate-800 tracking-tight truncate">{item.name}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium">Pay: %{share}</span>
+                                    </div>
                                   </div>
                                 </td>
-                                <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono font-bold">
-                                  {item.count}
+                                <td className="py-3 px-4 text-center">
+                                  {isCompareActive ? (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <div className="flex items-center gap-1.5 font-mono">
+                                        <span className="text-sm font-black text-slate-800">{item.count}</span>
+                                        <span className="text-xs text-slate-400 font-semibold">/ {item.prevCount || 0}</span>
+                                      </div>
+                                      {item.prevCount !== undefined && item.prevCount > 0 ? (
+                                        <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full inline-flex items-center gap-0.5 ${
+                                          growthRate !== undefined && growthRate >= 0 ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                                        }`}>
+                                          {growthRate !== undefined && growthRate >= 0 ? `+${growthRate}% ▲` : `${growthRate}% ▼`}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1 rounded">Yeni ✨</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="flex flex-col items-center">
+                                      <span className="text-sm text-slate-500 font-mono font-bold">{item.count}</span>
+                                      <span className="text-[10px] text-slate-400 font-medium mt-0.5">Ort: {(item.count / daysInPeriod).toFixed(1)}</span>
+                                    </div>
+                                  )}
                                 </td>
-                                {isCompareActive && (
-                                  <td className="py-3 px-4 text-sm text-slate-400 text-center font-mono font-bold">
-                                    {item.prevCount || 0}
-                                  </td>
-                                )}
                                 <td className="py-3 px-4">
                                   <div className="flex items-center gap-3">
-                                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
-                                      <div 
-                                        className={`h-full rounded-full ${
-                                          item.avgScore >= 80 ? 'bg-emerald-500' :
-                                          item.avgScore >= 60 ? 'bg-blue-500' :
-                                          item.avgScore >= 40 ? 'bg-amber-500' :
-                                          'bg-red-500'
-                                        }`}
-                                        style={{ width: `${item.avgScore}%` }}
-                                      />
+                                    <div className="flex-1 flex flex-col gap-1 min-w-[120px]">
+                                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                        <div 
+                                          className={`h-full rounded-full transition-all duration-500 ${
+                                            item.avgScore >= 80 ? 'bg-emerald-500' :
+                                            item.avgScore >= 60 ? 'bg-blue-500' :
+                                            item.avgScore >= 40 ? 'bg-amber-500' :
+                                            'bg-red-500'
+                                          }`}
+                                          style={{ width: `${item.avgScore}%` }}
+                                        />
+                                      </div>
+                                      {isCompareActive && item.prevScore !== undefined && (
+                                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                          <span>Bu: <strong className="text-slate-700 font-bold">%{item.avgScore}</strong></span>
+                                          <span>Önceki: <strong className="text-slate-500 font-semibold">%{item.prevScore}</strong></span>
+                                        </div>
+                                      )}
                                     </div>
-                                    <span className={`text-xs font-black w-10 ${
-                                      item.avgScore >= 80 ? 'text-emerald-600' :
-                                      item.avgScore >= 60 ? 'text-blue-600' :
-                                      item.avgScore >= 40 ? 'text-amber-600' :
-                                      'text-red-600'
-                                    }`}>
-                                      %{item.avgScore}
-                                    </span>
+                                    <div className="flex flex-col items-end min-w-[50px]">
+                                      <span className={`text-xs font-black ${
+                                        item.avgScore >= 80 ? 'text-emerald-600' :
+                                        item.avgScore >= 60 ? 'text-blue-600' :
+                                        item.avgScore >= 40 ? 'text-amber-600' :
+                                        'text-red-600'
+                                      }`}>
+                                        %{item.avgScore}
+                                      </span>
+                                      {isCompareActive && scoreDelta !== undefined && (
+                                        <span className={`text-[10px] font-black leading-none mt-0.5 ${
+                                          scoreDelta > 0 ? 'text-emerald-600' : 
+                                          scoreDelta < 0 ? 'text-rose-600' : 
+                                          'text-slate-400'
+                                        }`}>
+                                          {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} p.
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </td>
                                 {isCompareActive && (
-                                  <td className="py-3 px-4">
-                                    <span className="text-xs font-bold text-slate-400">
-                                      %{item.prevScore || 0}
-                                    </span>
+                                  <td className="py-3 px-4 text-center">
+                                    {scoreDelta !== undefined ? (
+                                      <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black tracking-tight ${
+                                        scoreDelta > 3 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                                        scoreDelta < -3 ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                                        'bg-slate-50 text-slate-600 border border-slate-200'
+                                      }`}>
+                                        {scoreDelta > 0 ? `+${scoreDelta} p. ↗` : scoreDelta < 0 ? `${scoreDelta} p. ↘` : '▬ Dengeli'}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-slate-400 font-medium">-</span>
+                                    )}
                                   </td>
                                 )}
                               </tr>

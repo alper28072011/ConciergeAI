@@ -57,6 +57,7 @@ export interface SourceAnalysis {
   prevCount?: number;
   scoreDelta?: number;
   countDelta?: number;
+  growthRate?: number;
 }
 
 export interface NationalityAnalysis {
@@ -67,6 +68,7 @@ export interface NationalityAnalysis {
   prevCount?: number;
   scoreDelta?: number;
   countDelta?: number;
+  growthRate?: number;
 }
 
 export interface CategoryPerformance {
@@ -77,12 +79,19 @@ export interface CategoryPerformance {
   prevCount?: number;
   scoreDelta?: number;
   countDelta?: number;
+  growthRate?: number;
 }
 
 export interface SatisfactionOverTime {
   date: string;
   avgScore: number;
   count: number;
+  prevDate?: string;
+  prevAvgScore?: number;
+  prevCount?: number;
+  scoreDelta?: number;
+  countDelta?: number;
+  growthRate?: number;
 }
 
 export interface DashboardData {
@@ -334,10 +343,10 @@ export const calculateCategoryPerformance = (analytics: CommentAnalytics[]): Cat
   })).sort((a, b) => b.score - a.score);
 };
 
-export const calculateSatisfactionOverTime = (analytics: CommentAnalytics[]) => {
-  const process = (groupBy: (d: Date) => { key: string; display: string; timestamp: number }) => {
+export const calculateSatisfactionOverTime = (analytics: CommentAnalytics[], previousAnalytics?: CommentAnalytics[]) => {
+  const process = (groupBy: (d: Date) => { key: string; display: string; timestamp: number }, dataset: CommentAnalytics[]) => {
     const map = new Map<string, { totalScore: number; count: number; display: string; timestamp: number }>();
-    analytics.forEach(item => {
+    dataset.forEach(item => {
       const d = new Date(item.date);
       if (isNaN(d.getTime())) return;
       const { key, display, timestamp } = groupBy(d);
@@ -353,8 +362,7 @@ export const calculateSatisfactionOverTime = (analytics: CommentAnalytics[]) => 
         count: data.count,
         timestamp: data.timestamp
       }))
-      .sort((a, b) => a.timestamp - b.timestamp)
-      .map(({ timestamp, ...rest }) => rest); // Remove timestamp before returning
+      .sort((a, b) => a.timestamp - b.timestamp);
   };
 
   const getWeekNumber = (d: Date) => {
@@ -367,42 +375,83 @@ export const calculateSatisfactionOverTime = (analytics: CommentAnalytics[]) => 
 
   const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 
+  const mergeTimeline = (
+    currentList: { date: string; avgScore: number; count: number; timestamp: number }[],
+    prevList: { date: string; avgScore: number; count: number; timestamp: number }[]
+  ): SatisfactionOverTime[] => {
+    if (!previousAnalytics || prevList.length === 0) {
+      return currentList.map(({ timestamp, ...rest }) => rest);
+    }
+
+    return currentList.map((item, idx) => {
+      const prevItem = prevList[idx];
+      const prevAvgScore = prevItem ? prevItem.avgScore : undefined;
+      const prevCount = prevItem ? prevItem.count : undefined;
+      const prevDate = prevItem ? prevItem.date : undefined;
+      const scoreDelta = prevAvgScore !== undefined ? (item.avgScore - prevAvgScore) : undefined;
+      const countDelta = prevCount !== undefined ? (item.count - prevCount) : undefined;
+      const growthRate = (prevCount && prevCount > 0)
+        ? Math.round(((item.count - prevCount) / prevCount) * 100)
+        : (item.count > 0 ? 100 : 0);
+
+      return {
+        date: item.date,
+        avgScore: item.avgScore,
+        count: item.count,
+        prevDate,
+        prevAvgScore,
+        prevCount,
+        scoreDelta,
+        countDelta,
+        growthRate
+      };
+    });
+  };
+
+  const groupByDaily = (d: Date) => {
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return {
+      key: `${yyyy}-${mm}-${dd}`,
+      display: `${dd}.${mm}.${yyyy}`,
+      timestamp: new Date(yyyy, d.getMonth(), d.getDate()).getTime()
+    };
+  };
+
+  const groupByWeekly = (d: Date) => {
+    const weekNumber = getWeekNumber(d);
+    const startOfWeek = new Date(d);
+    startOfWeek.setDate(d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1));
+    startOfWeek.setHours(0, 0, 0, 0);
+    return {
+      key: `${startOfWeek.getFullYear()}-W${weekNumber}`,
+      display: `${weekNumber}. Hafta`,
+      timestamp: startOfWeek.getTime()
+    };
+  };
+
+  const groupByMonthly = (d: Date) => {
+    return {
+      key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+      display: `${months[d.getMonth()]} ${d.getFullYear()}`,
+      timestamp: new Date(d.getFullYear(), d.getMonth(), 1).getTime()
+    };
+  };
+
+  const groupByYearly = (d: Date) => {
+    return {
+      key: `${d.getFullYear()}`,
+      display: `${d.getFullYear()}`,
+      timestamp: new Date(d.getFullYear(), 0, 1).getTime()
+    };
+  };
+
   return {
-    daily: process(d => {
-      const dd = String(d.getDate()).padStart(2, '0');
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const yyyy = d.getFullYear();
-      return {
-        key: `${yyyy}-${mm}-${dd}`,
-        display: `${dd}.${mm}.${yyyy}`,
-        timestamp: new Date(yyyy, d.getMonth(), d.getDate()).getTime()
-      };
-    }),
-    weekly: process(d => {
-      const weekNumber = getWeekNumber(d);
-      const startOfWeek = new Date(d);
-      startOfWeek.setDate(d.getDate() - d.getDay() + (d.getDay() === 0 ? -6 : 1));
-      startOfWeek.setHours(0, 0, 0, 0);
-      return {
-        key: `${startOfWeek.getFullYear()}-W${weekNumber}`,
-        display: `${weekNumber}. Hafta`,
-        timestamp: startOfWeek.getTime()
-      };
-    }),
-    monthly: process(d => {
-      return {
-        key: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-        display: `${months[d.getMonth()]} ${d.getFullYear()}`,
-        timestamp: new Date(d.getFullYear(), d.getMonth(), 1).getTime()
-      };
-    }),
-    yearly: process(d => {
-      return {
-        key: `${d.getFullYear()}`,
-        display: `${d.getFullYear()}`,
-        timestamp: new Date(d.getFullYear(), 0, 1).getTime()
-      };
-    })
+    daily: mergeTimeline(process(groupByDaily, analytics), previousAnalytics ? process(groupByDaily, previousAnalytics) : []),
+    weekly: mergeTimeline(process(groupByWeekly, analytics), previousAnalytics ? process(groupByWeekly, previousAnalytics) : []),
+    monthly: mergeTimeline(process(groupByMonthly, analytics), previousAnalytics ? process(groupByMonthly, previousAnalytics) : []),
+    yearly: mergeTimeline(process(groupByYearly, analytics), previousAnalytics ? process(groupByYearly, previousAnalytics) : [])
   };
 };
 
@@ -524,11 +573,13 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
         source.prevCount = prevSource.count;
         source.scoreDelta = source.avgScore - prevSource.avgScore;
         source.countDelta = source.count - prevSource.count;
+        source.growthRate = prevSource.count > 0 ? Math.round(((source.count - prevSource.count) / prevSource.count) * 100) : 100;
       } else {
         source.prevScore = 0;
         source.prevCount = 0;
         source.scoreDelta = source.avgScore;
         source.countDelta = source.count;
+        source.growthRate = 100;
       }
     });
 
@@ -540,11 +591,13 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
         nat.prevCount = prevNat.count;
         nat.scoreDelta = nat.avgScore - prevNat.avgScore;
         nat.countDelta = nat.count - prevNat.count;
+        nat.growthRate = prevNat.count > 0 ? Math.round(((nat.count - prevNat.count) / prevNat.count) * 100) : 100;
       } else {
         nat.prevScore = 0;
         nat.prevCount = 0;
         nat.scoreDelta = nat.avgScore;
         nat.countDelta = nat.count;
+        nat.growthRate = 100;
       }
     });
   } else if (previousAnalytics && previousAnalytics.length === 0) {
@@ -555,6 +608,7 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
       cat.prevCount = 0;
       cat.scoreDelta = cat.score;
       cat.countDelta = cat.count;
+      cat.growthRate = 100;
     });
     mostMentioned.forEach(topic => {
       topic.prevScore = 0;
@@ -582,12 +636,14 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
       source.prevCount = 0;
       source.scoreDelta = source.avgScore;
       source.countDelta = source.count;
+      source.growthRate = 100;
     });
     nationalityAnalysis.forEach(nat => {
       nat.prevScore = 0;
       nat.prevCount = 0;
       nat.scoreDelta = nat.avgScore;
       nat.countDelta = nat.count;
+      nat.growthRate = 100;
     });
   }
 
@@ -606,6 +662,6 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
     topNegative,
     sourceAnalysis,
     nationalityAnalysis,
-    satisfactionOverTime: calculateSatisfactionOverTime(analytics)
+    satisfactionOverTime: calculateSatisfactionOverTime(analytics, previousAnalytics)
   };
 };
