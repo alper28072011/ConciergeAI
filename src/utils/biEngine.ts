@@ -1,4 +1,5 @@
 import { CommentAnalytics } from '../types';
+import { normalizeNationality } from './nationality';
 
 export interface MostMentionedTopic {
   mainCategory: string;
@@ -7,6 +8,9 @@ export interface MostMentionedTopic {
   avgScore: number;
   prevScore?: number;
   prevCount?: number;
+  scoreDelta?: number;
+  countDelta?: number;
+  growthRate?: number;
 }
 
 export interface TopPositiveTopic {
@@ -17,6 +21,9 @@ export interface TopPositiveTopic {
   weightedScore: number;
   prevScore?: number;
   prevCount?: number;
+  scoreDelta?: number;
+  countDelta?: number;
+  growthRate?: number;
 }
 
 export interface TopNegativeTopic {
@@ -27,6 +34,9 @@ export interface TopNegativeTopic {
   weightedScore: number;
   prevScore?: number;
   prevCount?: number;
+  scoreDelta?: number;
+  countDelta?: number;
+  growthRate?: number;
 }
 
 export interface SourceAnalysis {
@@ -35,6 +45,8 @@ export interface SourceAnalysis {
   avgScore: number;
   prevScore?: number;
   prevCount?: number;
+  scoreDelta?: number;
+  countDelta?: number;
 }
 
 export interface NationalityAnalysis {
@@ -43,6 +55,8 @@ export interface NationalityAnalysis {
   avgScore: number;
   prevScore?: number;
   prevCount?: number;
+  scoreDelta?: number;
+  countDelta?: number;
 }
 
 export interface CategoryPerformance {
@@ -51,6 +65,8 @@ export interface CategoryPerformance {
   count: number;
   prevScore?: number;
   prevCount?: number;
+  scoreDelta?: number;
+  countDelta?: number;
 }
 
 export interface SatisfactionOverTime {
@@ -194,7 +210,7 @@ export const calculateNationalityAnalysis = (analytics: CommentAnalytics[]): Nat
   const natMap = new Map<string, { count: number; totalScore: number }>();
 
   analytics.forEach(item => {
-    const nat = item.nationality || 'Bilinmiyor';
+    const nat = normalizeNationality(item.nationality);
     if (!natMap.has(nat)) {
       natMap.set(nat, { count: 0, totalScore: 0 });
     }
@@ -349,9 +365,13 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
       if (prevCat) {
         cat.prevScore = prevCat.score;
         cat.prevCount = prevCat.count;
+        cat.scoreDelta = cat.score - prevCat.score;
+        cat.countDelta = cat.count - prevCat.count;
       } else {
         cat.prevScore = 0;
         cat.prevCount = 0;
+        cat.scoreDelta = cat.score;
+        cat.countDelta = cat.count;
       }
     });
 
@@ -361,33 +381,51 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
       if (prevTopic) {
         topic.prevScore = prevTopic.avgScore;
         topic.prevCount = prevTopic.count;
+        topic.scoreDelta = topic.avgScore - prevTopic.avgScore;
+        topic.countDelta = topic.count - prevTopic.count;
+        topic.growthRate = prevTopic.count > 0 ? Math.round(((topic.count - prevTopic.count) / prevTopic.count) * 100) : 100;
       } else {
         topic.prevScore = 0;
         topic.prevCount = 0;
+        topic.scoreDelta = topic.avgScore;
+        topic.countDelta = topic.count;
+        topic.growthRate = 100;
       }
     });
 
-    const prevTopPositive = calculateTopPositive(previousAnalytics);
     topPositive.forEach(topic => {
-      const prevTopic = prevTopPositive.find(p => p.mainCategory === topic.mainCategory && p.subCategory === topic.subCategory);
+      // Find accurate previous topic from full previous mentioned topics
+      const prevTopic = prevMostMentioned.find(p => p.mainCategory === topic.mainCategory && p.subCategory === topic.subCategory);
       if (prevTopic) {
         topic.prevScore = prevTopic.avgScore;
         topic.prevCount = prevTopic.count;
+        topic.scoreDelta = topic.avgScore - prevTopic.avgScore;
+        topic.countDelta = topic.count - prevTopic.count;
+        topic.growthRate = prevTopic.count > 0 ? Math.round(((topic.count - prevTopic.count) / prevTopic.count) * 100) : 100;
       } else {
         topic.prevScore = 0;
         topic.prevCount = 0;
+        topic.scoreDelta = topic.avgScore;
+        topic.countDelta = topic.count;
+        topic.growthRate = 100;
       }
     });
 
-    const prevTopNegative = calculateTopNegative(previousAnalytics);
     topNegative.forEach(topic => {
-      const prevTopic = prevTopNegative.find(p => p.mainCategory === topic.mainCategory && p.subCategory === topic.subCategory);
+      // Find accurate previous topic from full previous mentioned topics
+      const prevTopic = prevMostMentioned.find(p => p.mainCategory === topic.mainCategory && p.subCategory === topic.subCategory);
       if (prevTopic) {
         topic.prevScore = prevTopic.avgScore;
         topic.prevCount = prevTopic.count;
+        topic.scoreDelta = topic.avgScore - prevTopic.avgScore;
+        topic.countDelta = topic.count - prevTopic.count;
+        topic.growthRate = prevTopic.count > 0 ? Math.round(((topic.count - prevTopic.count) / prevTopic.count) * 100) : 100;
       } else {
         topic.prevScore = 0;
         topic.prevCount = 0;
+        topic.scoreDelta = topic.avgScore;
+        topic.countDelta = topic.count;
+        topic.growthRate = 100;
       }
     });
 
@@ -397,9 +435,13 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
       if (prevSource) {
         source.prevScore = prevSource.avgScore;
         source.prevCount = prevSource.count;
+        source.scoreDelta = source.avgScore - prevSource.avgScore;
+        source.countDelta = source.count - prevSource.count;
       } else {
         source.prevScore = 0;
         source.prevCount = 0;
+        source.scoreDelta = source.avgScore;
+        source.countDelta = source.count;
       }
     });
 
@@ -409,9 +451,13 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
       if (prevNat) {
         nat.prevScore = prevNat.avgScore;
         nat.prevCount = prevNat.count;
+        nat.scoreDelta = nat.avgScore - prevNat.avgScore;
+        nat.countDelta = nat.count - prevNat.count;
       } else {
         nat.prevScore = 0;
         nat.prevCount = 0;
+        nat.scoreDelta = nat.avgScore;
+        nat.countDelta = nat.count;
       }
     });
   } else if (previousAnalytics && previousAnalytics.length === 0) {
@@ -420,26 +466,41 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
     categoryPerf.forEach(cat => {
       cat.prevScore = 0;
       cat.prevCount = 0;
+      cat.scoreDelta = cat.score;
+      cat.countDelta = cat.count;
     });
     mostMentioned.forEach(topic => {
       topic.prevScore = 0;
       topic.prevCount = 0;
+      topic.scoreDelta = topic.avgScore;
+      topic.countDelta = topic.count;
+      topic.growthRate = 100;
     });
     topPositive.forEach(topic => {
       topic.prevScore = 0;
       topic.prevCount = 0;
+      topic.scoreDelta = topic.avgScore;
+      topic.countDelta = topic.count;
+      topic.growthRate = 100;
     });
     topNegative.forEach(topic => {
       topic.prevScore = 0;
       topic.prevCount = 0;
+      topic.scoreDelta = topic.avgScore;
+      topic.countDelta = topic.count;
+      topic.growthRate = 100;
     });
     sourceAnalysis.forEach(source => {
       source.prevScore = 0;
       source.prevCount = 0;
+      source.scoreDelta = source.avgScore;
+      source.countDelta = source.count;
     });
     nationalityAnalysis.forEach(nat => {
       nat.prevScore = 0;
       nat.prevCount = 0;
+      nat.scoreDelta = nat.avgScore;
+      nat.countDelta = nat.count;
     });
   }
 

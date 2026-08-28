@@ -24,6 +24,7 @@ import {
 } from 'recharts';
 import { getDashboardData } from '../utils/biEngine';
 import { buildUnifiedTimeline } from '../utils';
+import { normalizeNationality, getStandardCountryCode } from '../utils/nationality';
 
 enum OperationType {
   CREATE = 'create',
@@ -69,95 +70,7 @@ const RADAR_COLORS = ['#4f46e5', '#10b981', '#f59e0b', '#ef4444'];
 
 // Country code mapping for flags
 const getCountryCode = (countryName: string): string => {
-  if (!countryName) return '';
-  
-  const name = countryName.trim().toLowerCase();
-  
-  const mapping: { [key: string]: string } = {
-    // Common mappings (Turkish & English) - Lowercase keys for robust matching
-    'türkiye': 'tr', 'turkey': 'tr', 'tr': 'tr',
-    'almanya': 'de', 'germany': 'de', 'de': 'de',
-    'ingiltere': 'gb', 'united kingdom': 'gb', 'uk': 'gb', 'birleşik krallık': 'gb', 'great britain': 'gb', 'gb': 'gb',
-    'rusya': 'ru', 'russia': 'ru', 'rusya federasyonu': 'ru', 'russian federation': 'ru', 'ru': 'ru',
-    'hollanda': 'nl', 'netherlands': 'nl', 'nl': 'nl',
-    'belçika': 'be', 'belgium': 'be', 'be': 'be',
-    'fransa': 'fr', 'france': 'fr', 'fr': 'fr',
-    'italya': 'it', 'italy': 'it', 'it': 'it',
-    'ispanya': 'es', 'spain': 'es', 'es': 'es',
-    'abd': 'us', 'usa': 'us', 'united states': 'us', 'amerika': 'us', 'amerika birleşik devletleri': 'us', 'us': 'us',
-    'ukrayna': 'ua', 'ukraine': 'ua', 'ua': 'ua',
-    'polonya': 'pl', 'poland': 'pl', 'pl': 'pl',
-    'isviçre': 'ch', 'switzerland': 'ch', 'ch': 'ch',
-    'avusturya': 'at', 'austria': 'at', 'at': 'at',
-    'isveç': 'se', 'sweden': 'se', 'se': 'se',
-    'norveç': 'no', 'norway': 'no', 'no': 'no',
-    'danimarka': 'dk', 'denmark': 'dk', 'dk': 'dk',
-    'finlandiya': 'fi', 'finland': 'fi', 'fi': 'fi',
-    'yunanistan': 'gr', 'greece': 'gr', 'gr': 'gr',
-    'bulgaristan': 'bg', 'bulgaria': 'bg', 'bg': 'bg',
-    'romanya': 'ro', 'romania': 'ro', 'ro': 'ro',
-    'azerbaycan': 'az', 'azerbaijan': 'az', 'az': 'az',
-    'kazakistan': 'kz', 'kazakhstan': 'kz', 'kz': 'kz',
-    'özbekistan': 'uz', 'uzbekistan': 'uz', 'uz': 'uz',
-    'türkmenistan': 'tm', 'turkmenistan': 'tm', 'tm': 'tm',
-    'kırgızistan': 'kg', 'kyrgyzstan': 'kg', 'kg': 'kg',
-    'iran': 'ir', 'ir': 'ir',
-    'irak': 'iq', 'iraq': 'iq', 'iq': 'iq',
-    'suriye': 'sy', 'syria': 'sy', 'sy': 'sy',
-    'lübnan': 'lb', 'lebanon': 'lb', 'lb': 'lb',
-    'ürdün': 'jo', 'jordan': 'jo', 'jo': 'jo',
-    'mısır': 'eg', 'egypt': 'eg', 'eg': 'eg',
-    'suudi arabistan': 'sa', 'saudi arabia': 'sa', 'sa': 'sa',
-    'bae': 'ae', 'uae': 'ae', 'birleşik arap emirlikleri': 'ae', 'united arab emirates': 'ae', 'ae': 'ae',
-    'katar': 'qa', 'qatar': 'qa', 'qa': 'qa',
-    'kuveyt': 'kw', 'kuwait': 'kw', 'kw': 'kw',
-    'bahreyn': 'bh', 'bahrain': 'bh', 'bh': 'bh',
-    'umman': 'om', 'oman': 'om', 'om': 'om',
-    'israil': 'il', 'israel': 'il', 'il': 'il',
-    'çin': 'cn', 'china': 'cn', 'cn': 'cn',
-    'japonya': 'jp', 'japan': 'jp', 'jp': 'jp',
-    'güney kore': 'kr', 'south korea': 'kr', 'kr': 'kr',
-    'hindistan': 'in', 'india': 'in', 'in': 'in',
-    'pakistan': 'pk', 'pk': 'pk',
-    'kanada': 'ca', 'canada': 'ca', 'ca': 'ca',
-    'meksika': 'mx', 'mexico': 'mx', 'mx': 'mx',
-    'brezilya': 'br', 'brazil': 'br', 'br': 'br',
-    'arjantin': 'ar', 'argentina': 'ar', 'ar': 'ar',
-    'avustralya': 'au', 'australia': 'au', 'au': 'au',
-    'yeni zelanda': 'nz', 'new zealand': 'nz', 'nz': 'nz',
-    'güney afrika': 'za', 'south africa': 'za', 'za': 'za',
-    'fas': 'ma', 'morocco': 'ma', 'ma': 'ma',
-    'tunus': 'tn', 'tunisia': 'tn', 'tn': 'tn',
-    'cezayir': 'dz', 'algeria': 'dz', 'dz': 'dz',
-    'libya': 'ly', 'ly': 'ly',
-    'nijerya': 'ng', 'nigeria': 'ng', 'ng': 'ng',
-    'gürcistan': 'ge', 'georgia': 'ge', 'ge': 'ge',
-    'ermenistan': 'am', 'armenia': 'am', 'am': 'am',
-    'kıbrıs': 'cy', 'cyprus': 'cy', 'cy': 'cy',
-    'malta': 'mt', 'mt': 'mt',
-    'macaristan': 'hu', 'hungary': 'hu', 'hu': 'hu',
-    'çekya': 'cz', 'czechia': 'cz', 'czech republic': 'cz', 'cz': 'cz',
-    'slovakya': 'sk', 'slovakia': 'sk', 'sk': 'sk',
-    'irlanda': 'ie', 'ireland': 'ie', 'ie': 'ie',
-    'lüksemburg': 'lu', 'luxembourg': 'lu', 'lu': 'lu',
-    'sırbistan': 'rs', 'serbia': 'rs', 'rs': 'rs',
-    'hırvatistan': 'hr', 'croatia': 'hr', 'hr': 'hr',
-    'slovenya': 'si', 'slovenia': 'si', 'si': 'si',
-    'bosna hersek': 'ba', 'bosnia and herzegovina': 'ba', 'ba': 'ba',
-    'karadağ': 'me', 'montenegro': 'me', 'me': 'me',
-    'arnavutluk': 'al', 'albania': 'al', 'al': 'al',
-    'kuzey makedonya': 'mk', 'north macedonia': 'mk', 'makedonya': 'mk', 'macedonia': 'mk', 'mk': 'mk',
-    'estonya': 'ee', 'estonia': 'ee', 'ee': 'ee',
-    'letonya': 'lv', 'latvia': 'lv', 'lv': 'lv',
-    'litvanya': 'lt', 'lithuania': 'lt', 'lt': 'lt',
-    'beyaz rusya': 'by', 'belarus': 'by', 'by': 'by',
-    'moldova': 'md', 'md': 'md',
-    'kosova': 'xk', 'kosovo': 'xk', 'xk': 'xk',
-    'izlanda': 'is', 'iceland': 'is', 'is': 'is',
-    'portekiz': 'pt', 'portugal': 'pt', 'pt': 'pt',
-  };
-  
-  return mapping[name] || '';
+  return getStandardCountryCode(countryName);
 };
 
 const AVAILABLE_MODULES = [
@@ -651,7 +564,8 @@ export function DashboardModule() {
       }
 
       if (apNats.length > 0) {
-        if (!apNats.includes(item.nationality || 'Bilinmiyor')) return;
+        const itemNat = normalizeNationality(item.nationality);
+        if (!apNats.includes(itemNat) && !apNats.includes(item.nationality || 'Bilinmiyor')) return;
       }
 
       if (apSources.length > 0) {
@@ -707,7 +621,9 @@ export function DashboardModule() {
         }
       }
       if (drillDownFilter.type === 'source') return item.source === drillDownFilter.value;
-      if (drillDownFilter.type === 'nationality') return item.nationality === drillDownFilter.value;
+      if (drillDownFilter.type === 'nationality') {
+        return normalizeNationality(item.nationality) === normalizeNationality(drillDownFilter.value) || item.nationality === drillDownFilter.value;
+      }
       return true;
     });
   }, [filteredAnalytics, drillDownFilter]);
@@ -716,22 +632,52 @@ export function DashboardModule() {
   const previousDashboardData = useMemo(() => getDashboardData(previousFilteredAnalytics), [previousFilteredAnalytics]);
 
   const hierarchicalCategoryData = useMemo(() => {
-    const groups: { [key: string]: { name: string, count: number, totalScore: number, subCategories: any[] } } = {};
+    const groups: { [key: string]: { 
+      name: string; 
+      count: number; 
+      totalScore: number; 
+      prevCount: number; 
+      prevTotalScore: number; 
+      subCategories: any[];
+    } } = {};
     
     dashboardData.mostMentioned.forEach(item => {
       if (!groups[item.mainCategory]) {
-        groups[item.mainCategory] = { name: item.mainCategory, count: 0, totalScore: 0, subCategories: [] };
+        groups[item.mainCategory] = { 
+          name: item.mainCategory, 
+          count: 0, 
+          totalScore: 0, 
+          prevCount: 0, 
+          prevTotalScore: 0, 
+          subCategories: [] 
+        };
       }
       groups[item.mainCategory].count += item.count;
       groups[item.mainCategory].totalScore += (item.avgScore * item.count);
+      groups[item.mainCategory].prevCount += (item.prevCount || 0);
+      groups[item.mainCategory].prevTotalScore += ((item.prevScore || 0) * (item.prevCount || 0));
       groups[item.mainCategory].subCategories.push(item);
     });
 
-    return Object.values(groups).map(group => ({
-      ...group,
-      avgScore: Math.round(group.totalScore / group.count)
-    })).sort((a, b) => b.count - a.count);
-  }, [dashboardData.mostMentioned]);
+    return Object.values(groups).map(group => {
+      const avgScore = group.count > 0 ? Math.round(group.totalScore / group.count) : 0;
+      const prevAvgScore = group.prevCount > 0 ? Math.round(group.prevTotalScore / group.prevCount) : (appliedFilters.isCompareActive ? 0 : undefined);
+      const scoreDelta = prevAvgScore !== undefined ? (avgScore - prevAvgScore) : undefined;
+      const countDelta = appliedFilters.isCompareActive ? (group.count - group.prevCount) : undefined;
+      const growthRate = (appliedFilters.isCompareActive && group.prevCount > 0)
+        ? Math.round(((group.count - group.prevCount) / group.prevCount) * 100)
+        : (group.count > 0 ? 100 : 0);
+
+      return {
+        ...group,
+        avgScore,
+        prevScore: prevAvgScore,
+        scoreDelta,
+        countDelta,
+        growthRate
+      };
+    }).sort((a, b) => b.count - a.count);
+  }, [dashboardData.mostMentioned, appliedFilters.isCompareActive]);
 
   const categoryChartData = useMemo(() => {
     const flatData: any[] = [];
@@ -740,6 +686,10 @@ export function DashboardModule() {
         name: group.name,
         score: group.avgScore,
         count: group.count,
+        prevScore: group.prevScore,
+        prevCount: group.prevCount,
+        scoreDelta: group.scoreDelta,
+        countDelta: group.countDelta,
         isSub: false
       });
       
@@ -749,6 +699,11 @@ export function DashboardModule() {
             name: sub.subCategory,
             score: sub.avgScore,
             count: sub.count,
+            prevScore: sub.prevScore,
+            prevCount: sub.prevCount,
+            scoreDelta: sub.scoreDelta,
+            countDelta: sub.countDelta,
+            growthRate: sub.growthRate,
             isSub: true,
             parent: group.name
           });
@@ -760,8 +715,10 @@ export function DashboardModule() {
 
   const allNationalities = useMemo(() => {
     const nats = new Set<string>();
-    analytics.forEach(item => nats.add(item.nationality || 'Bilinmiyor'));
-    return Array.from(nats).sort();
+    analytics.forEach(item => {
+      nats.add(normalizeNationality(item.nationality));
+    });
+    return Array.from(nats).filter(Boolean).sort((a, b) => a.localeCompare(b, 'tr'));
   }, [analytics]);
 
   const allSources = useMemo(() => {
@@ -1582,7 +1539,7 @@ export function DashboardModule() {
       // Nationality (Market) counts
       const nationalityCounts: Record<string, { count: number, totalScore: number }> = {};
       thisYearItems.forEach(item => {
-        const nat = item.nationality || 'Bilinmiyor';
+        const nat = normalizeNationality(item.nationality);
         if (!nationalityCounts[nat]) nationalityCounts[nat] = { count: 0, totalScore: 0 };
         nationalityCounts[nat].count += 1;
         nationalityCounts[nat].totalScore += item.overallScore || 0;
@@ -1629,7 +1586,7 @@ export function DashboardModule() {
       // Last Year Nationalities
       const lastYearNationalityCounts: Record<string, { count: number, totalScore: number }> = {};
       lastYearItems.forEach(item => {
-        const nat = item.nationality || 'Bilinmiyor';
+        const nat = normalizeNationality(item.nationality);
         if (!lastYearNationalityCounts[nat]) lastYearNationalityCounts[nat] = { count: 0, totalScore: 0 };
         lastYearNationalityCounts[nat].count += 1;
         lastYearNationalityCounts[nat].totalScore += item.overallScore || 0;
@@ -2719,7 +2676,11 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                   <div className="flex items-center justify-between mb-6">
                     <div>
                       <h3 className="text-lg font-bold text-slate-900">Kategori Bazlı Memnuniyet</h3>
-                      <p className="text-xs text-slate-500">Ana ve alt kategorilerdeki misafir deneyim puanları</p>
+                      <p className="text-xs text-slate-500">
+                        {isCompareActive 
+                          ? 'Ana ve alt kategorilerin önceki döneme göre puan ve yorum hacmi karşılaştırması' 
+                          : 'Ana ve alt kategorilerdeki misafir deneyim puanları'}
+                      </p>
                     </div>
                     <button
                       id="toggle-subtopics-btn"
@@ -2746,7 +2707,7 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                         <BarChart 
                           layout="vertical" 
                           data={categoryChartData} 
-                          margin={{ left: 10, right: 60, top: 10, bottom: 10 }}
+                          margin={{ left: 10, right: 80, top: 10, bottom: 10 }}
                           onClick={(data: any) => {
                             if (data && data.activePayload && data.activePayload[0]) {
                               const payload = data.activePayload[0].payload;
@@ -2800,7 +2761,46 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                           />
                           <Tooltip 
                             cursor={{ fill: '#f8fafc' }}
-                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                            content={({ active, payload }) => {
+                              if (!active || !payload || !payload.length) return null;
+                              const data = payload[0].payload;
+                              return (
+                                <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[220px]">
+                                  <p className="text-xs font-black text-slate-800 uppercase tracking-tight mb-2 border-b border-slate-100 pb-1.5 flex items-center justify-between">
+                                    <span>{data.name}</span>
+                                    {data.isSub && <span className="text-[9px] text-slate-400 font-normal lowercase">({data.parent})</span>}
+                                  </p>
+                                  <div className="space-y-1.5 text-xs">
+                                    <div className="flex items-center justify-between font-medium">
+                                      <span className="text-indigo-600 flex items-center gap-1.5 font-bold">
+                                        <span className="w-2 h-2 rounded-full bg-indigo-600"></span> Bu Dönem:
+                                      </span>
+                                      <span className="font-bold font-mono">%{data.score} <span className="text-slate-400 text-[10px]">({data.count} yorum)</span></span>
+                                    </div>
+                                    {isCompareActive && data.prevScore !== undefined && (
+                                      <div className="flex items-center justify-between font-medium text-slate-500">
+                                        <span className="flex items-center gap-1.5">
+                                          <span className="w-2 h-2 rounded-full bg-slate-300"></span> Önceki Dönem:
+                                        </span>
+                                        <span className="font-bold font-mono">%{data.prevScore} <span className="text-slate-400 text-[10px]">({data.prevCount || 0} yorum)</span></span>
+                                      </div>
+                                    )}
+                                    {isCompareActive && data.scoreDelta !== undefined && (
+                                      <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold">
+                                        <span className="text-slate-500">Puan Değişimi:</span>
+                                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                          data.scoreDelta > 0 ? 'bg-emerald-50 text-emerald-700' : 
+                                          data.scoreDelta < 0 ? 'bg-rose-50 text-rose-700' : 
+                                          'bg-slate-100 text-slate-600'
+                                        }`}>
+                                          {data.scoreDelta > 0 ? `+${data.scoreDelta}` : data.scoreDelta} puan {data.scoreDelta > 0 ? '↗' : data.scoreDelta < 0 ? '↘' : '▬'}
+                                        </span>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            }}
                           />
                           {isCompareActive && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
                           {isCompareActive && (
@@ -2839,13 +2839,26 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                         <thead>
                           <tr className="border-b border-slate-100">
                             <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Kategori</th>
-                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">Bahsedilme Sayısı</th>
-                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Memnuniyet Skoru</th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">
+                              {isCompareActive ? 'Bahsedilme (Bu Dönem / Önceki)' : 'Bahsedilme Sayısı'}
+                            </th>
+                            <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                              {isCompareActive ? 'Memnuniyet Skoru & Karşılaştırma' : 'Memnuniyet Skoru'}
+                            </th>
+                            {isCompareActive && (
+                              <th className="py-3 px-4 text-[10px] font-bold text-slate-400 uppercase tracking-wider text-center">
+                                Performans Eğilimi
+                              </th>
+                            )}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-50">
                           {hierarchicalCategoryData.map((group, gIdx) => {
                             const isExpanded = showSubCategories || expandedCategories[group.name];
+                            const scoreDelta = group.scoreDelta;
+                            const countDelta = group.countDelta;
+                            const growthRate = group.growthRate;
+
                             return (
                             <React.Fragment key={gIdx}>
                               <tr 
@@ -2873,35 +2886,98 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                     </span>
                                   </div>
                                 </td>
-                                <td className="py-3 px-4 text-sm text-slate-500 text-center font-mono font-bold">
-                                  {group.count}
+                                <td className="py-3 px-4 text-center">
+                                  {isCompareActive ? (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <div className="flex items-center gap-1.5 font-mono">
+                                        <span className="text-sm font-black text-slate-800">{group.count}</span>
+                                        <span className="text-xs text-slate-400 font-semibold">/ {group.prevCount || 0}</span>
+                                      </div>
+                                      {group.prevCount > 0 ? (
+                                        <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full inline-flex items-center gap-0.5 ${
+                                          growthRate >= 0 ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                                        }`}>
+                                          {growthRate >= 0 ? `+${growthRate}% ▲` : `${growthRate}% ▼`}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1 rounded">Yeni ✨</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-sm text-slate-500 font-mono font-bold">{group.count}</span>
+                                  )}
                                 </td>
                                 <td className="py-3 px-4">
                                   <div className="flex items-center gap-3">
-                                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[100px]">
-                                      <div 
-                                        className={`h-full rounded-full transition-all duration-500 ${
-                                          group.avgScore >= 80 ? 'bg-emerald-500' :
-                                          group.avgScore >= 60 ? 'bg-blue-500' :
-                                          group.avgScore >= 40 ? 'bg-amber-500' :
-                                          'bg-red-500'
-                                        }`}
-                                        style={{ width: `${group.avgScore}%` }}
-                                      />
+                                    <div className="flex-1 flex flex-col gap-1 min-w-[120px]">
+                                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                        <div 
+                                          className={`h-full rounded-full transition-all duration-500 ${
+                                            group.avgScore >= 80 ? 'bg-emerald-500' :
+                                            group.avgScore >= 60 ? 'bg-blue-500' :
+                                            group.avgScore >= 40 ? 'bg-amber-500' :
+                                            'bg-red-500'
+                                          }`}
+                                          style={{ width: `${group.avgScore}%` }}
+                                        />
+                                      </div>
+                                      {isCompareActive && group.prevScore !== undefined && (
+                                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                          <span>Bu: <strong className="text-slate-700 font-bold">%{group.avgScore}</strong></span>
+                                          <span>Önceki: <strong className="text-slate-500 font-semibold">%{group.prevScore}</strong></span>
+                                        </div>
+                                      )}
                                     </div>
-                                    <span className={`text-xs font-black w-10 ${
-                                      group.avgScore >= 80 ? 'text-emerald-600' :
-                                      group.avgScore >= 60 ? 'text-blue-600' :
-                                      group.avgScore >= 40 ? 'text-amber-600' :
-                                      'text-red-600'
-                                    }`}>
-                                      %{group.avgScore}
-                                    </span>
+                                    <div className="flex flex-col items-end min-w-[55px]">
+                                      <span className={`text-xs font-black ${
+                                        group.avgScore >= 80 ? 'text-emerald-600' :
+                                        group.avgScore >= 60 ? 'text-blue-600' :
+                                        group.avgScore >= 40 ? 'text-amber-600' :
+                                        'text-red-600'
+                                      }`}>
+                                        %{group.avgScore}
+                                      </span>
+                                      {isCompareActive && scoreDelta !== undefined && (
+                                        <span className={`text-[10px] font-black leading-none mt-0.5 ${
+                                          scoreDelta > 0 ? 'text-emerald-600' : 
+                                          scoreDelta < 0 ? 'text-rose-600' : 
+                                          'text-slate-400'
+                                        }`}>
+                                          {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} p.
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </td>
+                                {isCompareActive && (
+                                  <td className="py-3 px-4 text-center">
+                                    {scoreDelta !== undefined ? (
+                                      scoreDelta >= 5 ? (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                          <ArrowUpRight size={12} className="text-emerald-600" /> Güçlü İyileşme
+                                        </span>
+                                      ) : scoreDelta <= -5 ? (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black bg-rose-50 text-rose-700 px-2.5 py-1 rounded-lg border border-rose-200">
+                                          <ArrowDownRight size={12} className="text-rose-600" /> Dikkat: Düşüş
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black bg-slate-100 text-slate-600 px-2.5 py-1 rounded-lg border border-slate-200">
+                                          ⚖️ Dengeli & Stabil
+                                        </span>
+                                      )
+                                    ) : (
+                                      <span className="text-[10px] text-slate-400 font-medium">-</span>
+                                    )}
+                                  </td>
+                                )}
                               </tr>
                               <AnimatePresence>
-                                {isExpanded && group.subCategories.map((sub, sIdx) => (
+                                {isExpanded && group.subCategories.map((sub, sIdx) => {
+                                  const subScoreDelta = sub.scoreDelta;
+                                  const subCountDelta = sub.countDelta;
+                                  const subGrowthRate = sub.growthRate;
+
+                                  return (
                                   <motion.tr
                                     initial={{ opacity: 0, height: 0, scaleY: 0.8 }}
                                     animate={{ opacity: 1, height: 'auto', scaleY: 1 }}
@@ -2923,8 +2999,22 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                         {sub.subCategory}
                                       </span>
                                     </td>
-                                    <td className="py-2 px-4 text-xs text-slate-400 text-center font-mono">
-                                      {sub.count}
+                                    <td className="py-2 px-4 text-center">
+                                      {isCompareActive ? (
+                                        <div className="flex items-center justify-center gap-1.5 font-mono text-xs">
+                                          <span className="font-bold text-slate-700">{sub.count}</span>
+                                          <span className="text-slate-400">/ {sub.prevCount || 0}</span>
+                                          {subGrowthRate !== undefined && (
+                                            <span className={`text-[9px] font-bold px-1 rounded ${
+                                              subGrowthRate >= 0 ? 'text-indigo-600 bg-indigo-50' : 'text-slate-500 bg-slate-100'
+                                            }`}>
+                                              {subGrowthRate >= 0 ? `+${subGrowthRate}%` : `${subGrowthRate}%`}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span className="text-xs text-slate-400 font-mono">{sub.count}</span>
+                                      )}
                                     </td>
                                     <td className="py-2 px-4">
                                       <div className="flex items-center gap-2">
@@ -2942,10 +3032,33 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                         <span className="text-[10px] font-bold text-slate-500 w-8">
                                           %{sub.avgScore}
                                         </span>
+                                        {isCompareActive && subScoreDelta !== undefined && (
+                                          <span className={`text-[9px] font-black ${
+                                            subScoreDelta > 0 ? 'text-emerald-600' : 
+                                            subScoreDelta < 0 ? 'text-rose-600' : 
+                                            'text-slate-400'
+                                          }`}>
+                                            ({subScoreDelta > 0 ? `+${subScoreDelta}` : subScoreDelta}p)
+                                          </span>
+                                        )}
                                       </div>
                                     </td>
+                                    {isCompareActive && (
+                                      <td className="py-2 px-4 text-center">
+                                        {subScoreDelta !== undefined && (
+                                          <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                            subScoreDelta >= 5 ? 'text-emerald-700 bg-emerald-50' :
+                                            subScoreDelta <= -5 ? 'text-rose-700 bg-rose-50' :
+                                            'text-slate-500 bg-slate-100'
+                                          }`}>
+                                            {subScoreDelta >= 5 ? 'İyileşme' : subScoreDelta <= -5 ? 'Düşüş' : 'Sabit'}
+                                          </span>
+                                        )}
+                                      </td>
+                                    )}
                                   </motion.tr>
-                                ))}
+                                  );
+                                })}
                               </AnimatePresence>
                             </React.Fragment>
                             );
@@ -3323,7 +3436,11 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                           </div>
                           En Çok Konuşulan Konular
                         </h3>
-                        <p className="text-xs text-slate-500 mt-1">En yüksek yorum hacmine sahip, gündemi belirleyen alt kategoriler</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {isCompareActive 
+                            ? 'En yüksek yorum hacmine sahip konuların önceki döneme göre değişim ve büyüme analizi' 
+                            : 'En yüksek yorum hacmine sahip, gündemi belirleyen alt kategoriler'}
+                        </p>
                       </div>
                     </div>
 
@@ -3355,12 +3472,51 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             />
                             <Tooltip 
                               cursor={{ fill: '#f8fafc' }}
-                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
-                              formatter={(value: any, name: string) => {
-                                if (name === 'count') return [value, 'Bu Dönem Bahsedilme'];
-                                if (name === 'prevCount') return [value, 'Önceki Dönem Bahsedilme'];
-                                if (name === 'avgScore') return [`%${value}`, 'Memnuniyet Skoru'];
-                                return [value, name];
+                              content={({ active, payload }) => {
+                                if (!active || !payload || !payload.length) return null;
+                                const item = payload[0].payload;
+                                return (
+                                  <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[220px]">
+                                    <p className="text-xs font-black text-slate-800 uppercase tracking-tight mb-2 border-b border-slate-100 pb-1.5 flex items-center justify-between">
+                                      <span>{item.subCategory}</span>
+                                      <span className="text-[9px] text-slate-400 font-normal lowercase">({item.mainCategory})</span>
+                                    </p>
+                                    <div className="space-y-1.5 text-xs">
+                                      <div className="flex items-center justify-between font-medium">
+                                        <span className="text-indigo-600 flex items-center gap-1.5 font-bold">
+                                          <span className="w-2 h-2 rounded-full bg-indigo-600"></span> Bu Dönem:
+                                        </span>
+                                        <span className="font-bold font-mono">{item.count} yorum <span className="text-slate-500 font-normal">(%{item.avgScore})</span></span>
+                                      </div>
+                                      {isCompareActive && (
+                                        <div className="flex items-center justify-between font-medium text-slate-500">
+                                          <span className="flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full bg-slate-300"></span> Önceki Dönem:
+                                          </span>
+                                          <span className="font-bold font-mono">{item.prevCount || 0} yorum <span className="text-slate-400 font-normal">(%{item.prevScore || 0})</span></span>
+                                        </div>
+                                      )}
+                                      {isCompareActive && (
+                                        <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold">
+                                          <span className="text-slate-500">Hacim / Skor Farkı:</span>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-indigo-600 font-black">
+                                              {item.countDelta !== undefined && item.countDelta >= 0 ? `+${item.countDelta}` : item.countDelta} yorum
+                                            </span>
+                                            {item.scoreDelta !== undefined && (
+                                              <span className={`text-[10px] px-1 py-0.2 rounded font-black ${
+                                                item.scoreDelta > 0 ? 'bg-emerald-50 text-emerald-700' : 
+                                                item.scoreDelta < 0 ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'
+                                              }`}>
+                                                {item.scoreDelta > 0 ? `+${item.scoreDelta}` : item.scoreDelta}p
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
                               }}
                             />
                             {isCompareActive && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
@@ -3391,12 +3547,25 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             <tr className="border-b border-slate-100">
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Alt Kategori</th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ana Kategori</th>
-                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Bahsedilme Sayısı</th>
-                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Skor</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                {isCompareActive ? 'Bahsedilme (Bu Dönem / Önceki)' : 'Bahsedilme Sayısı'}
+                              </th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                {isCompareActive ? 'Memnuniyet Skoru & Fark' : 'Skor'}
+                              </th>
+                              {isCompareActive && (
+                                <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                  Gündem Dinamiği
+                                </th>
+                              )}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50" data-section="most-mentioned">
-                            {dashboardData.mostMentioned.map((item, idx) => (
+                            {dashboardData.mostMentioned.map((item, idx) => {
+                              const growthRate = item.growthRate;
+                              const scoreDelta = item.scoreDelta;
+
+                              return (
                               <tr 
                                 key={idx} 
                                 className={`hover:bg-slate-50/80 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllMostMentioned && idx >= 10) ? 'hidden' : ''}`}
@@ -3411,28 +3580,97 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                   <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{item.mainCategory}</span>
                                 </td>
                                 <td className="py-4 px-4 text-center">
-                                  <span className="text-sm font-black text-indigo-600">{item.count}</span>
+                                  {isCompareActive ? (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <div className="flex items-center gap-1.5 font-mono">
+                                        <span className="text-sm font-black text-indigo-600">{item.count}</span>
+                                        <span className="text-xs text-slate-400 font-semibold">/ {item.prevCount || 0}</span>
+                                      </div>
+                                      {item.prevCount && item.prevCount > 0 ? (
+                                        <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full inline-flex items-center gap-0.5 ${
+                                          growthRate !== undefined && growthRate >= 0 ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-100 text-slate-600'
+                                        }`}>
+                                          {growthRate !== undefined && growthRate >= 0 ? `+${growthRate}% ▲` : `${growthRate}% ▼`}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1 rounded">Yeni Gündem ✨</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-sm font-black text-indigo-600">{item.count}</span>
+                                  )}
                                 </td>
                                 <td className="py-4 px-4">
                                   <div className="flex items-center gap-3">
-                                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[120px]">
-                                      <div className={`h-full rounded-full ${
-                                        item.avgScore >= 80 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]' :
-                                        item.avgScore >= 60 ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.3)]' :
-                                        item.avgScore >= 40 ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.3)]' :
-                                        'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.3)]'
-                                      }`} style={{ width: `${item.avgScore}%` }} />
+                                    <div className="flex-1 flex flex-col gap-1 min-w-[120px]">
+                                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                        <div className={`h-full rounded-full ${
+                                          item.avgScore >= 80 ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]' :
+                                          item.avgScore >= 60 ? 'bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.3)]' :
+                                          item.avgScore >= 40 ? 'bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.3)]' :
+                                          'bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.3)]'
+                                        }`} style={{ width: `${item.avgScore}%` }} />
+                                      </div>
+                                      {isCompareActive && item.prevScore !== undefined && (
+                                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                          <span>Bu: <strong className="text-slate-700 font-bold">%{item.avgScore}</strong></span>
+                                          <span>Önceki: <strong className="text-slate-500 font-semibold">%{item.prevScore}</strong></span>
+                                        </div>
+                                      )}
                                     </div>
-                                    <span className={`text-xs font-black w-10 ${
-                                      item.avgScore >= 80 ? 'text-emerald-600' :
-                                      item.avgScore >= 60 ? 'text-blue-600' :
-                                      item.avgScore >= 40 ? 'text-amber-600' :
-                                      'text-red-600'
-                                    }`}>%{item.avgScore}</span>
+                                    <div className="flex flex-col items-end min-w-[55px]">
+                                      <span className={`text-xs font-black ${
+                                        item.avgScore >= 80 ? 'text-emerald-600' :
+                                        item.avgScore >= 60 ? 'text-blue-600' :
+                                        item.avgScore >= 40 ? 'text-amber-600' :
+                                        'text-red-600'
+                                      }`}>
+                                        %{item.avgScore}
+                                      </span>
+                                      {isCompareActive && scoreDelta !== undefined && (
+                                        <span className={`text-[10px] font-black leading-none mt-0.5 ${
+                                          scoreDelta > 0 ? 'text-emerald-600' : 
+                                          scoreDelta < 0 ? 'text-rose-600' : 
+                                          'text-slate-400'
+                                        }`}>
+                                          {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} p.
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </td>
+                                {isCompareActive && (
+                                  <td className="py-4 px-4 text-center">
+                                    {growthRate !== undefined ? (
+                                      growthRate >= 50 ? (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black bg-purple-50 text-purple-700 px-2 py-1 rounded-lg border border-purple-200">
+                                          🔥 Hızlı Yükselen
+                                        </span>
+                                      ) : growthRate <= -30 ? (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black bg-slate-100 text-slate-600 px-2 py-1 rounded-lg border border-slate-200">
+                                          📉 Azalan İlgi
+                                        </span>
+                                      ) : scoreDelta !== undefined && scoreDelta >= 5 ? (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg border border-emerald-200">
+                                          🌟 Pozitif Trend
+                                        </span>
+                                      ) : scoreDelta !== undefined && scoreDelta <= -5 ? (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black bg-rose-50 text-rose-700 px-2 py-1 rounded-lg border border-rose-200">
+                                          ⚠️ Dikkat Çeken Düşüş
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex items-center gap-1 text-[10px] font-black bg-slate-50 text-slate-600 px-2 py-1 rounded-lg border border-slate-200">
+                                          ⚖️ Dengeli Gündem
+                                        </span>
+                                      )
+                                    ) : (
+                                      <span className="text-[10px] text-slate-400">-</span>
+                                    )}
+                                  </td>
+                                )}
                               </tr>
-                            ))}
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -3469,7 +3707,11 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                           </div>
                           En Çok Övülen Konular
                         </h3>
-                        <p className="text-xs text-slate-500 mt-1">Misafirlerin en yüksek puan verdiği ve memnuniyetin zirve yaptığı alanlar</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {isCompareActive 
+                            ? 'Misafirlerin en çok beğendiği alanların önceki döneme göre puan artışı ve başarı performansı' 
+                            : 'Misafirlerin en yüksek puan verdiği ve memnuniyetin zirve yaptığı alanlar'}
+                        </p>
                       </div>
                     </div>
 
@@ -3501,12 +3743,44 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             />
                             <Tooltip 
                               cursor={{ fill: '#f8fafc' }}
-                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
-                              formatter={(value: any, name: string) => {
-                                if (name === 'avgScore') return [`%${value}`, 'Bu Dönem Memnuniyet'];
-                                if (name === 'prevScore') return [`%${value}`, 'Önceki Dönem Memnuniyet'];
-                                if (name === 'count') return [value, 'Bahsedilme Sayısı'];
-                                return [value, name];
+                              content={({ active, payload }) => {
+                                if (!active || !payload || !payload.length) return null;
+                                const item = payload[0].payload;
+                                return (
+                                  <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[220px]">
+                                    <p className="text-xs font-black text-slate-800 uppercase tracking-tight mb-2 border-b border-slate-100 pb-1.5 flex items-center justify-between">
+                                      <span>{item.subCategory}</span>
+                                      <span className="text-[9px] text-slate-400 font-normal lowercase">({item.mainCategory})</span>
+                                    </p>
+                                    <div className="space-y-1.5 text-xs">
+                                      <div className="flex items-center justify-between font-medium">
+                                        <span className="text-emerald-600 flex items-center gap-1.5 font-bold">
+                                          <span className="w-2 h-2 rounded-full bg-emerald-600"></span> Bu Dönem:
+                                        </span>
+                                        <span className="font-bold font-mono">%{item.avgScore} <span className="text-slate-400 text-[10px]">({item.count} yorum)</span></span>
+                                      </div>
+                                      {isCompareActive && (
+                                        <div className="flex items-center justify-between font-medium text-slate-500">
+                                          <span className="flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full bg-slate-300"></span> Önceki Dönem:
+                                          </span>
+                                          <span className="font-bold font-mono">%{item.prevScore || 0} <span className="text-slate-400 text-[10px]">({item.prevCount || 0} yorum)</span></span>
+                                        </div>
+                                      )}
+                                      {isCompareActive && item.scoreDelta !== undefined && (
+                                        <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold">
+                                          <span className="text-slate-500">Puan Değişimi:</span>
+                                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
+                                            item.scoreDelta > 0 ? 'bg-emerald-50 text-emerald-700' : 
+                                            item.scoreDelta < 0 ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'
+                                          }`}>
+                                            {item.scoreDelta > 0 ? `+${item.scoreDelta}` : item.scoreDelta} puan {item.scoreDelta > 0 ? '↗' : item.scoreDelta < 0 ? '↘' : '▬'}
+                                          </span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
                               }}
                             />
                             {isCompareActive && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
@@ -3537,12 +3811,25 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             <tr className="border-b border-slate-100">
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Alt Kategori</th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ana Kategori</th>
-                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Bahsedilme Sayısı</th>
-                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Memnuniyet Skoru</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                {isCompareActive ? 'Övgü Hacmi (Bu Dönem / Önceki)' : 'Bahsedilme Sayısı'}
+                              </th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                {isCompareActive ? 'Memnuniyet Skoru & Puan Artışı' : 'Memnuniyet Skoru'}
+                              </th>
+                              {isCompareActive && (
+                                <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                  Başarı Trendi
+                                </th>
+                              )}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50" data-section="top-positive">
-                            {dashboardData.topPositive.map((item, idx) => (
+                            {dashboardData.topPositive.map((item, idx) => {
+                              const scoreDelta = item.scoreDelta;
+                              const growthRate = item.growthRate;
+
+                              return (
                               <tr 
                                 key={idx} 
                                 className={`hover:bg-slate-50/80 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopPositive && idx >= 10) ? 'hidden' : ''}`}
@@ -3558,18 +3845,77 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                   <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{item.mainCategory}</span>
                                 </td>
                                 <td className="py-4 px-4 text-center">
-                                  <span className="text-xs font-bold text-slate-500">{item.count}</span>
+                                  {isCompareActive ? (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <div className="flex items-center gap-1.5 font-mono">
+                                        <span className="text-sm font-black text-emerald-600">{item.count}</span>
+                                        <span className="text-xs text-slate-400 font-semibold">/ {item.prevCount || 0}</span>
+                                      </div>
+                                      {item.prevCount && item.prevCount > 0 ? (
+                                        <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full inline-flex items-center gap-0.5 ${
+                                          growthRate !== undefined && growthRate >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'
+                                        }`}>
+                                          {growthRate !== undefined && growthRate >= 0 ? `+${growthRate}% ▲` : `${growthRate}% ▼`}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 px-1 rounded">Yeni Başarı 🌱</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs font-bold text-slate-500">{item.count}</span>
+                                  )}
                                 </td>
                                 <td className="py-4 px-4">
                                   <div className="flex items-center gap-3">
-                                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[120px]">
-                                      <div className="h-full bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.3)]" style={{ width: `${item.avgScore}%` }} />
+                                    <div className="flex-1 flex flex-col gap-1 min-w-[120px]">
+                                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                        <div className="h-full bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.3)]" style={{ width: `${item.avgScore}%` }} />
+                                      </div>
+                                      {isCompareActive && item.prevScore !== undefined && (
+                                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                          <span>Bu: <strong className="text-slate-700 font-bold">%{item.avgScore}</strong></span>
+                                          <span>Önceki: <strong className="text-slate-500 font-semibold">%{item.prevScore}</strong></span>
+                                        </div>
+                                      )}
                                     </div>
-                                    <span className="text-xs font-black text-emerald-600 w-10">%{item.avgScore}</span>
+                                    <div className="flex flex-col items-end min-w-[55px]">
+                                      <span className="text-xs font-black text-emerald-600 w-10">%{item.avgScore}</span>
+                                      {isCompareActive && scoreDelta !== undefined && (
+                                        <span className={`text-[10px] font-black leading-none mt-0.5 ${
+                                          scoreDelta > 0 ? 'text-emerald-600' : 
+                                          scoreDelta < 0 ? 'text-rose-600' : 
+                                          'text-slate-400'
+                                        }`}>
+                                          {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} p.
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </td>
+                                {isCompareActive && (
+                                  <td className="py-4 px-4 text-center">
+                                    {item.avgScore >= 95 ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black bg-amber-50 text-amber-700 px-2 py-1 rounded-lg border border-amber-200">
+                                        👑 Zirveyi Koruyor (%95+)
+                                      </span>
+                                    ) : scoreDelta !== undefined && scoreDelta >= 5 ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg border border-emerald-200">
+                                        🚀 Güçlenen Memnuniyet
+                                      </span>
+                                    ) : !item.prevCount ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg border border-indigo-200">
+                                        🌱 Yeni Başarı Alanı
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black bg-slate-50 text-slate-600 px-2 py-1 rounded-lg border border-slate-200">
+                                        🌟 İstikrarlı Başarı
+                                      </span>
+                                    )}
+                                  </td>
+                                )}
                               </tr>
-                            ))}
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -3606,7 +3952,11 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                           </div>
                           Acil Müdahale Gerekenler
                         </h3>
-                        <p className="text-xs text-slate-500 mt-1">En düşük performans gösteren ve operasyonel müdahale bekleyen kritik konular</p>
+                        <p className="text-xs text-slate-500 mt-1">
+                          {isCompareActive 
+                            ? 'En düşük performans gösteren alanların şikayet hacmi ve memnuniyet puanı değişim analizi' 
+                            : 'En düşük performans gösteren ve operasyonel müdahale bekleyen kritik konular'}
+                        </p>
                       </div>
                     </div>
 
@@ -3638,12 +3988,51 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             />
                             <Tooltip 
                               cursor={{ fill: '#fff1f2' }}
-                              contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', padding: '12px' }}
-                              formatter={(value: any, name: string) => {
-                                if (name === 'avgScore') return [`%${value}`, 'Bu Dönem Memnuniyet'];
-                                if (name === 'prevScore') return [`%${value}`, 'Önceki Dönem Memnuniyet'];
-                                if (name === 'count') return [value, 'Bahsedilme Sayısı'];
-                                return [value, name];
+                              content={({ active, payload }) => {
+                                if (!active || !payload || !payload.length) return null;
+                                const item = payload[0].payload;
+                                return (
+                                  <div className="bg-white p-3.5 rounded-xl shadow-xl border border-slate-100 min-w-[220px]">
+                                    <p className="text-xs font-black text-slate-800 uppercase tracking-tight mb-2 border-b border-slate-100 pb-1.5 flex items-center justify-between">
+                                      <span>{item.subCategory}</span>
+                                      <span className="text-[9px] text-slate-400 font-normal lowercase">({item.mainCategory})</span>
+                                    </p>
+                                    <div className="space-y-1.5 text-xs">
+                                      <div className="flex items-center justify-between font-medium">
+                                        <span className="text-rose-600 flex items-center gap-1.5 font-bold">
+                                          <span className="w-2 h-2 rounded-full bg-rose-600"></span> Bu Dönem:
+                                        </span>
+                                        <span className="font-bold font-mono">%{item.avgScore} <span className="text-slate-400 text-[10px]">({item.count} şikayet)</span></span>
+                                      </div>
+                                      {isCompareActive && (
+                                        <div className="flex items-center justify-between font-medium text-slate-500">
+                                          <span className="flex items-center gap-1.5">
+                                            <span className="w-2 h-2 rounded-full bg-slate-300"></span> Önceki Dönem:
+                                          </span>
+                                          <span className="font-bold font-mono">%{item.prevScore || 0} <span className="text-slate-400 text-[10px]">({item.prevCount || 0} şikayet)</span></span>
+                                        </div>
+                                      )}
+                                      {isCompareActive && (
+                                        <div className="pt-1.5 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold">
+                                          <span className="text-slate-500">Şikayet / Skor Değişimi:</span>
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="text-rose-600 font-black">
+                                              {item.countDelta !== undefined && item.countDelta >= 0 ? `+${item.countDelta}` : item.countDelta} yorum
+                                            </span>
+                                            {item.scoreDelta !== undefined && (
+                                              <span className={`text-[10px] px-1 py-0.2 rounded font-black ${
+                                                item.scoreDelta > 0 ? 'bg-emerald-50 text-emerald-700' : 
+                                                item.scoreDelta < 0 ? 'bg-rose-50 text-rose-700' : 'bg-slate-100 text-slate-600'
+                                              }`}>
+                                                {item.scoreDelta > 0 ? `+${item.scoreDelta}` : item.scoreDelta}p
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                );
                               }}
                             />
                             {isCompareActive && <Legend wrapperStyle={{ fontSize: '10px', paddingTop: '10px' }} />}
@@ -3674,12 +4063,25 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             <tr className="border-b border-slate-100">
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Alt Kategori</th>
                               <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Ana Kategori</th>
-                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">Bahsedilme Sayısı</th>
-                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">Memnuniyet Skoru</th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                {isCompareActive ? 'Şikayet Hacmi (Bu Dönem / Önceki)' : 'Bahsedilme Sayısı'}
+                              </th>
+                              <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                                {isCompareActive ? 'Memnuniyet Skoru & Değişim' : 'Memnuniyet Skoru'}
+                              </th>
+                              {isCompareActive && (
+                                <th className="py-4 px-4 text-[10px] font-black text-slate-400 uppercase tracking-widest text-center">
+                                  Risk & Değişim Durumu
+                                </th>
+                              )}
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-50" data-section="top-negative">
-                            {dashboardData.topNegative.map((item, idx) => (
+                            {dashboardData.topNegative.map((item, idx) => {
+                              const scoreDelta = item.scoreDelta;
+                              const growthRate = item.growthRate;
+
+                              return (
                               <tr 
                                 key={idx} 
                                 className={`hover:bg-rose-50/30 transition-all group cursor-pointer interactive-filter-trigger ${idx >= 10 ? 'toggleable-row' : ''} ${(!showAllTopNegative && idx >= 10) ? 'hidden' : ''}`}
@@ -3695,18 +4097,77 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                   <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{item.mainCategory}</span>
                                 </td>
                                 <td className="py-4 px-4 text-center">
-                                  <span className="text-xs font-bold text-slate-500">{item.count}</span>
+                                  {isCompareActive ? (
+                                    <div className="flex flex-col items-center justify-center gap-0.5">
+                                      <div className="flex items-center gap-1.5 font-mono">
+                                        <span className="text-sm font-black text-rose-600">{item.count}</span>
+                                        <span className="text-xs text-slate-400 font-semibold">/ {item.prevCount || 0}</span>
+                                      </div>
+                                      {item.prevCount && item.prevCount > 0 ? (
+                                        <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full inline-flex items-center gap-0.5 ${
+                                          growthRate !== undefined && growthRate > 0 ? 'bg-rose-50 text-rose-700' : 'bg-emerald-50 text-emerald-700'
+                                        }`}>
+                                          {growthRate !== undefined && growthRate >= 0 ? `+${growthRate}% Şikayet Artışı ⚠️` : `${growthRate}% Azalma 📉`}
+                                        </span>
+                                      ) : (
+                                        <span className="text-[9px] font-bold text-amber-600 bg-amber-50 px-1 rounded">Yeni Beliren Sorun ⚡</span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs font-bold text-slate-500">{item.count}</span>
+                                  )}
                                 </td>
                                 <td className="py-4 px-4">
                                   <div className="flex items-center gap-3">
-                                    <div className="flex-1 h-2 bg-slate-100 rounded-full overflow-hidden min-w-[120px]">
-                                      <div className="h-full bg-rose-500 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.3)]" style={{ width: `${item.avgScore}%` }} />
+                                    <div className="flex-1 flex flex-col gap-1 min-w-[120px]">
+                                      <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
+                                        <div className="h-full bg-rose-500 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.3)]" style={{ width: `${item.avgScore}%` }} />
+                                      </div>
+                                      {isCompareActive && item.prevScore !== undefined && (
+                                        <div className="flex items-center justify-between text-[10px] text-slate-400">
+                                          <span>Bu: <strong className="text-slate-700 font-bold">%{item.avgScore}</strong></span>
+                                          <span>Önceki: <strong className="text-slate-500 font-semibold">%{item.prevScore}</strong></span>
+                                        </div>
+                                      )}
                                     </div>
-                                    <span className="text-xs font-black text-rose-600 w-10">%{item.avgScore}</span>
+                                    <div className="flex flex-col items-end min-w-[55px]">
+                                      <span className="text-xs font-black text-rose-600 w-10">%{item.avgScore}</span>
+                                      {isCompareActive && scoreDelta !== undefined && (
+                                        <span className={`text-[10px] font-black leading-none mt-0.5 ${
+                                          scoreDelta > 0 ? 'text-emerald-600' : 
+                                          scoreDelta < 0 ? 'text-rose-600' : 
+                                          'text-slate-400'
+                                        }`}>
+                                          {scoreDelta > 0 ? `+${scoreDelta}` : scoreDelta} p.
+                                        </span>
+                                      )}
+                                    </div>
                                   </div>
                                 </td>
+                                {isCompareActive && (
+                                  <td className="py-4 px-4 text-center">
+                                    {growthRate !== undefined && growthRate > 0 && scoreDelta !== undefined && scoreDelta <= 0 ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black bg-rose-100 text-rose-800 px-2 py-1 rounded-lg border border-rose-300">
+                                        🚨 Kritikleşen Problem
+                                      </span>
+                                    ) : scoreDelta !== undefined && scoreDelta >= 5 ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black bg-emerald-50 text-emerald-700 px-2 py-1 rounded-lg border border-emerald-200">
+                                        ✅ Toparlanma Eğiliminde
+                                      </span>
+                                    ) : !item.prevCount ? (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black bg-amber-50 text-amber-700 px-2 py-1 rounded-lg border border-amber-200">
+                                        ⚡ Yeni Beliren Sorun
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex items-center gap-1 text-[10px] font-black bg-rose-50 text-rose-700 px-2 py-1 rounded-lg border border-rose-200">
+                                        ⚠️ Kronik Memnuniyetsizlik
+                                      </span>
+                                    )}
+                                  </td>
+                                )}
                               </tr>
-                            ))}
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>

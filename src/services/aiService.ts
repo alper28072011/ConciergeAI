@@ -3,6 +3,7 @@ import { collection, addDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { ApiSettings, AIFeature, CommentData, CommentAnalytics, HotelTaxonomy, UnifiedTopicAnalysis } from '../types';
 import { HOTEL_MAIN_CATEGORIES } from '../utils/constants';
+import { normalizeNationality } from '../utils/nationality';
 
 const COST_RATES = {
   'gemini-2.5-flash-lite': { input: 0.10, output: 0.40 },
@@ -214,7 +215,7 @@ ${comment.COMMENT || ''}`;
       resId: comment.RESNAMEID_LOOKUP || '',
       date: comment.COMMENTDATE || new Date().toISOString(),
       source: comment.COMMENTSOURCEID_NAME || 'Bilinmiyor',
-      nationality: comment.NATIONALITY || 'Bilinmiyor',
+      nationality: normalizeNationality(comment.NATIONALITY),
       overallScore: result.overallScore || 0,
       comment: comment.COMMENT || '',
       answer: comment.ANSWER || '',
