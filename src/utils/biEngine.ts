@@ -102,6 +102,12 @@ export interface DashboardData {
     worstCategory: string;
     scoreChange?: number;
     commentChange?: number;
+    prevAvgScore?: number;
+    prevTotalComments?: number;
+    prevBestCategory?: string;
+    prevWorstCategory?: string;
+    scorePointDelta?: number;
+    commentCountDelta?: number;
   };
   categoryPerformance: CategoryPerformance[];
   mostMentioned: MostMentionedTopic[];
@@ -479,9 +485,17 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
   
   let scoreChange: number | undefined = undefined;
   let commentChange: number | undefined = undefined;
+  let prevAvgScoreVal: number | undefined = undefined;
+  let prevTotalCommentsVal: number | undefined = undefined;
+  let prevBestCatVal: string | undefined = undefined;
+  let prevWorstCatVal: string | undefined = undefined;
+  let scorePointDeltaVal: number | undefined = undefined;
+  let commentCountDeltaVal: number | undefined = undefined;
 
   if (previousAnalytics && previousAnalytics.length > 0) {
     const prevAvgScore = Math.round(previousAnalytics.reduce((sum, item) => sum + item.overallScore, 0) / previousAnalytics.length);
+    prevAvgScoreVal = prevAvgScore;
+    scorePointDeltaVal = avgScore - prevAvgScore;
     if (prevAvgScore > 0) {
       scoreChange = Math.round(((avgScore - prevAvgScore) / prevAvgScore) * 100 * 10) / 10;
     } else {
@@ -489,6 +503,8 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
     }
     
     const prevTotalComments = previousAnalytics.length;
+    prevTotalCommentsVal = prevTotalComments;
+    commentCountDeltaVal = analytics.length - prevTotalComments;
     if (prevTotalComments > 0) {
       commentChange = Math.round(((analytics.length - prevTotalComments) / prevTotalComments) * 100 * 10) / 10;
     } else {
@@ -496,6 +512,10 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
     }
 
     const prevCategoryPerf = calculateCategoryPerformance(previousAnalytics);
+    if (prevCategoryPerf.length > 0) {
+      prevBestCatVal = prevCategoryPerf[0]?.name || '-';
+      prevWorstCatVal = prevCategoryPerf[prevCategoryPerf.length - 1]?.name || '-';
+    }
     categoryPerf.forEach(cat => {
       const prevCat = prevCategoryPerf.find(p => p.name === cat.name);
       if (prevCat) {
@@ -654,7 +674,13 @@ export const getDashboardData = (analytics: CommentAnalytics[], previousAnalytic
       bestCategory: categoryPerf[0]?.name || '-',
       worstCategory: categoryPerf[categoryPerf.length - 1]?.name || '-',
       scoreChange,
-      commentChange
+      commentChange,
+      prevAvgScore: prevAvgScoreVal,
+      prevTotalComments: prevTotalCommentsVal,
+      prevBestCategory: prevBestCatVal,
+      prevWorstCategory: prevWorstCatVal,
+      scorePointDelta: scorePointDeltaVal,
+      commentCountDelta: commentCountDeltaVal
     },
     categoryPerformance: categoryPerf,
     mostMentioned,
