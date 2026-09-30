@@ -22,7 +22,7 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   LineChart, Line, PieChart, Pie, Cell, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar
 } from 'recharts';
-import { getDashboardData } from '../utils/biEngine';
+import { getDashboardData, getWeekNumber } from '../utils/biEngine';
 import { buildUnifiedTimeline } from '../utils';
 import { normalizeNationality, getStandardCountryCode } from '../utils/nationality';
 import PerformanceTrendBadge from '../components/PerformanceTrendBadge';
@@ -141,7 +141,12 @@ export function DashboardModule() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
-  const [drillDownFilter, setDrillDownFilter] = useState<{ type: 'category' | 'source' | 'nationality' | 'all', value: string, sentiment?: 'negative' | 'positive' | 'all' }>({ type: 'all', value: 'all' });
+  const [drillDownFilter, setDrillDownFilter] = useState<{ 
+    type: 'category' | 'source' | 'nationality' | 'date' | 'all', 
+    value: string, 
+    granularity?: 'daily' | 'weekly' | 'monthly' | 'yearly',
+    sentiment?: 'negative' | 'positive' | 'all' 
+  }>({ type: 'all', value: 'all' });
   const [timelineGranularity, setTimelineGranularity] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
   const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
   const [expandedActions, setExpandedActions] = useState<Record<string, boolean>>({});
@@ -606,6 +611,37 @@ export function DashboardModule() {
     if (drillDownFilter.type === 'all') return filteredAnalytics;
     
     return filteredAnalytics.filter(item => {
+      if (drillDownFilter.type === 'date') {
+        const cDate = new Date(item.date || item.createdAt);
+        if (isNaN(cDate.getTime())) return false;
+        
+        const dd = String(cDate.getDate()).padStart(2, '0');
+        const mm = String(cDate.getMonth() + 1).padStart(2, '0');
+        const yyyy = cDate.getFullYear();
+        const dailyStr = `${dd}.${mm}.${yyyy}`;
+        
+        if (drillDownFilter.granularity === 'daily' || drillDownFilter.value.includes('.')) {
+          return dailyStr === drillDownFilter.value;
+        }
+        
+        if (drillDownFilter.granularity === 'yearly' || drillDownFilter.value === String(yyyy)) {
+          return String(yyyy) === drillDownFilter.value;
+        }
+        
+        const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+        const monthStr = `${months[cDate.getMonth()]} ${yyyy}`;
+        if (drillDownFilter.granularity === 'monthly' || monthStr === drillDownFilter.value) {
+          return monthStr === drillDownFilter.value;
+        }
+        
+        if (drillDownFilter.granularity === 'weekly' || drillDownFilter.value.includes('Hafta')) {
+          const weekNo = getWeekNumber(cDate);
+          return `${weekNo}. Hafta` === drillDownFilter.value;
+        }
+        
+        return dailyStr === drillDownFilter.value;
+      }
+
       if (drillDownFilter.type === 'category') {
         if (drillDownFilter.value.includes('|')) {
           const [main, sub] = drillDownFilter.value.split('|');
@@ -738,8 +774,12 @@ export function DashboardModule() {
    * 4. Tüm görsel tasarım, yazı tipleri, gölgeler ve animasyonları BİREBİR KORUR.
    */
   const optimizeExportedHtml = (rawHtml: string): string => {
-    // 1. SVG koordinat hassasiyeti sıkıştırması (d ve points niteliklerindeki aşırı ondalıkları 2 basamağa yuvarlar)
-    let optimized = rawHtml.replace(/([0-9]+\.[0-9]{2})[0-9]+/g, '$1');
+    // 1. SVG koordinat hassasiyeti sıkıştırması: YALNIZCA SVG path "d" ve polygon "points" nitelikleri içindeki sayıları yuvarlar.
+    // Metinleri, tarihleri (01.01.2026) ve HTML etiketlerini KESİNLİKLE bozmaz.
+    let optimized = rawHtml.replace(/\b(d|points)="([^"]*)"/g, (match, attr, val) => {
+      const trimmedVal = val.replace(/([0-9]+\.[0-9]{2})[0-9]+/g, '$1');
+      return `${attr}="${trimmedVal}"`;
+    });
 
     // 2. Script ve Style bloklarını koruyarak güvenli minifikasyon
     const parts = optimized.split(/(<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>)/gi);
@@ -921,8 +961,9 @@ export function DashboardModule() {
             a.date ? new Date(a.date).toLocaleString('tr-TR') : 'Tarih Belirtilmemiş',
             a.description
           ]);
+          const rawIso = new Date(commentData.date || commentData.createdAt).toISOString();
 
-          return [sIdx, nIdx, dateStr, oScore, localText, topicsArr, actionsArr];
+          return [sIdx, nIdx, dateStr, oScore, localText, topicsArr, actionsArr, rawIso];
         });
 
         const rawJson = JSON.stringify({
@@ -1337,7 +1378,7 @@ export function DashboardModule() {
               try {
                 const raw = JSON.parse(commentsDataEl.textContent);
                 allComments = (raw.items || []).map((item, idx) => {
-                  const [sIdx, nIdx, dateStr, oScore, text, topicsArr, actionsArr] = item;
+                  const [sIdx, nIdx, dateStr, oScore, text, topicsArr, actionsArr, rawIso] = item;
                   const source = raw.s[sIdx] || 'Bilinmiyor';
                   const nationality = raw.n[nIdx] || 'Bilinmiyor';
                   const topics = (topicsArr || []).map(([cIdx, subIdx, sc]) => ({
@@ -1361,6 +1402,7 @@ export function DashboardModule() {
                     source,
                     nationality,
                     dateStr,
+                    rawIso: rawIso || '',
                     score: oScore,
                     text,
                     topics,
@@ -1530,7 +1572,13 @@ export function DashboardModule() {
                   triggers.forEach(t => t.classList.remove('active-filter-highlight'));
                   trigger.classList.add('active-filter-highlight');
 
-                  if (filterText) filterText.textContent = 'Filtreleniyor: ' + value;
+                  if (filterText) {
+                    if (type === 'date') {
+                      filterText.textContent = 'Tarih Filtresi: ' + value;
+                    } else {
+                      filterText.textContent = 'Filtreleniyor: ' + value;
+                    }
+                  }
                   if (filterBar) {
                     filterBar.style.display = 'flex';
                     void filterBar.offsetWidth;
@@ -1538,7 +1586,42 @@ export function DashboardModule() {
                   }
 
                   activeFilteredComments = allComments.filter(c => {
-                    if (type === 'topic') {
+                    if (type === 'date') {
+                      const targetDate = value;
+                      const gran = trigger.getAttribute('data-filter-granularity') || '';
+                      if (c.dateStr === targetDate) return true;
+                      
+                      const dStr = c.rawIso || (c.dateStr ? c.dateStr.split('.').reverse().join('-') : '');
+                      if (!dStr) return false;
+                      const d = new Date(dStr);
+                      if (isNaN(d.getTime())) return c.dateStr === targetDate;
+                      
+                      const dd = String(d.getDate()).padStart(2, '0');
+                      const mm = String(d.getMonth() + 1).padStart(2, '0');
+                      const yyyy = d.getFullYear();
+                      const dailyStr = dd + '.' + mm + '.' + yyyy;
+                      
+                      if (dailyStr === targetDate || gran === 'daily') {
+                        return dailyStr === targetDate;
+                      }
+                      if (gran === 'yearly' || targetDate === String(yyyy)) {
+                        return String(yyyy) === targetDate;
+                      }
+                      const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+                      const monthStr = months[d.getMonth()] + ' ' + yyyy;
+                      if (gran === 'monthly' || monthStr === targetDate) {
+                        return monthStr === targetDate;
+                      }
+                      if (gran === 'weekly' || targetDate.includes('Hafta')) {
+                        const dUtc = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+                        const dayNum = dUtc.getUTCDay() || 7;
+                        dUtc.setUTCDate(dUtc.getUTCDate() + 4 - dayNum);
+                        const yearStart = new Date(Date.UTC(dUtc.getUTCFullYear(), 0, 1));
+                        const weekNo = Math.ceil((((dUtc.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+                        return (weekNo + '. Hafta') === targetDate;
+                      }
+                      return dailyStr === targetDate;
+                    } else if (type === 'topic') {
                       for (let i = 0; i < c.topics.length; i++) {
                         const t = c.topics[i];
                         let matchesValue = false;
@@ -3229,7 +3312,28 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                             className={`absolute inset-0 transition-opacity duration-300 ${isActive ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'}`}
                           >
                             <ResponsiveContainer width="100%" height="100%">
-                              <LineChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: isCompareActive ? 25 : 10 }}>
+                              <LineChart 
+                                data={data} 
+                                margin={{ top: 10, right: 30, left: 0, bottom: isCompareActive ? 25 : 10 }}
+                                onClick={(e: any) => {
+                                  if (e && e.activePayload && e.activePayload[0]) {
+                                    const item = e.activePayload[0].payload;
+                                    if (item && item.date) {
+                                      setDrillDownFilter({
+                                        type: 'date',
+                                        value: item.date,
+                                        granularity: granularity as any
+                                      });
+                                    }
+                                  } else if (e && e.activeLabel) {
+                                    setDrillDownFilter({
+                                      type: 'date',
+                                      value: e.activeLabel,
+                                      granularity: granularity as any
+                                    });
+                                  }
+                                }}
+                              >
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                 <XAxis 
                                   dataKey="date" 
@@ -3322,8 +3426,8 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                   name="Bu Dönem" 
                                   stroke="#6366f1" 
                                   strokeWidth={3} 
-                                  dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff' }} 
-                                  activeDot={{ r: 6, strokeWidth: 0 }} 
+                                  dot={{ r: 4, fill: '#6366f1', strokeWidth: 2, stroke: '#fff', cursor: 'pointer' }} 
+                                  activeDot={{ r: 7, strokeWidth: 2, stroke: '#fff', cursor: 'pointer' }} 
                                 />
                               </LineChart>
                             </ResponsiveContainer>
@@ -3373,7 +3477,17 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                                   const growthRate = item.growthRate;
                                   
                                   return (
-                                    <tr key={idx} className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors">
+                                    <tr 
+                                      key={idx} 
+                                      onClick={() => setDrillDownFilter({ type: 'date', value: item.date, granularity: granularity as any })}
+                                      data-filter-type="date"
+                                      data-filter-value={item.date}
+                                      data-filter-granularity={granularity}
+                                      className={`interactive-filter-trigger border-b border-slate-50 hover:bg-indigo-50/50 cursor-pointer transition-colors ${
+                                        drillDownFilter.type === 'date' && drillDownFilter.value === item.date ? 'bg-indigo-50/80 font-bold' : ''
+                                      }`}
+                                      title={`${item.date} periyoduna ait ${item.count} yorumu incelemek için tıklayın`}
+                                    >
                                       <td className="py-3 px-4 text-sm font-bold text-slate-700">
                                         <div className="flex flex-col">
                                           <span>{item.date}</span>
@@ -3475,6 +3589,73 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                       })}
                     </div>
                   )}
+
+                  {/* Hızlı Tarih / Periyot Filtreleme Şeridi */}
+                  <div className="mt-4 pt-3 border-t border-slate-100 flex flex-col gap-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+                        <CalendarIcon size={13} className="text-indigo-600" />
+                        <span>Periyoda Göre Yorumları İncele:</span>
+                        <span className="text-[10px] text-slate-400 font-normal hidden sm:inline">(Yorumları listelemek için periyoda tıklayın)</span>
+                      </span>
+                      {drillDownFilter.type === 'date' && (
+                        <button
+                          onClick={() => setDrillDownFilter({ type: 'all', value: 'all' })}
+                          className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2 py-0.5 rounded-md transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          <X size={11} /> Filtreyi Kaldır
+                        </button>
+                      )}
+                    </div>
+                    {['daily', 'weekly', 'monthly', 'yearly'].map(granularity => {
+                      const data = dashboardData.satisfactionOverTime[granularity as keyof typeof dashboardData.satisfactionOverTime];
+                      const isActive = timelineGranularity === granularity;
+                      return (
+                        <div 
+                          key={granularity} 
+                          data-timeline-content={granularity} 
+                          className={`flex items-center gap-1.5 overflow-x-auto pb-1.5 custom-scrollbar transition-opacity duration-300 ${
+                            isActive ? 'flex opacity-100' : 'hidden opacity-0 pointer-events-none'
+                          }`}
+                        >
+                          {data.map((item, dIdx) => {
+                            const isSelected = drillDownFilter.type === 'date' && drillDownFilter.value === item.date;
+                            return (
+                              <button
+                                key={dIdx}
+                                onClick={() => setDrillDownFilter({ type: 'date', value: item.date, granularity: granularity as any })}
+                                data-filter-type="date"
+                                data-filter-value={item.date}
+                                data-filter-granularity={granularity}
+                                className={`interactive-filter-trigger shrink-0 text-xs px-2.5 py-1 rounded-lg border font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
+                                  isSelected
+                                    ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                    : 'bg-slate-50 hover:bg-indigo-50/70 text-slate-700 border-slate-200/80 hover:border-indigo-200'
+                                }`}
+                                title={`${item.date} dönemine ait ${item.count} yorumu listele`}
+                              >
+                                <span>{item.date}</span>
+                                <span className={`text-[10px] font-black px-1.5 py-0.2 rounded-full ${
+                                  isSelected 
+                                    ? 'bg-white/20 text-white' 
+                                    : item.avgScore >= 80 
+                                      ? 'bg-emerald-100 text-emerald-800' 
+                                      : item.avgScore >= 50 
+                                        ? 'bg-blue-100 text-blue-800' 
+                                        : 'bg-rose-100 text-rose-800'
+                                }`}>
+                                  %{item.avgScore}
+                                </span>
+                                <span className={`text-[9px] ${isSelected ? 'text-indigo-100' : 'text-slate-400'}`}>
+                                  ({item.count})
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      );
+                    })}
+                  </div>
                   {renderAiSummary('satisfaction_timeline')}
                   {renderDeepAnalytics('satisfaction_timeline')}
                 </section>
@@ -4513,43 +4694,88 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
               return (
                 <div key="hotel_agenda" className="flex flex-col gap-8">
                   {/* Analitik & Metrik Rehber Kartı */}
-                  <div className="bg-gradient-to-r from-slate-50 via-indigo-50/40 to-slate-50 border border-slate-200/90 rounded-2xl p-4.5 shadow-sm">
-                    <div className="flex items-start gap-3.5">
-                      <div className="p-2.5 bg-indigo-600 text-white rounded-xl shrink-0 mt-0.5 shadow-sm">
-                        <Info size={18} />
-                      </div>
-                      <div className="text-xs text-slate-600 leading-relaxed flex-1">
-                        <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-                          <p className="font-black text-slate-800 text-sm flex items-center gap-2">
-                            <span>Metrik & Çok Boyutlu Duygu Analizi Rehberi</span>
-                            <span className="text-[10px] font-bold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-md">İş Zekası & Karşılaştırma Standartları</span>
+                  <div className="bg-white border border-slate-200/90 rounded-2xl p-6 shadow-xs relative overflow-hidden">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-100">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl shrink-0 border border-indigo-100/60 shadow-xs">
+                          <Info size={20} />
+                        </div>
+                        <div>
+                          <h4 className="font-black text-slate-800 text-base leading-tight">
+                            Metrik & Çok Boyutlu Duygu Analizi Rehberi
+                          </h4>
+                          <p className="text-[11px] text-slate-400 font-medium mt-0.5">
+                            Otel operasyonları ve misafir memnuniyet kırılımları için standart analiz metodolojisi
                           </p>
                         </div>
-                        <p className="text-slate-600">
-                          Misafir yorumları çok boyutludur: Bir konu (örneğin <strong>"Tutum/İletişim"</strong>) bazı misafirler tarafından takdir edilirken (<strong>Övgü Skoru: %85+</strong>), bazı misafirlerce eleştirilebilir (<strong>Şikayet Skoru: %19</strong>). Sistemimiz bu boyutları operasyonel netlik için 3 ayrı perspektifle sunar:
-                        </p>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 mt-3 pt-3 border-t border-slate-200/70 font-medium text-[11px]">
-                          <div className="bg-white/80 p-2.5 rounded-xl border border-indigo-100 flex items-start gap-2 shadow-xs">
-                            <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 shrink-0 mt-0.5"></span>
-                            <div>
-                              <strong className="text-indigo-900 block font-bold">1. En Çok Konuşulanlar (Gündem):</strong>
-                              <span className="text-slate-500 text-[10px]">Tüm olumlu, nötr ve olumsuz yorumların toplam hacmi ve genel ağırlıklı ortalama puanı.</span>
-                            </div>
+                      </div>
+                      <span className="self-start sm:self-auto text-[10px] font-bold bg-indigo-50 text-indigo-700 px-3 py-1 rounded-full border border-indigo-100/80 shadow-xs tracking-wide">
+                        İş Zekası & Karşılaştırma Standartları
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-slate-600 leading-relaxed max-w-4xl">
+                      Misafir yorumları çok boyutludur: Bir konu (örneğin <strong>"Tutum/İletişim"</strong>) bazı misafirler tarafından takdir edilirken (<strong>Övgü Skoru: %85+</strong>), bazı misafirlerce eleştirilebilir (<strong>Şikayet Skoru: %19</strong>). Sistemimiz bu boyutları operasyonel netlik için 3 ayrı perspektifle sunar:
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
+                      <div className="bg-gradient-to-b from-indigo-50/60 to-white p-4 rounded-xl border border-indigo-100/80 shadow-xs flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="text-xs font-black text-indigo-900 flex items-center gap-1.5">
+                              <span className="w-2.5 h-2.5 rounded-full bg-indigo-600 shrink-0"></span>
+                              1. En Çok Konuşulanlar
+                            </span>
+                            <span className="text-[9px] font-bold bg-indigo-100/80 text-indigo-700 px-2 py-0.5 rounded-md">
+                              Gündem
+                            </span>
                           </div>
-                          <div className="bg-white/80 p-2.5 rounded-xl border border-emerald-100 flex items-start gap-2 shadow-xs">
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0 mt-0.5"></span>
-                            <div>
-                              <strong className="text-emerald-900 block font-bold">2. En Çok Övülenler (Başarı):</strong>
-                              <span className="text-slate-500 text-[10px]">Yalnızca memnun misafirlerin pozitif geri bildirim adedi ve övgü memnuniyet skoru.</span>
-                            </div>
+                          <p className="text-slate-600 text-[11px] leading-relaxed">
+                            Tüm olumlu, nötr ve olumsuz yorumların toplam hacmi ve genel ağırlıklı ortalama puanı.
+                          </p>
+                        </div>
+                        <div className="mt-3 pt-2.5 border-t border-indigo-100/60 text-[10px] text-indigo-600/80 font-bold">
+                          Odak: Yorum Hacmi & Genel Skor
+                        </div>
+                      </div>
+
+                      <div className="bg-gradient-to-b from-emerald-50/60 to-white p-4 rounded-xl border border-emerald-100/80 shadow-xs flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="text-xs font-black text-emerald-900 flex items-center gap-1.5">
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-600 shrink-0"></span>
+                              2. En Çok Övülenler
+                            </span>
+                            <span className="text-[9px] font-bold bg-emerald-100/80 text-emerald-700 px-2 py-0.5 rounded-md">
+                              Başarı
+                            </span>
                           </div>
-                          <div className="bg-white/80 p-2.5 rounded-xl border border-rose-100 flex items-start gap-2 shadow-xs">
-                            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 mt-0.5"></span>
-                            <div>
-                              <strong className="text-rose-900 block font-bold">3. Acil Müdahale (Risk & Şikayet):</strong>
-                              <span className="text-slate-500 text-[10px]">Yalnızca şikayetçi misafirlerin olumsuz yorum adedi ve memnuniyetsizlik şiddeti.</span>
-                            </div>
+                          <p className="text-slate-600 text-[11px] leading-relaxed">
+                            Yalnızca memnun misafirlerin pozitif geri bildirim adedi ve övgü memnuniyet skoru (%80+ puanlar).
+                          </p>
+                        </div>
+                        <div className="mt-3 pt-2.5 border-t border-emerald-100/60 text-[10px] text-emerald-600/80 font-bold">
+                          Odak: Pozitif Takdir & Güçlü Yönler
+                        </div>
+                      </div>
+
+                      <div className="bg-gradient-to-b from-rose-50/60 to-white p-4 rounded-xl border border-rose-100/80 shadow-xs flex flex-col justify-between">
+                        <div>
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="text-xs font-black text-rose-900 flex items-center gap-1.5">
+                              <span className="w-2.5 h-2.5 rounded-full bg-rose-600 shrink-0"></span>
+                              3. Acil Müdahale
+                            </span>
+                            <span className="text-[9px] font-bold bg-rose-100/80 text-rose-700 px-2 py-0.5 rounded-md">
+                              Risk & Şikayet
+                            </span>
                           </div>
+                          <p className="text-slate-600 text-[11px] leading-relaxed">
+                            Yalnızca şikayetçi misafirlerin olumsuz yorum adedi ve memnuniyetsizlik şiddeti (&lt;50 puanlar).
+                          </p>
+                        </div>
+                        <div className="mt-3 pt-2.5 border-t border-rose-100/60 text-[10px] text-rose-600/80 font-bold">
+                          Odak: Kritik Uyarı & Çözüm Eylemi
                         </div>
                       </div>
                     </div>
@@ -5408,7 +5634,11 @@ Zaman Dilimi: ${c.monthName} vs ${c.compareMonthName}
                   Yorum Detayları
                 </h3>
                 <p id="html-export-drilldown-title" className="text-[10px] text-slate-500 font-bold uppercase mt-1">
-                  {drillDownFilter.type === 'all' ? 'Tüm Filtrelenmiş Yorumlar' : `${drillDownFilter.value} Analizi`}
+                  {drillDownFilter.type === 'all' 
+                    ? 'Tüm Filtrelenmiş Yorumlar' 
+                    : drillDownFilter.type === 'date'
+                      ? `Tarih: ${drillDownFilter.value}`
+                      : `${drillDownFilter.value} Analizi`}
                 </p>
               </div>
               <button 

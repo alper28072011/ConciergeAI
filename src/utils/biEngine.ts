@@ -349,6 +349,14 @@ export const calculateCategoryPerformance = (analytics: CommentAnalytics[]): Cat
   })).sort((a, b) => b.score - a.score);
 };
 
+export const getWeekNumber = (d: Date) => {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  return Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+};
+
 export const calculateSatisfactionOverTime = (analytics: CommentAnalytics[], previousAnalytics?: CommentAnalytics[]) => {
   const process = (groupBy: (d: Date) => { key: string; display: string; timestamp: number }, dataset: CommentAnalytics[]) => {
     const map = new Map<string, { totalScore: number; count: number; display: string; timestamp: number }>();
@@ -361,6 +369,7 @@ export const calculateSatisfactionOverTime = (analytics: CommentAnalytics[], pre
       data.totalScore += item.overallScore;
       data.count += 1;
     });
+
     return Array.from(map.values())
       .map(data => ({
         date: data.display,
@@ -369,14 +378,6 @@ export const calculateSatisfactionOverTime = (analytics: CommentAnalytics[], pre
         timestamp: data.timestamp
       }))
       .sort((a, b) => a.timestamp - b.timestamp);
-  };
-
-  const getWeekNumber = (d: Date) => {
-    const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-    const dayNum = date.getUTCDay() || 7;
-    date.setUTCDate(date.getUTCDate() + 4 - dayNum);
-    const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
-    return Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
   };
 
   const months = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
